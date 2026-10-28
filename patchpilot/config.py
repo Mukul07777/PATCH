@@ -1,0 +1,37 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / ".env")
+
+NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
+NEBIUS_BASE_URL = os.getenv("NEBIUS_BASE_URL", "https://api.tokenfactory.nebius.com/v1").rstrip("/")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+MAX_FIX_ATTEMPTS = int(os.getenv("MAX_FIX_ATTEMPTS", "4"))
+
+MODEL_OVERRIDES = {
+    "nano": os.getenv("MODEL_NANO", ""),
+    "super": os.getenv("MODEL_SUPER", ""),
+    "ultra": os.getenv("MODEL_ULTRA", ""),
+}
+
+
+def _price(name):
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    parts = [float(p) for p in raw.split("/")]
+    return (parts[0], parts[-1])  # ($/1M input, $/1M output)
+
+
+PRICES = {"nano": _price("PRICE_NANO"), "super": _price("PRICE_SUPER"), "ultra": _price("PRICE_ULTRA")}
+
+RUNS_DIR = ROOT / "runs"
+WORK_DIR = RUNS_DIR / "work"
+CASES_DIR = ROOT / "cases"
+DEFAULT_CASE = "authsvc"
+# Public deployments should keep this off: remote repos run arbitrary test code on the server
+ALLOW_REMOTE_REPOS = os.getenv("ALLOW_REMOTE_REPOS", "1") == "1"
