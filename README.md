@@ -86,6 +86,8 @@ Tavily is called at runtime on every run that has advisories, when `TAVILY_API_K
 3. **Used by the models**: the kept results' URLs and text go to the repair model (Super / Ultra) as `migration_research`, and the top 2 to the exploit-proof writer when no curated proof exists. The repair model must quote the exact lines it relied on, with their URL.
 4. **Citations**: the console's **Evidence (Tavily)** tab lists every source under "Research via Tavily" plus the quoted lines, and the PR report has a "Sources consulted (Tavily)" section and the quotes with their URLs. The ledger records how many quoted lines came from researched sources.
 
+**Example from a recorded run** (`demo-runs/20261029-153834-job.jsonl`, authsvc). The PyJWT query returned `pyjwt.readthedocs.io/en/stable/changelog.html` (score 8.2), a Yocto patchwork upgrade thread (7.2), `security.snyk.io/package/pip/PyJWT/1.7.1` (6.9) and `github.com/jpadilla/pyjwt/releases` (6.0); the requests query returned `requests.readthedocs.io/en/latest/community/updates` (8.3) and three more. Super's first patch did not pass. Ultra's second patch went green, citing two lines from the PyJWT changelog: *"The `verify` argument to `decode` does nothing in PyJWT 2.0 and newer. The equivalent is setting `verify_signa[ture]`..."* and *"Reject empty HMAC keys"*. The ledger records "3 quoted line(s) from researched sources", and the PR report lists all eight URLs under "Sources consulted (Tavily)". Other runs cite `urllib3.readthedocs.io/en/stable/v2-migration-guide.html` (fetcher) and `jinja.palletsprojects.com/en/stable/changes` (mailer: *"The `jinja2.Markup` class is available as before, but it is now just an alias for `markupsafe.Markup`."*).
+
 Without `TAVILY_API_KEY`, research is skipped and logged; the rest of the pipeline still runs.
 
 ## Model routing
@@ -214,20 +216,22 @@ Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PR
 
 ### Recorded benchmark on Token Factory (2026-10-29)
 
-All six bundled cases were run end-to-end with `python -m patchpilot.cli` against `https://api.tokenfactory.nebius.com/v1`, models pinned to `nvidia/Nemotron-3_5-Lightning` (Nano), `nvidia/nemotron-3-super-120b-a12b` (Super) and `nvidia/Nemotron-3-Ultra-550b-a55b` (Ultra). Tavily was not configured for this round, so the research step was skipped. No guard model was used (Token Factory's `/models` listed no Nemotron content-safety model for this account), so only the static AST screen ran. Recordings are in `demo-runs/`.
+All six bundled cases were run end-to-end with `python -m patchpilot.cli` against `https://api.tokenfactory.nebius.com/v1`, models pinned to `nvidia/Nemotron-3_5-Lightning` (Nano), `nvidia/nemotron-3-super-120b-a12b` (Super) and `nvidia/Nemotron-3-Ultra-550b-a55b` (Ultra). Five rows come from round 3, which ran with `TAVILY_API_KEY` set, so every one of them made live Tavily calls (sources in the last column). The sanitizer row is the round-2 run, recorded without Tavily (see below). No guard model was used (Token Factory's `/models` listed no Nemotron content-safety model for this account), so only the static AST screen ran. Recordings are in `demo-runs/`.
 
-| Case | Run id | Result | Fix attempts | Wall time | Exploit | Red-team blocked | Trust |
-|---|---|---|---|---|---|---|---|
-| authsvc (PyJWT) | `20261029-151559-job` | green | 3 (Super, then Ultra) | 75.0 s | proven closed | 7/8 | 85 |
-| fetcher (urllib3) | `20261029-151714-job` | green | 1 | 42.2 s | proven closed | 7/7 | 86 |
-| mailer (Jinja2) | `20261029-151757-job` | green | 2 | 51.7 s | proven closed | 8/8 | 86 |
-| sanitizer (bleach) | `20261029-153214-job` | green | 1 (+ `tinycss2` added by the dependency step) | 65.4 s | proven closed | 8/8 | 86 |
-| sqlfmt (sqlparse) | `20261029-152042-job` | green | 0 (upgrade alone passed) | 82.9 s | proven closed | 5/5 | 83 |
-| webhooks | `20261029-152206-job` | green | 2 | 72.4 s | proven closed | not measured (variant file collected no tests) | 85 |
+| Case | Run id | Result | Fix attempts | Wall time | Exploit | Red-team blocked | Trust | Tavily sources |
+|---|---|---|---|---|---|---|---|---|
+| authsvc (PyJWT, requests) | `20261029-153834-job` | green | 2 (Super, then Ultra) | 110.7 s | proven closed | 7/8 | 85 | 8 (2 packages) |
+| fetcher (urllib3) | `20261029-154025-job` | green | 1 | 136.4 s | proven closed | 7/7 | 91 | 4 |
+| mailer (Jinja2) | `20261029-154242-job` | green | 1 | 85.9 s | proven closed | 8/8 | 91 | 4 |
+| sanitizer (bleach) | `20261029-153214-job` | green | 1 (+ `tinycss2` added by the dependency step) | 65.4 s | proven closed | 8/8 | 86 | 0 (Tavily not configured in that round) |
+| sqlfmt (sqlparse) | `20261029-154551-job` | green | 0 (upgrade alone passed) | 65.5 s | proven closed | 5/5 | 83 | 4 |
+| webhooks (Werkzeug) | `20261029-154657-job` | green | 1 | 64.7 s | proven closed | 8/8 | 91 | 4 |
 
-**6/6 cases green**, 389.6 s total wall time, 39,502 input / 39,668 output tokens across 26 model calls (Nano 10, Super 12, Ultra 4; Ultra was not needed in fetcher, sanitizer and sqlfmt). Cost was not computed (`PRICE_*` unset).
+**6/6 cases green**, 528.6 s total wall time, 45,904 input / 39,321 output tokens across 23 model calls (Nano 10, Super 12, Ultra 1; Ultra was only needed in authsvc). Cost was not computed (`PRICE_*` unset). In 4 of the 5 Tavily runs, the ledger claim "Code changes cite migration sources" is verified (sqlfmt needed no repair, so nothing was quoted).
 
-The sanitizer case first failed in 3 of 3 runs (e.g. `20261029-151849-job`): bleach 6 needs `tinycss2` for `CSSSanitizer`, and Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency, so `test_allowed_style_kept` failed and PatchPilot reported the run as not green. The repair loop now detects missing-module failures (`No module named X`, bleach's `NoCssSanitizerWarning`), tells the model that editing `requirements.txt` is preferred over removing features, and runs a deterministic dependency step before the next LLM call: a missing module that exists on PyPI is added pinned to its latest release, reinstalled and retested (reverted if the install fails), recorded as a `deps` event and evidence, and listed in the PR report (`patchpilot/deps.py`). In `20261029-153214-job`, Super's first patch moved to `css_sanitizer=CSSSanitizer(...)`, the test run hit `No module named 'tinycss2'`, the step added `tinycss2==1.5.1`, and all 5 tests passed. The other five rows are the unchanged round-2 runs; a regression rerun of fetcher after the change (`20261029-153326-job`) was also green in 1 attempt (44.7 s).
+The round-3 sanitizer run (`20261029-154409-job`) was not green. Super wrote `bleach.css_sanitizer.CSSSanitizer` without importing the submodule, and Ultra then guessed the wrong import path. Its last two replies were also dropped as "not valid JSON". That was a PatchPilot bug: the reply quoted the Tavily-sourced bleach changelog line `pip install 'bleach[css]'` together with its Markdown code fence, and `parse_json` took that inner fence as the reply's own. The parser now tries the whole reply first and then one outer fence (`tests/test_llm.py::test_parse_json_fence_inside_string`). A sanitizer rerun with the fix could not be recorded in this session, so the table keeps the green round-2 sanitizer run.
+
+The sanitizer case first failed in 3 of 3 runs (e.g. `20261029-151849-job`): bleach 6 needs `tinycss2` for `CSSSanitizer`, and Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency, so `test_allowed_style_kept` failed and PatchPilot reported the run as not green. The repair loop now detects missing-module failures (`No module named X`, bleach's `NoCssSanitizerWarning`), tells the model that editing `requirements.txt` is preferred over removing features, and runs a deterministic dependency step before the next LLM call: a missing module that exists on PyPI is added pinned to its latest release, reinstalled and retested (reverted if the install fails), recorded as a `deps` event and evidence, and listed in the PR report (`patchpilot/deps.py`). In `20261029-153214-job`, Super's first patch moved to `css_sanitizer=CSSSanitizer(...)`, the test run hit `No module named 'tinycss2'`, the step added `tinycss2==1.5.1`, and all 5 tests passed. Round 2 (`20261029-151559-job` to `20261029-152206-job`, no Tavily) was also 6/6 green with these fixes: 389.6 s in total and 26 model calls.
 
 A first round on Token Factory (`20261029-150603-job` to `20261029-151314-job`, same 5/6 result) exposed a bug: `reasoning="off"` was not sent to Token Factory, so Nano spent its whole 1500-token budget thinking and symbol inference / triage were skipped. Token Factory honours vLLM's `chat_template_kwargs.enable_thinking` (verified), so it now gets that switch; in the round above Nano's output fell from 3,000 to 203-1,721 tokens per run.
 
@@ -263,7 +267,7 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 ## Limitations
 
 - The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run (Token Factory listed no Nemotron content-safety model for our account).
-- Benchmark: 6/6 on Token Factory, but the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only adds packages that resolve on PyPI, pinned to their latest release.
+- Benchmark: 6/6 on Token Factory, but the recorded sanitizer run predates Tavily (its Tavily rerun is not recorded yet), and the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only adds packages that resolve on PyPI, pinned to their latest release.
 - Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
@@ -287,7 +291,7 @@ Every commit in this repository is dated 2026-10-29 (check with `git log --forma
 - **Initial agent** (00:29): security advisory to tested PR on NVIDIA Nemotron + Nebius Token Factory.
 - **Core features**: multipage UI, verified exploit proofs, risk score, reachability, model debate, org scan, red-team variants, proof certificate, Nemotron rerank, threat clock, API drift radar, least-change upgrade, real-world benchmark cases.
 - **Benchmark and self-tests**: benchmark round 1 on the OpenRouter free tier (3/3 completed cases secured; 3 cases blocked by API rate limit), agent self-test suite, provider and models recorded per run.
-- **Nebius benchmark**: full 6-case run on Nebius Token Factory (6/6 green after the missing-dependency repair step), Token Factory reasoning-switch fix, recorded runs shipped in `demo-runs/`.
+- **Nebius benchmark**: full 6-case run on Nebius Token Factory (6/6 green after the missing-dependency repair step), Token Factory reasoning-switch fix, recorded runs shipped in `demo-runs/`; round 3 re-recorded five cases with live Tavily research and fixed a JSON-parsing bug that research text exposed.
 - **Supply-chain depth**: curated exploit proofs for urllib3, Jinja2, bleach and sqlparse CVEs; symbol-level reachability; deps.dev release trust check; OpenVEX export; Nebius model id pinning.
 - **Speed and safety**: reasoning control, parallel triage/research, `uv` sandbox prep, demo mode; API keys kept out of the sandboxed repo's environment; NVIDIA content-safety gate + static AST screen.
 - **UI**: guided demo mode, auto-replay console, trust / OpenVEX / guardrails panels, per-tier charts.

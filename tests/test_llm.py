@@ -62,3 +62,11 @@ def test_token_factory_gets_thinking_switch():
     assert reasoning_style("https://api.tokenfactory.nebius.com/v1") == "nim"
     assert reasoning_style("https://openrouter.ai/api/v1") == "openrouter"
     assert reasoning_style("https://example.com/v1") is None
+
+
+def test_parse_json_fence_inside_string():
+    # a quoted shell snippet from research (with its own ``` fence) must not be mistaken for the reply's fence
+    body = r'{"files": [], "evidence": [{"quote": "install the extra:\n```\npip install bleach[css]\n```"}]}'
+    assert parse_json(body)["evidence"][0]["quote"].startswith("install")
+    assert parse_json("```json\n" + body + "\n```")["files"] == []
+    assert parse_json("Here:\n```json\n" + body + "\n```\nthanks")["files"] == []

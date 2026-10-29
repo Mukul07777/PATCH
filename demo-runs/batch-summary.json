@@ -1,31 +1,31 @@
 [
   {
     "repo": "case:authsvc",
-    "run": "20261029-151559-job",
+    "run": "20261029-153834-job",
     "ok": true,
-    "attempts": 3,
-    "seconds": 75.0,
+    "attempts": 2,
+    "seconds": 110.7,
     "usage": {
       "tiers": {
         "nano": {
           "calls": 2,
-          "in": 7009,
-          "out": 1721,
-          "seconds": 12.412737846374512,
+          "in": 7005,
+          "out": 1620,
+          "seconds": 40.14194655418396,
           "model": "nvidia/Nemotron-3_5-Lightning"
         },
         "super": {
           "calls": 2,
-          "in": 4129,
-          "out": 4654,
-          "seconds": 20.051111459732056,
+          "in": 7399,
+          "out": 8033,
+          "seconds": 42.09805130958557,
           "model": "nvidia/nemotron-3-super-120b-a12b"
         },
         "ultra": {
-          "calls": 2,
-          "in": 4776,
-          "out": 5768,
-          "seconds": 18.47632932662964,
+          "calls": 1,
+          "in": 5544,
+          "out": 4020,
+          "seconds": 11.909834861755371,
           "model": "nvidia/Nemotron-3-Ultra-550b-a55b"
         }
       },
@@ -46,28 +46,29 @@
       "super": "nvidia/nemotron-3-super-120b-a12b",
       "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"
     },
-    "proven": true
+    "proven": true,
+    "tavily_sources": 8
   },
   {
     "repo": "case:fetcher",
-    "run": "20261029-151714-job",
+    "run": "20261029-154025-job",
     "ok": true,
     "attempts": 1,
-    "seconds": 42.2,
+    "seconds": 136.4,
     "usage": {
       "tiers": {
         "nano": {
           "calls": 1,
           "in": 1446,
-          "out": 309,
-          "seconds": 2.823531150817871,
+          "out": 409,
+          "seconds": 105.41806626319885,
           "model": "nvidia/Nemotron-3_5-Lightning"
         },
         "super": {
           "calls": 2,
-          "in": 1941,
-          "out": 4034,
-          "seconds": 13.782841682434082,
+          "in": 3378,
+          "out": 4686,
+          "seconds": 19.159258365631104,
           "model": "nvidia/nemotron-3-super-120b-a12b"
         },
         "ultra": {
@@ -88,42 +89,43 @@
       "blocked": 7,
       "total": 7
     },
-    "trust": 86,
+    "trust": 91,
     "provider": "Token Factory",
     "models": {
       "nano": "nvidia/Nemotron-3_5-Lightning",
       "super": "nvidia/nemotron-3-super-120b-a12b",
       "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"
     },
-    "proven": true
+    "proven": true,
+    "tavily_sources": 4
   },
   {
     "repo": "case:mailer",
-    "run": "20261029-151757-job",
+    "run": "20261029-154242-job",
     "ok": true,
-    "attempts": 2,
-    "seconds": 51.7,
+    "attempts": 1,
+    "seconds": 85.9,
     "usage": {
       "tiers": {
         "nano": {
           "calls": 2,
-          "in": 1683,
-          "out": 440,
-          "seconds": 3.126918315887451,
+          "in": 1684,
+          "out": 452,
+          "seconds": 3.3721649646759033,
           "model": "nvidia/Nemotron-3_5-Lightning"
         },
         "super": {
           "calls": 2,
-          "in": 1651,
-          "out": 3799,
-          "seconds": 14.780034303665161,
+          "in": 3443,
+          "out": 6561,
+          "seconds": 58.26290941238403,
           "model": "nvidia/nemotron-3-super-120b-a12b"
         },
         "ultra": {
-          "calls": 1,
-          "in": 1179,
-          "out": 2306,
-          "seconds": 6.613530874252319,
+          "calls": 0,
+          "in": 0,
+          "out": 0,
+          "seconds": 0.0,
           "model": "nvidia/Nemotron-3-Ultra-550b-a55b"
         }
       },
@@ -137,14 +139,15 @@
       "blocked": 8,
       "total": 8
     },
-    "trust": 86,
+    "trust": 91,
     "provider": "Token Factory",
     "models": {
       "nano": "nvidia/Nemotron-3_5-Lightning",
       "super": "nvidia/nemotron-3-super-120b-a12b",
       "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"
     },
-    "proven": true
+    "proven": true,
+    "tavily_sources": 4
   },
   {
     "repo": "case:sanitizer",
@@ -193,28 +196,29 @@
       "super": "nvidia/nemotron-3-super-120b-a12b",
       "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"
     },
-    "proven": true
+    "proven": true,
+    "tavily_sources": 0
   },
   {
     "repo": "case:sqlfmt",
-    "run": "20261029-152042-job",
+    "run": "20261029-154551-job",
     "ok": true,
     "attempts": 0,
-    "seconds": 82.9,
+    "seconds": 65.5,
     "usage": {
       "tiers": {
         "nano": {
           "calls": 2,
           "in": 3874,
-          "out": 1012,
-          "seconds": 5.6107354164123535,
+          "out": 1000,
+          "seconds": 11.953485488891602,
           "model": "nvidia/Nemotron-3_5-Lightning"
         },
         "super": {
           "calls": 1,
-          "in": 962,
-          "out": 636,
-          "seconds": 3.400784730911255,
+          "in": 943,
+          "out": 599,
+          "seconds": 3.0400562286376953,
           "model": "nvidia/nemotron-3-super-120b-a12b"
         },
         "ultra": {
@@ -242,35 +246,36 @@
       "super": "nvidia/nemotron-3-super-120b-a12b",
       "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"
     },
-    "proven": true
+    "proven": true,
+    "tavily_sources": 4
   },
   {
     "repo": "case:webhooks",
-    "run": "20261029-152206-job",
+    "run": "20261029-154657-job",
     "ok": true,
-    "attempts": 2,
-    "seconds": 72.4,
+    "attempts": 1,
+    "seconds": 64.7,
     "usage": {
       "tiers": {
         "nano": {
           "calls": 2,
           "in": 4088,
-          "out": 1210,
-          "seconds": 10.940771579742432,
+          "out": 1266,
+          "seconds": 14.431887149810791,
           "model": "nvidia/Nemotron-3_5-Lightning"
         },
         "super": {
           "calls": 3,
-          "in": 2659,
-          "out": 8754,
-          "seconds": 38.16401696205139,
+          "in": 4018,
+          "out": 7816,
+          "seconds": 37.28438448905945,
           "model": "nvidia/nemotron-3-super-120b-a12b"
         },
         "ultra": {
-          "calls": 1,
-          "in": 1023,
-          "out": 2166,
-          "seconds": 5.637841463088989,
+          "calls": 0,
+          "in": 0,
+          "out": 0,
+          "seconds": 0.0,
           "model": "nvidia/Nemotron-3-Ultra-550b-a55b"
         }
       },
@@ -280,14 +285,18 @@
     },
     "advisories": 11,
     "exploit": "proven closed",
-    "redteam": null,
-    "trust": 85,
+    "redteam": {
+      "blocked": 8,
+      "total": 8
+    },
+    "trust": 91,
     "provider": "Token Factory",
     "models": {
       "nano": "nvidia/Nemotron-3_5-Lightning",
       "super": "nvidia/nemotron-3-super-120b-a12b",
       "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"
     },
-    "proven": true
+    "proven": true,
+    "tavily_sources": 4
   }
 ]

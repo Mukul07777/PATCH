@@ -211,13 +211,18 @@ def parse_json(text):
     text = text.strip()
     if "</think>" in text:
         text = text.split("</think>")[-1].strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.S)
-    if fence:
-        text = fence.group(1).strip()
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    # whole reply, then a reply wrapped in one outer fence (greedy, so a ``` inside a JSON string such as a quoted
+    # shell snippet from research does not cut it short), then each fenced block on its own
+    candidates = [text]
+    outer = re.fullmatch(r"```(?:json)?\s*(.*)```", text, flags=re.S)
+    if outer:
+        candidates.append(outer.group(1).strip())
+    candidates += [m.group(1).strip() for m in re.finditer(r"```(?:json)?\s*(.*?)```", text, flags=re.S)]
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except json.JSONDecodeError:
+            pass
     # first complete JSON object in the text, ignoring any prose or a second object after it
     dec = json.JSONDecoder()
     for i, ch in enumerate(text):
