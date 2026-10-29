@@ -1,9 +1,12 @@
 """Real-world data sources: OSV.dev advisories, PyPI releases, Tavily web research."""
+import logging
 import re
 import httpx
 
 from . import config
 from .reach import parse_imports
+
+log = logging.getLogger(__name__)
 
 _http = httpx.Client(timeout=30, headers={"User-Agent": "patchpilot/0.1"})
 
@@ -180,5 +183,5 @@ def release_trust(name, version):
                 out["checks"] = {c["name"]: c.get("score") for c in sc.get("checks") or [] if c.get("name") in KEY_CHECKS}
         out["deps"] = depsdev_dependencies(name, version)
     except Exception:
-        pass
+        log.warning("deps.dev lookup failed for %s %s", name, version, exc_info=True)
     return out

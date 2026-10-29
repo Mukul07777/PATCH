@@ -12,10 +12,19 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 # Demo fast path: fewer fix attempts, curated proofs/variants only (no LLM exploit or variant generation)
 DEMO = os.getenv("PATCHPILOT_DEMO", "") == "1"
-MAX_FIX_ATTEMPTS = int(os.getenv("MAX_FIX_ATTEMPTS", "4"))
+
+
+def _num(name, default, cast=float):
+    try:
+        return cast(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+MAX_FIX_ATTEMPTS = _num("MAX_FIX_ATTEMPTS", 4, int)
 if DEMO:
     MAX_FIX_ATTEMPTS = min(MAX_FIX_ATTEMPTS, 2)
-FIX_TIMEOUT = float(os.getenv("FIX_TIMEOUT", "90"))  # seconds per fix call before escalating to Ultra
+FIX_TIMEOUT = _num("FIX_TIMEOUT", 90.0)  # seconds per fix call before escalating to Ultra
 
 MODEL_OVERRIDES = {
     "nano": os.getenv("MODEL_NANO", ""),
@@ -28,7 +37,10 @@ def _price(name):
     raw = os.getenv(name, "").strip()
     if not raw:
         return None
-    parts = [float(p) for p in raw.split("/")]
+    try:
+        parts = [float(p) for p in raw.split("/")]
+    except ValueError:
+        return None
     return (parts[0], parts[-1])  # ($/1M input, $/1M output)
 
 
@@ -39,7 +51,7 @@ WORK_DIR = RUNS_DIR / "work"
 CASES_DIR = ROOT / "cases"
 DEFAULT_CASE = "authsvc"
 # Public deployments should keep this off: remote repos run arbitrary test code on the server
-ALLOW_REMOTE_REPOS = os.getenv("ALLOW_REMOTE_REPOS", "1") == "1"
+ALLOW_REMOTE_REPOS = os.getenv("ALLOW_REMOTE_REPOS", "0") == "1"
 
 
 def provider_name(base_url=None):
@@ -55,4 +67,4 @@ def provider_name(base_url=None):
 GUARD = os.getenv("GUARD", "1") != "0"
 MODEL_GUARD = os.getenv("MODEL_GUARD", "").strip() or (
     "nvidia/nemotron-3.5-content-safety:free" if "openrouter.ai" in NEBIUS_BASE_URL else "")
-GUARD_TIMEOUT = float(os.getenv("GUARD_TIMEOUT", "30"))
+GUARD_TIMEOUT = _num("GUARD_TIMEOUT", 30.0)

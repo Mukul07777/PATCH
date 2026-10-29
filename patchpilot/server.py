@@ -1,6 +1,9 @@
 """FastAPI server: start runs, stream events over SSE, replay recorded runs."""
 import asyncio
+import collections
 import json
+import logging
+import os
 import re
 import threading
 import time
@@ -8,21 +11,66 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from . import config, sources
 from .agent import PIN, Agent
 
 app = FastAPI(title="PatchPilot")
 RUNS = {}  # run_id -> {"events": [...], "done": bool}
+MAX_RUNS = 50
+RATE_LIMIT, RATE_WINDOW = 5, 60.0
+_hits = collections.defaultdict(collections.deque)
+_lock = threading.Lock()
+RUN_ID = re.compile(r"[\w.-]+")
+REPO = re.compile(r"https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}?(?:\.git)?/?")
+log = logging.getLogger(__name__)
 config.RUNS_DIR.mkdir(exist_ok=True)
 
 
 class RunRequest(BaseModel):
     repo: str = ""
+
+    @field_validator("repo")
+    @classmethod
+    def _repo(cls, v):
+        v = v.strip()
+        if v and (len(v) > 200 or not REPO.fullmatch(v)):
+            raise ValueError("repo must be empty or https://github.com/owner/repo")
+        return v
+
+
+def _evict():
+    done = [k for k, v in RUNS.items() if v["done"]]
+    for k in done[:max(0, len(RUNS) - MAX_RUNS)]:
+        del RUNS[k]
+
+
+def _rate_ok(ip, now=None):
+    now = time.monotonic() if now is None else now
+    with _lock:
+        q = _hits[ip]
+        while q and now - q[0] > RATE_WINDOW:
+            q.popleft()
+        if len(q) >= RATE_LIMIT:
+            return False
+        q.append(now)
+        return True
+
+
+def _read_events(path):
+    out = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(ev, dict):
+            out.append(ev)
+    return out
 
 
 def _record(run_id):
@@ -66,8 +114,12 @@ def org_scan(owner: str):
     """Scan every public repo of a GitHub user/org: pinned requirements.txt -> OSV advisories."""
     if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", owner):
         raise HTTPException(400, "Invalid GitHub owner")
-    gh = httpx.Client(timeout=20, headers={"Accept": "application/vnd.github+json",
-                                           **({"Authorization": f"Bearer {config.GITHUB_TOKEN}"} if config.GITHUB_TOKEN else {})})
+    with httpx.Client(timeout=20, headers={"Accept": "application/vnd.github+json",
+                      **({"Authorization": f"Bearer {config.GITHUB_TOKEN}"} if config.GITHUB_TOKEN else {})}) as gh:
+        return _org_scan(gh, owner)
+
+
+def _org_scan(gh, owner):
     r = gh.get(f"https://api.github.com/users/{owner}/repos", params={"per_page": 40, "sort": "pushed"})
     if r.status_code == 404:
         raise HTTPException(404, f"No GitHub user or org named '{owner}'")
@@ -90,6 +142,7 @@ def org_scan(owner: str):
             try:
                 vulns = sources.osv_vulns(m.group(1), m.group(2))
             except Exception:
+                log.warning("OSV lookup failed for %s", m.group(1), exc_info=True)
                 continue
             if vulns:
                 row["packages"].append({"package": m.group(1), "version": m.group(2), "count": len(vulns)})
@@ -105,11 +158,17 @@ def org_scan(owner: str):
 
 
 @app.post("/api/runs")
-def start_run(req: RunRequest):
+def start_run(req: RunRequest, request: Request):
+    token = os.getenv("PATCHPILOT_TOKEN", "")
+    if token and request.headers.get("authorization", "") != f"Bearer {token}":
+        raise HTTPException(401, "Missing or invalid bearer token")
+    if not _rate_ok(request.client.host if request.client else "?"):
+        raise HTTPException(429, "Too many runs; try again in a minute")
     if not config.NEBIUS_API_KEY:
         raise HTTPException(400, "NEBIUS_API_KEY is not configured on the server")
     run_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     RUNS[run_id] = {"events": [], "done": False}
+    _evict()
     emit = _record(run_id)
     emit({"type": "start", "repo": req.repo or f"case:{config.DEFAULT_CASE}", "t": 0})
     threading.Thread(target=Agent(run_id, req.repo, emit).run, daemon=True).start()
@@ -120,22 +179,27 @@ def start_run(req: RunRequest):
 def list_runs():
     out = []
     for p in sorted(config.RUNS_DIR.glob("*.jsonl"), reverse=True):
-        lines = p.read_text(encoding="utf-8").splitlines()
-        if not lines:
+        try:
+            evs = _read_events(p)
+        except OSError:
             continue
-        first, last = json.loads(lines[0]), json.loads(lines[-1])
-        out.append({"id": p.stem, "repo": first.get("repo"), "ok": last.get("ok") if last["type"] == "done" else None})
+        if not evs:
+            continue
+        first, last = evs[0], evs[-1]
+        out.append({"id": p.stem, "repo": first.get("repo"), "ok": last.get("ok") if last.get("type") == "done" else None})
     return out[:30]
 
 
 @app.get("/api/runs/{run_id}/events")
 async def events(run_id: str, replay: float = 0):
     if run_id not in RUNS:
+        if not RUN_ID.fullmatch(run_id):
+            raise HTTPException(404)
         path = config.RUNS_DIR / f"{run_id}.jsonl"
         if not path.exists():
             raise HTTPException(404)
-        RUNS[run_id] = {"events": [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()],
-                        "done": True}
+        RUNS[run_id] = {"events": _read_events(path), "done": True}
+        _evict()
 
     async def gen():
         i, last_t = 0, 0.0
@@ -161,12 +225,12 @@ app.mount("/static", StaticFiles(directory=config.ROOT / "web"), name="static")
 def run_vex(run_id: str):
     evs = RUNS.get(run_id, {}).get("events")
     if evs is None:
-        if not re.fullmatch(r"[\w.-]+", run_id):
+        if not RUN_ID.fullmatch(run_id):
             raise HTTPException(404, "unknown run")
         path = config.RUNS_DIR / f"{run_id}.jsonl"
         if not path.exists():
             raise HTTPException(404, "unknown run")
-        evs = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        evs = _read_events(path)
     doc = next((e["document"] for e in reversed(evs) if e.get("type") == "vex"), None)
     if doc is None:
         raise HTTPException(404, "no OpenVEX document for this run")

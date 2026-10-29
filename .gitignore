@@ -2,5 +2,9 @@
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
 runs/work/
-demo_repo/.pytest_cache/
+runs/*.jsonl
+runs/bench.log
+runs/batch-summary.json
+!runs/.gitkeep

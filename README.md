@@ -152,7 +152,7 @@ MODEL_SUPER=nvidia/nemotron-3.5-super-vl:free
 MODEL_ULTRA=nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 
-Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, and `ALLOW_REMOTE_REPOS=0` for public deployments (remote repos run arbitrary test code).
+Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, `PATCHPILOT_TOKEN` (requires `Authorization: Bearer <token>` on `POST /api/runs`), and `ALLOW_REMOTE_REPOS=1` to enable remote GitHub repos (off by default: remote repos run arbitrary test code).
 
 ## Screenshots
 

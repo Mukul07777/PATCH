@@ -2,18 +2,20 @@
 import difflib
 import hashlib
 import json
+import logging
 import re
 import shutil
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
 from . import config, drift, exploits, guard, reach, sources, vex
 from .llm import LLMError, Router, parse_json
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
+
+log = logging.getLogger(__name__)
 
 PIN = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+)\s*==\s*([A-Za-z0-9_.\-]+)\s*$")
 TEXT_EXT = {".py", ".txt", ".toml", ".cfg", ".ini", ".md"}
@@ -686,7 +688,6 @@ class Agent:
             add("Fix release provenance checked", "unverified", "deps.dev data unavailable for the target release(s)")
         else:
             ok_prov = [k for k, v in known.items() if v["provenance"]]
-            missing = [k for k, v in known.items() if not v["provenance"]]
             status = "verified" if len(ok_prov) == len(tr) else "partial"
             add("Fix release provenance checked", status,
                 "deps.dev: " + "; ".join(
@@ -732,7 +733,7 @@ class Agent:
                     out[u["package"]] = {"error": f"{type(e).__name__}: {e}", "provenance": None, "scorecard": None,
                                          "new_deps": None}
         except Exception:
-            pass
+            log.exception("trust lookup failed")
         self.trust = out
         return out
 
