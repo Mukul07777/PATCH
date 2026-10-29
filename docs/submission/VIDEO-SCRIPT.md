@@ -1,27 +1,21 @@
-# Video script (2:20, hard cap 2:30)
+# Demo video script (2:50, public YouTube, no music or royalty-free music only, no third-party logos)
 
-One story, told in this order: **Dependency bots bump the version and the build breaks. PatchPilot rewrites your code, proves the exploit is dead, and opens the PR.**
+Record at 1440×900, browser zoom 100%, dark or light theme. Say the lines in **bold**; the rest is what is on screen.
 
-Record from replay so nothing stalls: `uvicorn patchpilot.app.server:app --port 8000`, default light theme, 1080p, browser zoom 110%.
-Base run: `20261029-153834-job` (authsvc, PyJWT, Nebius Token Factory, live Tavily research, Super then Ultra, green on attempt 2, exploit proven closed, trust 85, 110.7 s).
-**[OWNER]** = needs an owner action. Each one has a fallback.
-
-| Time | On screen (exact) | Voice-over |
+| Time | On screen | Say |
 |---|---|---|
-| 0:00–0:12 (12 s) | **[OWNER]** A real red Dependabot PR on a fork (PyJWT 1.x to 2.x, CI failing). *Fallback:* `cases/authsvc` in an editor with `PyJWT==1.7.1`, then a terminal showing `pytest` red after a naive bump. | "Dependency bots bump the version. The build breaks. The CVE stays in prod." |
-| 0:12–0:25 (13 s) | `localhost:8000/` landing: hero headline, the three-step graphic (Find the CVE, Fix the code until tests pass, Prove the exploit closed), then the model strip: Nano, Super, Ultra, Tavily. | "PatchPilot rewrites your code, proves the exploit is dead, and opens the PR. Three NVIDIA Nemotron models on Nebius Token Factory, plus Tavily, each with one job." |
-| 0:25–0:40 (15 s) | `localhost:8000/settings` (signed in as admin) → Providers: LLM base URL `https://api.tokenfactory.nebius.com/v1`, the Nano / Super / Ultra model fields (pinned ids `nvidia/Nemotron-3_5-Lightning`, `nvidia/nemotron-3-super-120b-a12b`, `nvidia/Nemotron-3-Ultra-550b-a55b`; fields show what is stored, otherwise the `.env` pins apply), then **Test LLM** (key field stays masked). | "One OpenAI-compatible endpoint, three pinned models, and a test button that never shows the key." |
-| 0:40–0:55 (15 s) | `localhost:8000/console?demo=1`, step 1 Find. The tier strip lights **Nano**; threat clock with EPSS, KEV and days public; reachability chip. | "Step one, find it. Nano triages the advisories, and ranks them by what attackers actually use." |
-| 0:55–1:10 (15 s) | Same tab, Predict then Fix. Tavily lights up with the migration source; drift radar lists the lines the upgrade breaks. | "Tavily finds the migration guide. Before any test runs, we know which lines will break." |
-| 1:10–1:35 (25 s) | Fix: tests red, Super's patch fails, the strip moves to **Ultra**, tests green on attempt 2. Show the Test timeline. | "Now fix it. Super writes the patch, it fails, so Ultra takes over. Green on attempt two. This is the part version-bump bots never do." |
-| 1:35–1:55 (20 s) | Prove: the exploit goes **Exploited** on the old pins, then **Blocked** after the fix; red-team table with the one row still open highlighted. | "Then prove it. Same real exploit: it works on the old version and is closed on ours. And it tells you the one variant still open." |
-| 1:55–2:12 (17 s) | End-of-run **Run summary** card (CVEs fixed, tests before to after, exploit before to after, files changed, calls by tier), then the Certificate tab with trust 85 and the SHA-256. **[OWNER]** The real PR with the certificate (needs `GITHUB_TOKEN`). *Fallback:* the Diff tab and the `.patch` download. | "Every claim is checked on its own and hashed into the PR." |
-| 2:12–2:20 (8 s) | Hold on the summary. Lower third: "3 Nemotron tiers on Nebius Token Factory · run 20261029-153834-job · 110.7 s · replayable". | "Measured, recorded, replayable. Not promised." |
+| 0:00–0:15 | A red Dependabot PR on GitHub: "Bump pyjwt from 1.7.1 to 2.10.1", checks failing, opened weeks ago. | **"This is a security fix. It's been red for weeks, because the new version breaks the code. So the vulnerability is still in production. Every team has a pile of these."** |
+| 0:15–0:25 | PatchPilot landing page, scroll once. | **"PatchPilot is a coding agent on Nebius Token Factory with NVIDIA Nemotron. It doesn't just bump the version. It makes the upgrade work, and proves it."** |
+| 0:25–0:40 | `/console`: the start screen with three choices. Click **Watch it fix a real project**. | **"Nothing runs until you choose. Here's a real recorded run on Token Factory."** |
+| 0:40–1:05 | Findings tab: the **In plain words** box, then "Being attacked right now: None", "Chance of an attack in 30 days". | **"First it finds the holes and says what they mean in plain English, including whether your own code actually calls the broken function. Nemotron Nano does this triage: it's the fast, cheap tier."** |
+| 1:05–1:35 | Test timeline: baseline 9 passed → after upgrade 7 failed → attempt 1 (Super) 1 failed → attempt 2 (Ultra) 9 passed → "AI repairs what the upgrade broke". Model routing panel: Super, then Ultra. | **"The upgrade breaks seven of nine tests. Nemotron Super repairs all but one. For the last one the job escalates to Ultra, the big reasoning model, only now. Ultra's fix quotes the exact changelog line Tavily found. Nine of nine green."** |
+| 1:35–2:00 | Proof tab: Exploit card "Old version: Exploited ✗ → Patched: Blocked ✓ → Verdict: proven closed", then the attack-variant list. | **"Green tests aren't proof. PatchPilot runs the real attack: it works on the old version and is blocked on the fix. Then it tries eight variations. Seven are blocked, one is still open, and it says so instead of hiding it."** |
+| 2:00–2:15 | Proof tab: the certificate with its SHA-256. <!-- The authsvc recording predates the behaviour lock. Show its card here only after a new Token Factory recording has it; until then keep the line about it short. --> | **"It also records how your functions behaved before the upgrade and checks they still return the same thing, even if you have no tests. Every claim goes into a signed certificate."** |
+| 2:15–2:35 | `/projects`: add a `requirements.txt` with `reqeusts==1.0` and `PyQt5`. The project shows grade **F** and the **What to do** list. | **"No AI key? You still get a grade from A to F and a to-do list anyone can read: a fake package pretending to be requests, a GPL license, upgrades with exact versions. And a one-click fixed requirements file."** |
+| 2:35–2:50 | Console: paste a PR URL in the box. Cut to the GitHub PR turning green with PatchPilot's commit. <!-- TODO(owner): record once a real rescue PR exists; otherwise show the PR URL being pasted and the README comparison table --> | **"And for a red Dependabot PR, paste the link. PatchPilot pushes the repair onto that PR. Open source, on Nebius Token Factory and NVIDIA Nemotron."** |
 
-Total: 2:20 (12+13+15+15+15+25+20+17+8 = 140 s). Headroom of 10 s under the 2:30 cap.
-
-## Rules
-- Only measured numbers on screen, taken from `demo-runs/batch-summary.json` and the run itself. The landing results strip is computed from `/api/bench`; do not quote anything it does not show.
-- Five of the six shipped runs include live Tavily research; the sanitizer run (`20261029-153214-job`) was recorded without Tavily, so don't use it for the research shot.
-- Settings needs an admin session; sign in before recording. The Providers section shows stored values only, so if the model fields are empty say "pinned in the environment" and keep the Test LLM shot.
-- If the guided demo stops before the summary card, cut to `/console?replay=20261029-153834-job`.
+**Before recording:**
+- Set the server to Token Factory, so the provider pill reads "Token Factory".
+- Close other tabs.
+- Hide the bookmarks bar.
+- Do one dry run of the guided demo so its timing is familiar.
