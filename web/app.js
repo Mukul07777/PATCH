@@ -3,7 +3,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const STEPS = [
-  ["models", "Connect · Token Factory"], ["checkout", "Check out repo"], ["scan", "Scan · OSV.dev"],
+  ["models", "Connect · Nemotron"], ["checkout", "Check out repo"], ["scan", "Scan · OSV.dev"],
   ["triage", "Triage · Nemotron Nano"], ["research", "Research · Tavily"], ["plan", "Plan · Nemotron Super"],
   ["exploit", "Exploit proof · Super"], ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
 ];

@@ -22,6 +22,8 @@
 - [x] Working project
 - [x] Open-source license (MIT) at the repo root
 - [x] README with setup steps and the NVIDIA/Nebius usage
+- [x] `.env.example` documents all three provider options (Token Factory, NIM, OpenRouter)
+- [ ] Capture screenshots into `docs/screenshots/` (README references them)
 - [ ] Add `NEBIUS_API_KEY` and `TAVILY_API_KEY` to `.env` and do a **real** run on the demo repo
 - [ ] Record 2–3 real runs (committed in `runs/`) so judges can use **Replay** without spending credits
 - [ ] Set `PRICE_*` from the Token Factory pricing page so the cost and savings figures show
@@ -65,6 +67,14 @@
 | Web dashboard | ✅ | Live SSE, replay, themes, responsive |
 | CLI / batch job | ✅ | `python -m patchpilot.cli …` |
 | Dockerfile | ✅ | Endpoint by default; the Job overrides the command |
+| Multipage UI | ✅ | `/`, `/console`, `/runs`, `/org`, `/how` |
+| Exploit proof | ✅ | Generated pytest run before and after the upgrade |
+| PR risk score | ✅ | 0–100 from churn, files, major jumps, attempts, tests, exploit proof |
+| Reachability map, model debate, voice briefing | ✅ | Console tabs; voice uses browser speech synthesis |
+| Org-wide scan | ✅ | `/api/org/{owner}` heat map over public Python repos |
+| Multi-provider | ✅ | Nebius Token Factory, NVIDIA NIM, OpenRouter via `NEBIUS_BASE_URL` |
+| Submission README | ✅ | Pitch, mermaid pipeline, routing table, providers, comparison, limits, roadmap |
+| Screenshots in `docs/screenshots/` | ⬜ | README has placeholders |
 | End-to-end smoke test | ✅ | Full pipeline verified with a **local stub LLM** (not committed). **Not yet run against real Nemotron.** |
 
 ## Next steps, in priority order

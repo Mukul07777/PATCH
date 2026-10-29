@@ -245,8 +245,8 @@ table.bench { width: 100%; border-collapse: collapse; font-size: 13px; }
 footer { text-align: center; color: var(--muted); font-size: 12px; padding: 30px 16px; }
 
 @media (max-width: 1150px) {
-  .grid { grid-template-columns: 1fr; }
-  .hero { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: minmax(0, 1fr); } .grid > * { min-width: 0; }
+  .hero { grid-template-columns: minmax(0, 1fr); }
   .kpis { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 640px) {

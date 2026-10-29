@@ -24,6 +24,7 @@ class Router:
     def __init__(self, emit):
         self.emit = emit
         self.models = dict(config.MODEL_OVERRIDES)
+        self.last_reasoning = ""  # reasoning text of the most recent reply (for salvaging code from it)
         self.usage = {t: {"calls": 0, "in": 0, "out": 0, "seconds": 0.0} for t in TIER_HINTS}
         self._client = httpx.Client(
             base_url=config.NEBIUS_BASE_URL,
@@ -80,6 +81,7 @@ class Router:
         data = r.json()
         msg = data["choices"][0]["message"]
         text = msg.get("content") or ""
+        self.last_reasoning = msg.get("reasoning_content") or msg.get("reasoning") or ""
         if not text.strip():  # some reasoning models put everything in reasoning_content when the budget runs out
             text = msg.get("reasoning_content") or msg.get("reasoning") or ""
         usage = data.get("usage") or {}

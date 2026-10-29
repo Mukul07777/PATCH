@@ -1,118 +1,156 @@
 # PatchPilot
 
-**Fix the code a security upgrade breaks, not just the version number.**
+**An agentic DevSecOps tool for software supply chain security: it finds CVEs, upgrades dependencies, rewrites code until the tests pass, and proves the exploit is closed.**
 
-PatchPilot is an autonomous coding agent. It finds real vulnerabilities in your dependencies, researches the breaking changes, upgrades, **repairs your code until the test suite passes**, and opens a pull request with an evidence report. It runs on **NVIDIA Nemotron** models served by **Nebius Token Factory**.
-
-> Track: **Coding and Agentic Engineering** · License: MIT
+Built on NVIDIA Nemotron (Nano / Super / Ultra) through any OpenAI-compatible endpoint (Nebius Token Factory, NVIDIA NIM, OpenRouter), with Tavily, OSV.dev and PyPI.
 
 ---
 
 ## The problem
-A CVE lands in a dependency. Dependabot or Renovate opens a version bump, and if the fix is a **major** version, the build breaks. The PR then sits unmerged for weeks while vulnerable code stays in production. Version-bump bots stop at the bump. The open-source AI SRE agents (OpsGentic, OpenSRE, AutoSRE) focus on incidents, not dependency migrations. Tools that rewrite broken code (Snyk Agent Fix, Copilot Autofix) are closed and proprietary.
 
-PatchPilot closes that gap with an open agent that does the whole job: **advisory → plan → upgrade → repair → verified PR**.
+Dependency bots open a version-bump PR and stop there. When the fix needs a **major** version, the bump breaks the build, the PR goes red, and the known vulnerability stays in production until someone finds time to migrate the code. The bump is easy. The fix is the hard part.
 
 ## How it works
 
-```
- requirements.txt
-       │
-       ▼
- ┌─────────────┐   real advisories    ┌──────────────────────────┐
- │  OSV.dev     │ ───────────────────▶ │ Nemotron NANO  · triage   │  is the vulnerable code reachable?
- │  PyPI        │                      └──────────────────────────┘
- └─────────────┘                                  │
-       ┌──────────────────────────────────────────┘
-       ▼
- ┌─────────────┐  migration guides    ┌──────────────────────────┐
- │  Tavily      │ ───────────────────▶ │ Nemotron SUPER · plan     │  target versions + guardrail
- └─────────────┘                       └──────────────────────────┘
-                                                  │
-                                                  ▼
-                                   ┌───────────────────────────────┐
-                                   │ Sandbox: fresh venv + pytest   │◀──────┐
-                                   └───────────────────────────────┘       │ failing output
-                                                  │ red                    │
-                                                  ▼                        │
-                                   ┌───────────────────────────────┐       │
-                                   │ attempt 1: Nemotron SUPER      │───────┘
-                                   │ attempt 2+: escalate to ULTRA  │
-                                   └───────────────────────────────┘
-                                                  │ green
-                                                  ▼
-                                   Diff + evidence report → GitHub PR
+```mermaid
+flowchart LR
+  A[Discover models] --> B[Checkout repo]
+  B --> C[OSV.dev + PyPI scan]
+  C -->|no advisories| Z[Done: clean]
+  C --> D[Nano triage + reachability]
+  D --> E[Tavily research]
+  E --> F[Super upgrade plan]
+  F --> G[Baseline tests + exploit proof]
+  G --> H[Bump pins + pytest]
+  H -->|fail| I[Repair: Super, then Ultra]
+  I --> H
+  H -->|pass or max attempts| J[Re-run exploit proof]
+  J --> K[PR risk score]
+  K --> L[Diff + report + PR or .patch]
 ```
 
-### Why three Nemotron tiers
-| Tier | Job | Why |
-|---|---|---|
-| **Nano** | Triage every advisory against how the code uses the package | High volume, simple classification. Fast and cheap. |
-| **Super** | Plan target versions, write the first repair | Strong coder, sensible cost |
-| **Ultra** | Called **only** when a repair fails | Deep reasoning where it actually pays off |
+1. **Scan**: every pin in `requirements.txt` is checked against OSV.dev; the latest version comes from PyPI.
+2. **Triage**: Nemotron Nano judges each advisory against how your code actually uses the package.
+3. **Research**: Tavily finds migration guides and breaking-change notes for each upgrade.
+4. **Plan**: Nemotron Super picks target versions (with a version guardrail).
+5. **Exploit proof**: a pytest demonstrating the vulnerability (from a curated, verified library for known CVEs, otherwise written by Nemotron) is run before the upgrade, then again after.
+6. **Upgrade and repair**: pins are bumped in a fresh venv and pytest runs. On failure, Super writes the first fix; later attempts escalate to Ultra, up to `MAX_FIX_ATTEMPTS`.
+7. **Ship**: risk score, unified diff, Markdown report with cited evidence, and a GitHub PR (when `GITHUB_TOKEN` is set and the repo is a GitHub URL) or a `.patch` file.
 
-Each call's model, tokens and latency stream live to the UI. With prices set, every run reports its cost against the cost of sending every call to Ultra.
+## Features
 
-### Safety guardrails
-- The model can't choose a version that leaves an advisory open (`agent._plan` checks every advisory's fixed version).
-- The model **can't edit tests** or write outside the repository. Those writes are rejected.
-- Every change is verified by actually running the project's test suite in an isolated virtualenv. A patch that fails tests is never reported as passing.
+- **Live agent graph**: each pipeline step streams to the console over SSE.
+- **Exploit proof**: a curated or Nemotron-written test shows the vulnerability before the upgrade and checks it is closed after.
+- **PR risk score**: 0 to 100 from code churn, files touched, major-version jumps, repair attempts, test result and exploit proof.
+- **Reachability map**: where each vulnerable package is used in your code.
+- **Model debate**: each repair attempt's diagnosis (Super, then Ultra) side by side.
+- **Org-wide heat map**: scans a GitHub user or org's public Python repos for vulnerable pins.
+- **Replay**: recorded runs in `runs/` replay without spending API credits.
+- **Voice briefing**: a spoken run summary using the browser's speech synthesis.
+- **Cited evidence**: fixes quote the Tavily sources they relied on.
 
-## Real data, no mocks
-- **OSV.dev** for advisories (GHSA and PyPI advisory records, de-duplicated by CVE)
-- **PyPI JSON API** for the latest releases
-- **Tavily** for migration guides and changelogs
-- `cases/authsvc` pins **PyJWT 1.7.1** and **requests 2.25.1**. These are real vulnerable versions with 16 live advisories (including CVE-2022-29217). Upgrading PyJWT to 2.x breaks 7 of 9 tests, and PatchPilot has to repair the code.
-- `cases/webhooks` pins **Werkzeug 2.0.3** (CVE-2023-25577, CVE-2024-34069 and more). Werkzeug 3 removed `safe_str_cmp`, `url_quote` and `url_encode`, so the upgrade breaks the imports.
-- Public deployments should set `ALLOW_REMOTE_REPOS=0`, because remote repos run their own test code on the server.
+## Model routing
 
-## Run it
+| Tier | Job |
+|---|---|
+| Nemotron **Nano** | Advisory triage against code usage (cheap, high volume) |
+| Nemotron **Super** | Upgrade plan, exploit-proof test when no curated one exists (Ultra as fallback), first repair attempt |
+| Nemotron **Ultra** | Escalated repair attempts when Super's fix still fails tests |
+
+Models are auto-discovered from `/models` unless pinned with `MODEL_NANO` / `MODEL_SUPER` / `MODEL_ULTRA`. Tokens, latency and (if `PRICE_*` is set) cost are tracked per tier.
+
+## Quickstart
+
+**Windows**
+
+```bat
+run.bat
+```
+
+Creates `.venv`, installs dependencies, copies `.env.example` to `.env` on first run (opens it in Notepad for your keys), then serves http://localhost:8000.
+
+**Manual (any OS, Python 3.10+)**
 
 ```bash
-python -m venv .venv            # Windows shortcut: just double-click run.bat
-.venv/Scripts/activate          # Windows  (macOS/Linux: source .venv/bin/activate)
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env            # add NEBIUS_API_KEY and TAVILY_API_KEY
+cp .env.example .env               # add your keys
 uvicorn patchpilot.server:app --port 8000
 ```
-Open http://localhost:8000 and click **Run agent**. Pick a bundled case, or paste a public GitHub URL with a pinned `requirements.txt` and a pytest suite.
 
-The Nemotron models are **auto-discovered** from Token Factory's `/models` endpoint. You can pin them with `MODEL_NANO`, `MODEL_SUPER` and `MODEL_ULTRA`. To open real pull requests, set `GITHUB_TOKEN` and use a GitHub URL.
+CLI / batch mode: `python -m patchpilot.cli`. Container: see `Dockerfile`.
 
-### Headless / batch (Nebius Serverless Jobs)
-```bash
-python -m patchpilot.cli case:authsvc case:webhooks https://github.com/org/repo-a https://github.com/org/repo-b
-```
-This writes each run to `runs/<id>.jsonl` (which can be replayed in the UI) and writes `runs/batch-summary.json`.
+- Pages: `/` landing, `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
+- API: `/api/health`, `/api/cases`, `/api/runs`, `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`.
+- Demo cases in `cases/`: `authsvc` (PyJWT 1.x + requests) and `webhooks` (Werkzeug 2 to 3).
 
-### Deploy
-The `Dockerfile` serves the web app on port 8000 (Nebius Serverless Endpoint). The same image runs as a **Serverless Job** if you override the command with `python -m patchpilot.cli …`, for example as a nightly scan across all of an organization's repos.
+## Provider setup
 
-## Project layout
-```
-patchpilot/
-  agent.py      pipeline: scan → triage → research → plan → test → fix loop → report/PR
-  llm.py        Nemotron router on Token Factory (discovery, retries, usage + cost)
-  sources.py    OSV.dev, PyPI, Tavily
-  sandbox.py    isolated virtualenv + pytest runner
-  github_pr.py  branch, push, open PR
-  server.py     FastAPI + Server-Sent Events, run recording and replay
-  cli.py        headless / Serverless Job entrypoint
-web/            dashboard (vanilla JS, no build step)
-cases/          real vulnerable target projects (authsvc: PyJWT+requests, webhooks: Werkzeug)
+The LLM client is OpenAI-compatible and reads `NEBIUS_API_KEY` and `NEBIUS_BASE_URL`, so any compatible provider works.
+
+**Nebius Token Factory**
+```ini
+NEBIUS_API_KEY=your-nebius-key
+NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1
 ```
 
-## How we used NVIDIA and Nebius
-- **NVIDIA Nemotron (Nano / Super / Ultra)**: all reasoning in the agent, routed by difficulty.
-- **Nebius Token Factory**: OpenAI-compatible inference for all three tiers. Model discovery uses `/models`.
-- **Nebius Serverless Endpoints / Jobs**: deployment target for the web app and the batch scanner (see Deploy above).
-- **Tavily**: live research on migration guides and changelogs. Sources are cited in each PR.
+**NVIDIA NIM**
+```ini
+NEBIUS_API_KEY=nvapi-...
+NEBIUS_BASE_URL=https://integrate.api.nvidia.com/v1
+```
 
-## Feedback on the tools
-See [PROGRESS.md](PROGRESS.md#feedback-for-nebius--nvidia). We fill it in as we build.
+**OpenRouter (free tier)**
+```ini
+NEBIUS_API_KEY=sk-or-...
+NEBIUS_BASE_URL=https://openrouter.ai/api/v1
+MODEL_NANO=nvidia/nemotron-3.5-lightning:free
+MODEL_SUPER=nvidia/nemotron-3.5-super-vl:free
+MODEL_ULTRA=nvidia/nemotron-3-ultra-550b-a55b:free
+```
 
-## Data sources and credits
-Vulnerability data from [OSV.dev](https://osv.dev) (sourced from the GitHub Advisory Database and the PyPI Advisory Database). Package metadata from the [PyPI JSON API](https://pypi.org). Web research by [Tavily](https://tavily.com).
+Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, and `ALLOW_REMOTE_REPOS=0` for public deployments (remote repos run arbitrary test code).
+
+## Screenshots
+
+| View | Image |
+|---|---|
+| Landing | `docs/screenshots/landing.png` |
+| Live console | `docs/screenshots/console.png` |
+| Exploit proof + risk score | `docs/screenshots/risk.png` |
+| Model debate | `docs/screenshots/debate.png` |
+| Org heat map | `docs/screenshots/org.png` |
+
+## Comparison
+
+| | Dependabot | Renovate | Snyk | PatchPilot |
+|---|---|---|---|---|
+| Detects vulnerable dependencies | Yes | Yes | Yes | Yes (OSV.dev) |
+| Opens upgrade PRs | Yes | Yes | Yes | Yes |
+| Rewrites your code to fix breaking changes | No | No | not verified | Yes (LLM repair loop) |
+| Runs your tests before proposing the PR | No (relies on your CI) | No (relies on your CI) | not verified | Yes, in a sandbox venv |
+| Generates an exploit-proof test | No | No | not verified | Yes |
+| Open source | Yes | Yes | No | Yes (MIT) |
+| Ecosystems | Many | Many | Many | Python only |
+
+## Limitations
+
+- Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
+- Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
+- Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
+- Green tests are only as strong as the repo's test suite.
+
+## Roadmap
+
+- Auto-rollback guard: revert an upgrade if post-merge checks regress.
+- Slack bot: briefings and approvals in chat.
+- npm ecosystem support.
+
+## Credits
+
+Vulnerability data from [OSV.dev](https://osv.dev). Package metadata from PyPI. Web research by [Tavily](https://tavily.com).
 
 ## License
-MIT. See [LICENSE](LICENSE).
+
+MIT, see [LICENSE](LICENSE).

@@ -7,7 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import config, sources
+from . import config, exploits, sources
 from .llm import Router
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -16,6 +16,23 @@ PIN = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+)\s*==\s*([A-Za-z0-9_.\-]+)\s*$")
 TEXT_EXT = {".py", ".txt", ".toml", ".cfg", ".ini", ".md"}
 # lives in a dot-dir: the normal pytest run skips it and the diff ignores it
 EXPLOIT_TEST = ".patchpilot/test_exploit.py"
+
+
+def extract_test_code(text):
+    """Pull a compilable pytest file out of a reply (content or leaked reasoning); None if there isn't one."""
+    blocks = re.findall(r"```(?:python|py)?[ \t]*\n(.*?)```", text or "", re.S)
+    if not blocks and "def test" in (text or ""):
+        blocks = [text]
+    for code in sorted(blocks, key=len, reverse=True):
+        code = code.strip()
+        if not re.search(r"^def test\w*\(", code, re.M):
+            continue
+        try:
+            compile(code, "test_exploit.py", "exec")
+        except SyntaxError:
+            continue
+        return code + "\n"
+    return None
 
 
 class Agent:
@@ -291,45 +308,72 @@ class Agent:
 
     # ---------- exploit proof ----------
     def _exploit_before(self, findings, files, research, sandbox):
-        """Super writes a pytest asserting the SAFE outcome of the attack; it should fail on the vulnerable pins."""
-        self.step("exploit", "running", "Writing exploit proof with Nemotron Super")
-        sev = {"CRITICAL": 0, "HIGH": 1}
-        f, v = min(((f, v) for f in findings for v in f["vulns"]), key=lambda fv: sev.get(fv[1].get("severity"), 2))
+        """Run a proof-of-exploit pytest (asserts the SAFE outcome); it should fail on the vulnerable pins."""
+        self.step("exploit", "running", "Preparing exploit proof")
         try:
-            text = self.router.chat(
-                "super",
-                "You are a security engineer writing a proof-of-exploit regression test. Write ONE self-contained "
-                "pytest file that attempts the attack described in the advisory against the library (and the "
-                "project code if relevant) and ASSERTS THE SAFE OUTCOME (attack rejected). It must FAIL on the "
-                "vulnerable version and PASS once patched. Import ONLY the library under test, pytest and the standard "
-                "library (cryptography and other extras are NOT installed); no network. It must run on both the old and new library versions, so guard API differences with "
-                "try/except or hasattr. Start the file with a one-line comment naming the attack. "
-                "Reply with the file in a single ```python code block and nothing else.",
-                json.dumps({"package": f["package"], "vulnerable_version": f["current"], "advisory": v,
-                            "project_usage": self._usage_snippets(f["package"], files),
-                            "research": [h["content"][:800] for h in research.get(f["package"], [])[:2]]}),
-                "Write exploit proof", max_tokens=16000)
-            m = re.search(r"```(?:python)?\s*\n(.*?)```", text, re.S)
-            code = (m.group(1) if m else text).strip()
-            if "def test" not in code:
-                raise ValueError("no pytest test function in reply")
+            sev = {"CRITICAL": 0, "HIGH": 1}
+            pairs = [(f, v) for f in findings for v in f["vulns"]]
+            # prefer an advisory with a curated, verified proof; else the top-severity one
+            curated = [(f, v, hit) for f, v in pairs for hit in [exploits.find(v)] if hit]
+            if curated:
+                f, v, (cve, code) = min(curated, key=lambda x: sev.get(x[1].get("severity"), 2))
+                source = "curated"
+                self.log(f"Using curated exploit proof for {cve}", "exploit")
+            else:
+                f, v = min(pairs, key=lambda fv: sev.get(fv[1].get("severity"), 2))
+                code, source = self._generate_exploit(f, v, files, research), "generated"
         except Exception as e:  # the proof is a bonus; never block the fix on it
             self.log(f"Exploit proof skipped: {e}", "exploit")
             self.step("exploit", "failed")
             return None
-        title = code.splitlines()[0].lstrip("# ").strip() if code.startswith("#") else v["summary"]
-        path = self.work / EXPLOIT_TEST
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(code, encoding="utf-8")
-        ok, summary, _ = sandbox.test(EXPLOIT_TEST)
+        try:
+            title = code.splitlines()[0].lstrip("# ").strip() if code.startswith("#") else v["summary"]
+            path = self.work / EXPLOIT_TEST
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(code, encoding="utf-8")
+            ok, summary, _ = sandbox.test(EXPLOIT_TEST)
+        except Exception as e:
+            self.log(f"Exploit proof could not run: {e}", "exploit")
+            self.step("exploit", "failed")
+            return None
         ex = {"title": title, "advisory": v["cve"] or v["id"], "package": f["package"], "code": code,
-              "before": summary, "vulnerable": not ok}
+              "source": source, "before": summary, "vulnerable": not ok}
         self._emit({"type": "exploit", "stage": "before", **ex})
         self.step("exploit", "done")
         return ex
 
+    def _generate_exploit(self, f, v, files, research):
+        system = (
+            "You are a security engineer writing a proof-of-exploit regression test. Write ONE self-contained "
+            "pytest file that attempts the attack described in the advisory against the library (and the "
+            "project code if relevant) and ASSERTS THE SAFE OUTCOME (attack rejected). It must FAIL on the "
+            "vulnerable version and PASS once patched. Import ONLY the library under test, pytest and the standard "
+            "library (cryptography and other extras are NOT installed); no network. It must run on both the old "
+            "and new library versions, so guard API differences with try/except or hasattr. Start the file with a "
+            "one-line comment naming the attack. Keep your reasoning brief. "
+            "Reply with the file in a single ```python code block and nothing else.")
+        user = json.dumps({"package": f["package"], "vulnerable_version": f["current"], "advisory": v,
+                           "project_usage": self._usage_snippets(f["package"], files),
+                           "research": [h["content"][:800] for h in research.get(f["package"], [])[:2]]})
+        errors = []
+        for tier in ("super", "ultra"):
+            try:
+                text = self.router.chat(tier, system, user, f"Write exploit proof ({tier})", max_tokens=32000)
+                code = extract_test_code(text) or extract_test_code(self.router.last_reasoning)
+                if code:
+                    return code
+                errors.append(f"{tier}: no valid pytest test in reply")
+            except Exception as e:
+                errors.append(f"{tier}: {e}")
+            self.log(f"Exploit generation with {tier} failed: {errors[-1]}", "exploit")
+        raise ValueError("; ".join(errors))
+
     def _exploit_after(self, ex, sandbox):
-        ok, summary, _ = sandbox.test(EXPLOIT_TEST)
+        try:
+            ok, summary, _ = sandbox.test(EXPLOIT_TEST)
+        except Exception as e:
+            self.log(f"Exploit re-run failed: {e}", "exploit")
+            return
         ex["after"] = summary
         ex["verdict"] = ("proven closed" if ex["vulnerable"] and ok else
                          "inconclusive: old version passed the test too" if ok else "not proven")
