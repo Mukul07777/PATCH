@@ -148,3 +148,21 @@ def test_list_runs_includes_failure_reason(tmp_path, monkeypatch):
     assert got["a"]["error"] == "boom"
     assert got["b"]["error"] == "RateLimit: 429"
     assert "error" not in got["c"]
+
+
+def test_list_runs_reason_falls_back_to_last_test_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
+    (tmp_path / "d.jsonl").write_text(_jsonl({"type": "start", "repo": "w"},
+                                         {"type": "test", "ok": False, "summary": "3 failed, 2 passed"},
+                                         {"type": "test", "ok": False, "summary": "1 failed, 4 passed"},
+                                         {"type": "done", "ok": False}), encoding="utf-8")
+    (tmp_path / "e.jsonl").write_text(_jsonl({"type": "start", "repo": "v"}, {"type": "done", "ok": False}), encoding="utf-8")
+    got = {x["id"]: x for x in TestClient(server.app).get("/api/runs").json()}
+    assert got["d"]["error"] == "Tests still failing: 1 failed, 4 passed"
+    assert got["e"]["error"] is None
+
+
+def test_event_stream_is_not_gzipped():
+    with TestClient(server.app) as c:
+        r = c.get("/api/runs/20261029-153214-job/events?replay=0", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and "gzip" not in r.headers.get("content-encoding", "")

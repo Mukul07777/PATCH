@@ -55,6 +55,7 @@ class Agent:
         self.reach = {}
         self.guarded = []  # one entry per screened piece of AI-written code
         self.dep_hints = []  # missing-module hints for the repair prompt
+        self.original_imports = set()  # top-level imports of the checked-out repo, captured before LLM edits
         self.deps_added = []  # requirements added deterministically by the dependency pre-repair step
         self.guard_rejects = []  # patch writes blocked by the gate, fed into the next repair attempt
 
@@ -89,6 +90,8 @@ class Agent:
         self.step("checkout", "running", "Checking out repository")
         self._checkout()
         original = self._snapshot()
+        # imports present before any LLM edit: the only unmapped modules dep-repair may auto-add
+        self.original_imports = deps.top_level_imports(original)
         pins = self._pins()
         self.step("checkout", "done", detail={"files": len(original), "pins": pins})
         # venv + baseline install run in the background while the LLM stages think
@@ -437,8 +440,9 @@ class Agent:
                 raise first
 
     def _dep_repair(self, output, sandbox, ok, summary):
-        """Deterministic pre-repair: a missing module that exists on PyPI is added pinned, reinstalled and retested
-        before another LLM call. Unknown/nonexistent packages only become prompt hints."""
+        """Deterministic pre-repair: a missing module that the original repo imported (or that has a curated mapping)
+        and that has an established, non-yanked PyPI release for this Python is added pinned, reinstalled and
+        retested before another LLM call. Anything else only becomes a prompt hint."""
         local = {p.stem if p.is_file() else p.name for p in self.work.iterdir()}
         missing = deps.detect_missing(output, local)
         req = self.work / "requirements.txt"
@@ -446,15 +450,17 @@ class Agent:
         for h in deps.hints(missing):
             if h not in self.dep_hints:
                 self.dep_hints.append(h)
+        if getattr(self, "dep_repair_disabled", False):
+            return ok, summary, output
         pins = []
         for mod in missing:
             if deps._norm(deps.dist_for(mod)) in have:
                 continue  # already required: the model must fix usage, not the requirement
-            r = deps.resolve(mod)
-            if r:
-                pins.append(r)
+            dist, version, reason = deps.resolve(mod, original_imports=getattr(self, "original_imports", ()))
+            if version:
+                pins.append((dist, version))
             else:
-                self.log(f"Missing module '{mod}' has no PyPI package '{deps.dist_for(mod)}'; left to the model", "fix")
+                self.log(f"Missing module '{mod}' not auto-added ({reason}); left to the model as a hint", "fix")
         if not pins:
             return ok, summary, output
         before = req.read_text(encoding="utf-8")
@@ -466,7 +472,12 @@ class Agent:
         if not ok_install:
             req.write_text(before, encoding="utf-8")
             self.log("pip install failed for added dependency; reverted: " + out[-600:], "fix")
-            sandbox.install()
+            ok_revert, rout = sandbox.install()
+            if not ok_revert:
+                msg = "Reinstall after reverting the added dependency failed; dependency repair stopped: " + rout[-600:]
+                self.log(msg, "fix")
+                self._emit({"type": "error", "msg": msg})
+                self.dep_repair_disabled = True
             return ok, summary, output
         self.deps_added += [{"package": d, "version": v} for d, v in added]
         for d, v in added:

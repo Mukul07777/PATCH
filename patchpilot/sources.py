@@ -84,6 +84,12 @@ def pypi_latest(package):
     return r.json()["info"]["version"]
 
 
+def pypi_json(package):
+    r = _http.get(f"https://pypi.org/pypi/{package}/json")
+    r.raise_for_status()
+    return r.json()
+
+
 def tavily_search(query, max_results=4):
     if not config.TAVILY_API_KEY:
         return []

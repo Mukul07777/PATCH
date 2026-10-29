@@ -242,10 +242,20 @@ $("#runForm").onsubmit = async (e) => {
 $("#noKeyLink").onclick = (e) => { e.preventDefault(); $("#history").focus(); };
 $("#replayBtn").onclick = () => { const id = $("#history").value; if (id) { userStarted = true; stopDemo(); listen(id, 4); } };
 
+// highlight the case card that matches a run's repo (replays), without touching a typed URL
+function syncCase(repo) {
+  const m = /^case:(.+)$/.exec(repo || ""), btns = [...document.querySelectorAll(".case")];
+  const hit = m && btns.find((x) => x.dataset.id === m[1]);
+  if (!hit) return;
+  btns.forEach((x) => { const on = x === hit; x.classList.toggle("active", on); x.setAttribute("aria-checked", String(on)); x.tabIndex = on ? 0 : -1; });
+  selectedCase = repo;
+}
+
 function listen(id, replay, opts = {}) {
   if (source) source.close();
   reset();
   state.runId = id;
+  if ([...$("#history").options].some((o) => o.value === id)) $("#history").value = id;
   setReplayBadge(!!opts.auto);
   $("#runBtn").disabled = true;
   showTab("terminal");
@@ -265,6 +275,7 @@ function listen(id, replay, opts = {}) {
   src.addEventListener("message", (m) => {
     let ev; try { ev = JSON.parse(m.data); } catch { return; }
     if (ev.type === "done") finished = true;
+    if (ev.type === "start" && replay) syncCase(ev.repo);
     queue.push(ev); pump();
   });
   src.addEventListener("error", () => {

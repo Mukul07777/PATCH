@@ -2,7 +2,7 @@
 
 **An agentic DevSecOps tool for software supply chain security: it finds CVEs, upgrades dependencies, rewrites code until the tests pass, and proves the exploit is closed.**
 
-Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory** (the default provider), with Tavily, OSV.dev and PyPI. Any other OpenAI-compatible endpoint (NVIDIA NIM, or OpenRouter as a fallback) also works.
+Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory** (the default provider). External data sources: OSV.dev, PyPI, FIRST EPSS, CISA KEV, deps.dev, Tavily and the GitHub API. Any other OpenAI-compatible endpoint (NVIDIA NIM, or OpenRouter as a fallback) also works.
 
 - **Hackathon:** NVIDIA Global AI Hackathon · **Track: Coding and Agentic Engineering** · LLMs: NVIDIA Nemotron on Nebius Token Factory · Research: Tavily
 - **Live demo:** TODO <!-- TODO(owner): public URL of the deployed app; leave as TODO until it exists -->
@@ -267,7 +267,7 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 ## Limitations
 
 - The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run (Token Factory listed no Nemotron content-safety model for our account).
-- Benchmark: 6/6 on Token Factory, but the recorded sanitizer run predates Tavily (its Tavily rerun is not recorded yet), and the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only adds packages that resolve on PyPI, pinned to their latest release.
+- Benchmark: 6/6 on Token Factory, but the recorded sanitizer run predates Tavily (its Tavily rerun is not recorded yet), and the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only auto-adds a package with a curated import mapping or one the original repo already imported, whose first PyPI release is at least 90 days old, pinned to the newest non-yanked release that supports the sandbox Python; anything else becomes a hint for the model.
 - Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
@@ -307,7 +307,7 @@ Every commit in this repository is dated 2026-10-29 (check with `git log --forma
 
 ## Credits
 
-Vulnerability data from [OSV.dev](https://osv.dev). Package metadata from PyPI. Web research by [Tavily](https://tavily.com).
+Vulnerability data from [OSV.dev](https://osv.dev). Package metadata from [PyPI](https://pypi.org). Exploit likelihood from [FIRST EPSS](https://www.first.org/epss/). Known-exploited status from [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog). Release trust data from [deps.dev](https://deps.dev). Web research by [Tavily](https://tavily.com). Pull requests and org scans via the [GitHub API](https://docs.github.com/rest).
 
 ## License
 

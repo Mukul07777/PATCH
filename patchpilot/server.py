@@ -20,8 +20,18 @@ from pydantic import BaseModel, field_validator
 from . import config, sources
 from .agent import PIN, Agent
 
+
+class _GZipExceptSSE(GZipMiddleware):
+    """gzip buffers a streamed body until its compressor flushes, which stalls Server-Sent Events in browsers."""
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].endswith("/events"):
+            await self.app(scope, receive, send)
+        else:
+            await super().__call__(scope, receive, send)
+
+
 app = FastAPI(title="PatchPilot")
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(_GZipExceptSSE, minimum_size=1000)
 RUNS = {}  # run_id -> {"events": [...], "done": bool}
 MAX_RUNS = 50
 MAX_ACTIVE_RUNS = 3
@@ -328,8 +338,12 @@ def list_runs():
         done = last.get("type") == "done"
         row = {"id": p.stem, "repo": first.get("repo"), "ok": last.get("ok") if done else None}
         if done and last.get("ok") is False:
-            # failure reason: the done event's error, else the last error event's msg (older recordings)
-            err = last.get("error") or next((e.get("msg") for e in reversed(evs) if e.get("type") == "error" and e.get("msg")), None)
+            # failure reason: the done event's error, else the last error event's msg (older recordings),
+            # else the final test summary (a run that simply ended with failing tests)
+            err = (last.get("error")
+                   or next((e.get("msg") for e in reversed(evs) if e.get("type") == "error" and e.get("msg")), None)
+                   or next((f"Tests still failing: {e['summary']}" for e in reversed(evs)
+                            if e.get("type") == "test" and e.get("summary")), None))
             row["error"] = str(err)[:300] if err else None
         out.append(row)
     return out[:30]

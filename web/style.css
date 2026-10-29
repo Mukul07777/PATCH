@@ -94,8 +94,8 @@ select option { background: #11161c; color: #eef3f7; }
   background: linear-gradient(100deg, var(--accent), var(--accent-2)); box-shadow: 0 0 0 1px rgba(255,255,255,.1) inset, 0 10px 30px -8px var(--accent); position: relative; overflow: hidden; white-space: nowrap; }
 .btn-run::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.45) 50%, transparent 70%); transform: translateX(-100%); animation: shine 3.2s infinite; }
 @keyframes shine { 60%, 100% { transform: translateX(100%); } }
-.btn-run:disabled { filter: grayscale(.6); cursor: progress; }
-.btn-run:disabled::after { animation-duration: .9s; }
+.btn-run:disabled { opacity: .45; filter: grayscale(1); cursor: not-allowed; box-shadow: none; }
+.btn-run:disabled::after { animation: none; }
 .btn { border-radius: 12px; padding: 12px 18px; font: 600 14px Inter; cursor: pointer; white-space: nowrap; }
 .btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
 .launch-row.small select, .launch-row.small .btn { padding-top: 9px; padding-bottom: 9px; font-size: 13px; }

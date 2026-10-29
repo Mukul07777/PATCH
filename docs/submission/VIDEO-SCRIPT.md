@@ -1,7 +1,7 @@
 # Video script (2:00, hard cap 2:50)
 
 Record from replay so nothing stalls: `uvicorn patchpilot.server:app --port 8000`, dark theme, 1080p, browser zoom 110%.
-Base run: `20261029-113639-job` (authsvc, PyJWT CVE-2022-29217, Super → Ultra, proven closed, 7/8 variants, trust 93).
+Base run: `20261029-153834-job` (authsvc, PyJWT CVE-2022-29217, Nebius Token Factory, live Tavily research, Super → Ultra, green on attempt 2, proven closed, 7/8 variants, trust 85, 110.7 s).
 **[OWNER]** = needs an owner action. Each one has a fallback.
 
 Per-scene durations below add up to 2:00, which leaves 50 s of headroom under a 2:50 cap for pauses or a slower read.
@@ -12,16 +12,16 @@ Per-scene durations below add up to 2:00, which leaves 50 s of headroom under a 
 | 0:10–0:15 (5 s) | Title card: the tagline. | "PatchPilot makes it pass, attacks its own fix, and hands you a proof certificate." |
 | 0:15–0:30 (15 s) | `localhost:8000/console?demo=1`, Find → Prioritize. Threat clock: EPSS, KEV badge, days public. Reachability chip (point at the `llm-inferred` label). | "First: which of these sixteen advisories do attackers actually use, and does your code even reach them?" |
 | 0:30–0:42 (12 s) | Same tab, Predict. The drift radar lists the breaking lines and the least-change version. Trust panel: no attestation on the least-change target. | "Before any test runs, it predicts which lines the upgrade breaks, and it checks whether the release itself can be trusted." |
-| 0:42–0:52 (10 s) | Switch to `localhost:8000/console?replay=20261029-113639-job`. The exploit proof goes **RED** on the old version. | "We prove the vulnerability is real in your code first." |
-| 0:52–1:15 (23 s) | Repair loop: Super's attempts fail, escalation to **Nemotron Ultra**, tests green on attempt 3. Per-tier usage panel. | "Nano triages. Super writes the fix. It fails, so it escalates to Ultra. Green on attempt three." |
+| 0:42–0:52 (10 s) | Switch to `localhost:8000/console?replay=20261029-153834-job`. The exploit proof goes **RED** on the old version. | "We prove the vulnerability is real in your code first." |
+| 0:52–1:15 (23 s) | Repair loop: Super's attempt fails, escalation to **Nemotron Ultra**, tests green on attempt 2. Per-tier usage panel. | "Nano triages. Super writes the fix. It fails, so it escalates to Ultra. Green on attempt two." |
 | 1:15–1:25 (10 s) | Exploit re-run goes **GREEN**. | "Same exploit. Now closed." |
 | 1:25–1:40 (15 s) | Red-team table: 7/8 blocked, **the one "still open" row highlighted**. | "Then it attacks its own fix, and tells you the one variant still open. No other bot admits that." |
-| 1:40–1:52 (12 s) | **Certificate**: claims ledger, trust 93, SHA-256, OpenVEX download. **[OWNER]** The real PR body with the certificate (needs `GITHUB_TOKEN`). *Fallback:* the `.patch` file and the certificate panel. | "Every claim is checked on its own and hashed into the PR." |
-| 1:52–2:00 (8 s) | Hold on the certificate. Lower third: "3 Nemotron tiers · run 20261029-113639-job · replayable". **[OWNER]** If a Nebius run exists, show `provider: nebius` and its measured time. *Fallback:* say "OpenAI-compatible, Nebius-ready" and **don't** claim a Nebius run. | "Three Nemotron tiers. Measured, recorded, replayable. Not promised." |
+| 1:40–1:52 (12 s) | **Certificate**: claims ledger, trust 85, SHA-256, OpenVEX download. **[OWNER]** The real PR body with the certificate (needs `GITHUB_TOKEN`). *Fallback:* the `.patch` file and the certificate panel. | "Every claim is checked on its own and hashed into the PR." |
+| 1:52–2:00 (8 s) | Hold on the certificate. Lower third: "3 Nemotron tiers on Nebius Token Factory · run 20261029-153834-job · 110.7 s · replayable". | "Three Nemotron tiers. Measured, recorded, replayable. Not promised." |
 
 Total: 2:00 (10+5+15+12+10+23+10+15+12+8 = 120 s). Do not let any overrun push the cut past 2:50.
 
 ## Rules
-- Only measured numbers on screen: 16 advisories, attempt 3, 7/8, trust 93, 723 s (don't show the runtime unless a faster run is measured).
-- Don't show speed claims until an end-to-end run after the speed work is recorded.
+- Only measured numbers on screen (from `demo-runs/batch-summary.json`): 16 advisories, attempt 2, 7/8, trust 85, 110.7 s for this run; 6/6 green on Token Factory, 528.6 s for all six.
+- Five of the six shipped runs include live Tavily research; the sanitizer run (`20261029-153214-job`) was recorded without Tavily, so don't use it for the research shot.
 - If the guided demo doesn't end on the certificate yet (ui-2 issue), cut to `/console?replay=...` for the last 20 s.
