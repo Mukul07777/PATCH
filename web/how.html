@@ -27,6 +27,7 @@
 
 <div class="wrap">
   <div class="arch">
+    <h2 class="sr-only">Pipeline stages</h2>
     <div class="astep rv" data-css="--c:var(--muted)"><div class="num" aria-hidden="true">🔌</div><div class="body"><h3>Connect</h3><p>Resolves the Nemotron model for each tier from the provider's <code>/models</code> catalog, or uses the ones pinned with <code>MODEL_*</code>.</p></div></div>
     <div class="astep rv"><div class="num" aria-hidden="true">📦</div><div class="body"><h3>Check out</h3><p>Copies a demo case or clones a public GitHub repo with a pinned <code>requirements.txt</code> and a pytest suite.</p></div></div>
     <div class="astep rv" data-css="--c:var(--bad)"><div class="num" aria-hidden="true">🛰️</div><div class="body"><h3>Scan <span class="chip chip-bad">OSV.dev</span></h3><p>Every pinned package is queried against the open-source vulnerability database for real CVEs and GHSAs.</p></div></div>

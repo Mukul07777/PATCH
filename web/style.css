@@ -161,13 +161,13 @@ select option { background: #11161c; color: #eef3f7; }
 .pkg { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 14px; overflow: hidden; animation: in .3s ease; }
 .pkg-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface-2); flex-wrap: wrap; }
 .pkg-head b { font-family: var(--mono); font-size: 15px; }
-.pkg-head .ver { font-family: var(--mono); color: var(--bad); text-decoration: line-through; opacity: .8; }
+.pkg-head .ver { font-family: var(--mono); color: var(--bad); text-decoration: line-through; }
 .pkg-head .to { font-family: var(--mono); color: var(--ok); font-weight: 700; }
 .adv { display: grid; grid-template-columns: 86px 160px 1fr auto; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--line); align-items: start; font-size: 13px; }
 .adv a { font-family: var(--mono); font-size: 12px; text-decoration: none; }
 .adv .verdict { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .sev { font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 3px 8px; border-radius: 6px; text-align: center; }
-.sev.CRITICAL { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); box-shadow: 0 0 14px -4px var(--bad); }
+.sev.CRITICAL { background: color-mix(in srgb, var(--bad) 22%, transparent); color: #ff6b84; box-shadow: 0 0 14px -4px var(--bad); }
 .sev.HIGH { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 .sev.MODERATE, .sev.MEDIUM { background: color-mix(in srgb, var(--info) 18%, transparent); color: var(--info); }
 .sev.LOW, .sev.NA { background: var(--surface-2); color: var(--muted); }
@@ -404,7 +404,7 @@ body.demo .launch { display: none; }
 .tr-pkg { padding: 12px 0; border-top: 1px solid var(--line); }
 .tr-pkg:first-of-type { border-top: 0; padding-top: 0; }
 .tr-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 10px; min-width: 0; }
-.tr-head .ver { font-family: var(--mono); color: var(--bad); text-decoration: line-through; opacity: .8; }
+.tr-head .ver { font-family: var(--mono); color: var(--bad); text-decoration: line-through; }
 .tr-head .to { font-family: var(--mono); color: var(--ok); font-weight: 700; }
 .tr-repo { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
 .tr-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

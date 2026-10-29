@@ -86,7 +86,7 @@
         ${stat(trusts.length ? Math.round(trusts.reduce((n, r) => n + r.trust, 0) / trusts.length) : "–", "Avg certificate trust")}
       </div>
       ${variants ? `<p class="muted mb-14">Red team: <b class="c-text">${blocked}/${variants}</b> attack variants blocked after the fix.</p>` : ""}
-      <table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Advisories</th><th>Attempts</th><th>Exploit</th><th>Trust</th><th>Time</th><th>Tokens</th><th></th></tr></thead><tbody>
+      <table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Advisories</th><th>Attempts</th><th>Exploit</th><th>Trust</th><th>Time</th><th>Tokens</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>
       ${rows.map((r) => `<tr><td><code>${esc(r.repo)}</code></td><td>${r.ok ? '<span class="status ok">green</span>' : '<span class="status bad">review</span>'}</td>
       <td class="num">${r.advisories ?? "–"}</td><td class="num">${r.attempts ?? "–"}</td>
       <td>${r.exploit ? `<span class="status ${r.exploit === "proven closed" ? "ok" : "na"}">${esc(r.exploit)}</span>` : '<span class="muted">–</span>'}</td>

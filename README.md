@@ -147,7 +147,7 @@ Fast, offline unit tests for the agent itself (drift radar, OSV version math, JS
 risk score and trust ledger). No network, no LLM calls:
 
 ```bash
-pip install pytest
+pip install -r requirements.txt -r requirements-dev.txt
 .venv/Scripts/python.exe -m pytest -q
 ```
 
