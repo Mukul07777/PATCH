@@ -15,7 +15,7 @@ The owner (Mukul) is away. The manager (main Claude session) runs one **cycle** 
 
 ## One cycle
 1. Read `LOG.md` (last entries), `BACKLOG.md`, `SCORECARD.md`.
-2. If a builder is still running, do not start another (one builder at a time; it owns code files).
+2. At most one builder per file area at a time: a backend builder (patchpilot/, tests/, cases/) and a UI builder (web/) may run in parallel.
 3. Launch in parallel as needed: researcher (always, new angle each time), UI/UX researcher (every other cycle), feasibility reviewer (when new research landed), scorer (after a build lands).
 4. When the backlog has a ready item and no builder runs: launch the builder on the top item.
 5. When an agent finishes: check its claims (run tests, read the diff), then commit and push to origin main.
