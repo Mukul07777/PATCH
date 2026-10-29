@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, drift, exploits, reach, sources
+from . import config, drift, exploits, reach, sources, vex
 from .llm import Router
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -194,6 +194,13 @@ class Agent:
         self._emit({"type": "risk", **self._risk(diff, plan, attempts, ok, exploit)})
         ledger = self._ledger(findings, plan, ok, base_summary, summary, exploit, mutations, diff)
         self._emit({"type": "ledger", **ledger})
+        try:
+            doc = vex.build(self.run_id, findings, plan, self.reach, getattr(self, "remaining", []), ok, ledger, exploit)
+            self._emit({"type": "vex", "document": doc})
+            (config.WORK_DIR / self.run_id).mkdir(parents=True, exist_ok=True)
+            (config.WORK_DIR / self.run_id / "openvex.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        except Exception as e:
+            self.log(f"OpenVEX export skipped: {e}", "pr")
         report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary, exploit, ledger)
         self._emit({"type": "report", "markdown": report})
         pr = None
@@ -580,6 +587,7 @@ class Agent:
                               if (u["package"].lower(), v["cve"] or v["id"]) in original]
             except Exception:
                 remaining.append(f"{u['package']}: OSV re-scan failed")
+        self.remaining = remaining
         add("All reported advisories resolved", "unverified" if remaining else "verified",
             f"OSV re-scan of new pins still lists: {', '.join(remaining)}" if remaining
             else f"OSV re-scan of {len(plan['upgrades'])} upgraded package(s): 0 of {len(original)} advisories remain")

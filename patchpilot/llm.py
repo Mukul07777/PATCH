@@ -13,7 +13,8 @@ import httpx
 
 from . import config
 
-TIER_HINTS = {"nano": "nano", "super": "super", "ultra": "ultra"}
+# id substrings per tier; Nebius names its Nano-class tier "Lightning", others use "mini"
+TIER_HINTS = {"nano": ("nano", "lightning", "mini"), "super": ("super",), "ultra": ("ultra",)}
 
 
 class LLMError(RuntimeError):
@@ -43,7 +44,7 @@ class Router:
         for tier, hint in TIER_HINTS.items():
             if self.models[tier]:
                 continue
-            match = [i for i in nemotron if hint in i.lower()]
+            match = [i for i in nemotron if any(h in i.lower() for h in hint)]
             # prefer instruct/non-base variants and the newest-looking id
             match.sort(key=lambda i: ("base" in i.lower(), i), reverse=False)
             if match:

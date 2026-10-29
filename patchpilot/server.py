@@ -157,6 +157,22 @@ async def events(run_id: str, replay: float = 0):
 app.mount("/static", StaticFiles(directory=config.ROOT / "web"), name="static")
 
 
+@app.get("/api/runs/{run_id}/vex")
+def run_vex(run_id: str):
+    evs = RUNS.get(run_id, {}).get("events")
+    if evs is None:
+        if not re.fullmatch(r"[\w.-]+", run_id):
+            raise HTTPException(404, "unknown run")
+        path = config.RUNS_DIR / f"{run_id}.jsonl"
+        if not path.exists():
+            raise HTTPException(404, "unknown run")
+        evs = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    doc = next((e["document"] for e in reversed(evs) if e.get("type") == "vex"), None)
+    if doc is None:
+        raise HTTPException(404, "no OpenVEX document for this run")
+    return doc
+
+
 PAGES = {"": "landing", "console": "console", "app": "console", "runs": "runs", "how": "how", "org": "org"}
 
 

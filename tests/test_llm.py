@@ -19,3 +19,39 @@ def test_parse_json_invalid():
 def test_strip_thinking():
     assert strip_thinking("<think>hmm\nlong</think>  answer ") == "answer"
     assert strip_thinking("plain") == "plain"
+
+
+def test_discover_matches_nebius_ids(monkeypatch):
+    from patchpilot import config, llm
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"id": i} for i in (
+                "meta-llama/Llama-3.3-70B-Instruct", "nvidia/Nemotron-3_5-Lightning",
+                "nvidia/nemotron-3-super-120b-a12b", "nvidia/Nemotron-3-Ultra-550b-a55b")]}
+
+    monkeypatch.setattr(config, "MODEL_OVERRIDES", {"nano": "", "super": "", "ultra": ""})
+    r = llm.Router(lambda e: None)
+    monkeypatch.setattr(r._client, "get", lambda path: Resp())
+    assert r.discover() == {"nano": "nvidia/Nemotron-3_5-Lightning", "super": "nvidia/nemotron-3-super-120b-a12b",
+                            "ultra": "nvidia/Nemotron-3-Ultra-550b-a55b"}
+
+
+def test_discover_mini_hint(monkeypatch):
+    from patchpilot import config, llm
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"id": "nvidia/nemotron-mini-4b-instruct"}, {"id": "nvidia/nemotron-super-49b"}]}
+
+    monkeypatch.setattr(config, "MODEL_OVERRIDES", {"nano": "", "super": "", "ultra": ""})
+    r = llm.Router(lambda e: None)
+    monkeypatch.setattr(r._client, "get", lambda path: Resp())
+    m = r.discover()
+    assert m["nano"] == "nvidia/nemotron-mini-4b-instruct" and m["ultra"] == "nvidia/nemotron-super-49b"

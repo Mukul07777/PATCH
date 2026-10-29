@@ -66,3 +66,8 @@
 ## 2026-10-29 ~13:50 — research round 4 (speed)
 - research-4.md: model calls are 97-98% of wall time (authsvc 723 s: Nano triage 196 s, reranks 83 s, fix loop 413 s). Plan to reach ~55-80 s.
 - SPEED item placed at top of backlog; starts when the OpenVEX builder releases agent.py/llm.py.
+
+## 2026-10-29 ~14:00 — backend build: OpenVEX + Nebius pinning
+- vex.py: OpenVEX v0.2.0 per run (fixed / affected / not_affected only from real static evidence, never llm-inferred); GET /api/runs/{id}/vex. Nebius ids pinned in .env.example (marked verify). 33 tests pass (verified).
+- Note: OpenVEX field validation is from the builder's knowledge, spec page not fetched; flagged for check.
+- Launched SPEED builder (research-4 plan).
