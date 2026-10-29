@@ -1,0 +1,21 @@
+[[package]]
+name = "django"
+version = "3.2.0"
+description = "web"
+optional = false
+python-versions = ">=3.6"
+
+[[package]]
+name = "mylib"
+version = "0.1.0"
+optional = false
+python-versions = "*"
+
+[package.source]
+type = "git"
+url = "https://github.com/acme/mylib.git"
+reference = "HEAD"
+resolved_reference = "abc"
+
+[metadata]
+lock-version = "2.0"

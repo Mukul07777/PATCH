@@ -15,9 +15,9 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
-from . import config, sources
+from . import config, db, manifests, scanner, sources
 from .agent import PIN, Agent
 
 
@@ -44,6 +44,10 @@ _runs_lock = threading.RLock()
 _org_cache = {}  # owner.lower() -> (monotonic time, result)
 RUN_ID = re.compile(r"[\w.-]+")
 REPO = re.compile(r"https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}?(?:\.git)?/?")
+CASE = re.compile(r"case:[\w.-]{1,64}")
+REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")
+MAX_UPLOAD = 200_000  # characters of manifest text per uploaded project
+MAX_ACTIVE_SCANS = 4
 CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
        "img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
@@ -54,13 +58,48 @@ config.RUNS_DIR.mkdir(exist_ok=True)
 
 class RunRequest(BaseModel):
     repo: str = ""
+    project: int | None = Field(None, ge=1)
 
     @field_validator("repo")
     @classmethod
     def _repo(cls, v):
         v = v.strip()
+        if v and (len(v) > 200 or not (REPO.fullmatch(v) or CASE.fullmatch(v))):
+            raise ValueError("repo must be https://github.com/owner/repo or case:<sample>")
+        return v
+
+
+class ProjectRequest(BaseModel):
+    """Exactly one source: a GitHub URL (+ optional ref), an uploaded manifest, or a local path."""
+    name: str = Field("", max_length=100)
+    git_url: str = ""
+    ref: str = ""
+    filename: str = ""
+    content: str = Field("", max_length=MAX_UPLOAD)
+    path: str = Field("", max_length=500)
+
+    @field_validator("git_url")
+    @classmethod
+    def _git(cls, v):
+        v = v.strip()
         if v and (len(v) > 200 or not REPO.fullmatch(v)):
-            raise ValueError("repo must be empty or https://github.com/owner/repo")
+            raise ValueError("git_url must be https://github.com/owner/repo")
+        return v.rstrip("/").removesuffix(".git")
+
+    @field_validator("ref")
+    @classmethod
+    def _ref(cls, v):
+        v = v.strip()
+        if v and (not REF.fullmatch(v) or ".." in v):
+            raise ValueError("ref must be a branch, tag or commit name")
+        return v
+
+    @field_validator("filename")
+    @classmethod
+    def _filename(cls, v):
+        v = v.strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if v and (len(v) > 100 or manifests.kind_of(v) is None):
+            raise ValueError("filename must be requirements*.txt, pyproject.toml, poetry.lock, uv.lock or Pipfile.lock")
         return v
 
 
@@ -146,6 +185,10 @@ def _record(run_id):
             with _runs_lock:
                 if run_id in RUNS:
                     RUNS[run_id]["done"] = True
+            try:
+                db.finish_run(run_id, bool(ev.get("ok")), {"error": ev["error"]} if ev.get("error") else None)
+            except Exception:
+                log.warning("could not record end of run %s", run_id, exc_info=True)
     return emit
 
 
@@ -166,8 +209,16 @@ def _run_agent(run_id, repo, emit):
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
+    # model ids are the configured MODEL_* values (None = discovered from the provider catalog at run time)
     return {"nebius": bool(config.NEBIUS_API_KEY), "provider": config.provider_name(), "tavily": bool(config.TAVILY_API_KEY),
-            "github": bool(config.GITHUB_TOKEN), "remote_repos": config.ALLOW_REMOTE_REPOS}
+            "github": bool(config.GITHUB_TOKEN), "remote_repos": config.ALLOW_REMOTE_REPOS,
+            "local_paths": config.ALLOW_LOCAL_PATHS, "fix_mode": bool(config.NEBIUS_API_KEY), "scan_mode": True,
+            "models": {t: (m or None) for t, m in config.MODEL_OVERRIDES.items()}}
+
+
+@app.get("/api/stats")
+def stats():
+    return db.stats()
 
 
 @app.get("/api/cases")
@@ -300,11 +351,31 @@ def _org_reason(rows, capped):
     return None
 
 
+def _fix_target(req):
+    """(repo source for the agent, project id or None). Fix mode needs code to run, so uploads can't be fixed."""
+    if req.project is None:
+        if not req.repo:
+            raise HTTPException(422, "Choose a project (or give a repo URL) to fix")
+        return req.repo, None
+    p = db.get_project(req.project)
+    if p is None:
+        raise HTTPException(404, "Unknown project")
+    if p["source_type"] == "git":
+        return p["source"], p["id"]
+    if p["source_type"] == "sample":
+        return f"case:{p['source']}", p["id"]
+    if p["source_type"] == "upload":
+        raise HTTPException(400, "Uploaded manifests can be scanned but not fixed: the agent needs the code and tests. "
+                                 "Add the project as a GitHub repository to use fix mode")
+    raise HTTPException(400, "Fix mode is not available for local path projects yet")
+
+
 @app.post("/api/runs")
 def start_run(req: RunRequest, request: Request):
     _check_token(request)
     if not config.NEBIUS_API_KEY:
         raise HTTPException(400, "NEBIUS_API_KEY is not configured on the server")
+    repo, project_id = _fix_target(req)
     with _runs_lock:
         if sum(1 for v in RUNS.values() if not v["done"]) >= MAX_ACTIVE_RUNS:
             raise HTTPException(429, "Too many runs in progress; try again shortly")
@@ -315,8 +386,10 @@ def start_run(req: RunRequest, request: Request):
         RUNS[run_id] = {"events": [], "done": False}
     _evict()
     emit = _record(run_id)
-    emit({"type": "start", "repo": req.repo or f"case:{config.DEFAULT_CASE}", "t": 0})
-    threading.Thread(target=_run_agent, args=(run_id, req.repo, emit), daemon=True).start()
+    db.create_scan(project_id, "fix", "running", run_id)
+    db.audit(_ip(request), "run.start", {"run_id": run_id, "project_id": project_id, "repo": repo})
+    emit({"type": "start", "repo": repo, "project": project_id, "t": 0})
+    threading.Thread(target=_run_agent, args=(run_id, repo, emit), daemon=True).start()
     return {"id": run_id}
 
 
@@ -327,6 +400,11 @@ def list_runs():
         for p in d.glob("*.jsonl"):
             if RUN_ID.fullmatch(p.stem):
                 seen.setdefault(p.stem, p)
+    try:
+        projects = db.runs_by_id()
+    except Exception:
+        log.warning("could not read run/project links", exc_info=True)
+        projects = {}
     for p in sorted(seen.values(), key=lambda p: p.stem, reverse=True):
         try:
             evs = _read_events(p)
@@ -337,6 +415,10 @@ def list_runs():
         first, last = evs[0], evs[-1]
         done = last.get("type") == "done"
         row = {"id": p.stem, "repo": first.get("repo"), "ok": last.get("ok") if done else None}
+        if p.parent == config.DEMO_RUNS_DIR:
+            row["sample"] = True  # recorded run shipped with PatchPilot, not one of this server's own runs
+        if projects.get(p.stem):
+            row["project"] = projects[p.stem]
         if done and last.get("ok") is False:
             # failure reason: the done event's error, else the last error event's msg (older recordings),
             # else the final test summary (a run that simply ended with failing tests)
@@ -397,6 +479,127 @@ def run_vex(run_id: str):
     return doc
 
 
+# ---------- projects + scan-only mode ----------
+def _mutate(request, bucket="api"):
+    """Guard for mutating project endpoints: bearer token (if configured) then a per-IP rate limit."""
+    _check_token(request)
+    if not _rate_ok(f"{bucket}:" + _ip(request)):
+        raise HTTPException(429, "Too many requests; try again in a minute")
+
+
+def _spawn(fn, *args):
+    """Background scan worker (tests replace this to run inline)."""
+    threading.Thread(target=fn, args=args, daemon=True, name=f"pp-scan-{args[0]}").start()
+
+
+def _project_or_404(pid):
+    p = db.get_project(pid)
+    if p is None:
+        raise HTTPException(404, "Unknown project")
+    return p
+
+
+@app.post("/api/projects", status_code=201)
+def create_project(req: ProjectRequest, request: Request):
+    given = [k for k, v in (("git", req.git_url), ("upload", req.filename or req.content), ("path", req.path)) if v]
+    if len(given) != 1:
+        raise HTTPException(422, "Give exactly one source: git_url, an uploaded manifest (filename + content), or path")
+    kind = given[0]
+    if kind == "upload":
+        if not req.filename or not req.content.strip():
+            raise HTTPException(422, "An uploaded manifest needs a filename and non-empty content")
+        if len(req.content.encode("utf-8")) > MAX_UPLOAD:
+            raise HTTPException(413, "Manifest is larger than 200 KB")
+        try:
+            deps = manifests.parse(req.filename, req.content)
+        except manifests.ManifestError as e:
+            raise HTTPException(422, str(e))
+        if not deps:
+            raise HTTPException(422, f"No dependencies found in {req.filename}")
+    if kind == "path":
+        if not config.ALLOW_LOCAL_PATHS:
+            raise HTTPException(403, "Local path projects are disabled on this server (ALLOW_LOCAL_PATHS=0)")
+        if not os.path.isabs(req.path) or not os.path.isdir(req.path):
+            raise HTTPException(422, "path must be an absolute path to an existing directory")
+    _mutate(request)
+    source = {"git": req.git_url, "upload": req.filename, "path": req.path}[kind]
+    default = {"git": req.git_url.removeprefix("https://github.com/"), "upload": req.filename,
+               "path": os.path.basename(req.path.rstrip("/\\")) or req.path}[kind]
+    name = req.name.strip() or default
+    pid = db.create_project(name, kind, source, ref=req.ref or None if kind == "git" else None,
+                            manifest=req.content if kind == "upload" else None)
+    db.audit(_ip(request), "project.create", {"id": pid, "type": kind, "source": source})
+    return db.get_project(pid)
+
+
+@app.post("/api/projects/samples", status_code=201)
+def create_samples(request: Request):
+    """Add the bundled demo cases as sample projects (skipping any already added)."""
+    _mutate(request)
+    try:
+        dirs = sorted(d for d in config.CASES_DIR.iterdir() if (d / "requirements.txt").is_file())
+    except OSError:
+        dirs = []
+    created = []
+    for d in dirs:
+        if db.find_project("sample", d.name) is None:
+            created.append(db.create_project(f"Sample: {d.name}", "sample", d.name))
+    if created:
+        db.audit(_ip(request), "project.samples", {"ids": created})
+    return {"created": created, "projects": db.list_projects()}
+
+
+@app.get("/api/projects")
+def list_projects():
+    return db.list_projects()
+
+
+@app.get("/api/projects/{pid}")
+def get_project(pid: int):
+    return _project_or_404(pid)
+
+
+@app.delete("/api/projects/{pid}", status_code=204)
+def delete_project(pid: int, request: Request):
+    _project_or_404(pid)
+    _mutate(request)
+    db.delete_project(pid)
+    db.audit(_ip(request), "project.delete", {"id": pid})
+
+
+@app.get("/api/projects/{pid}/scans")
+def project_scans(pid: int):
+    _project_or_404(pid)
+    return db.list_scans(pid)
+
+
+@app.post("/api/projects/{pid}/scan", status_code=202)
+def start_scan(pid: int, request: Request):
+    """Scan-only mode: manifests -> OSV/EPSS/KEV/PyPI. Needs no LLM key and never runs repository code,
+    which is why it is allowed for remote repos even when ALLOW_REMOTE_REPOS=0."""
+    _project_or_404(pid)
+    running = db.active_scan(pid)
+    if running:
+        return {"id": running, "status": "running"}
+    _check_token(request)
+    busy = sum(1 for t in threading.enumerate() if t.name.startswith("pp-scan-"))
+    if busy >= MAX_ACTIVE_SCANS:
+        raise HTTPException(429, "Too many scans in progress; try again shortly")
+    _mutate(request, "scan")
+    sid = db.create_scan(pid, "scan", "queued")
+    db.audit(_ip(request), "scan.start", {"project_id": pid, "scan_id": sid})
+    _spawn(scanner.run_scan, sid, pid)
+    return {"id": sid, "status": "queued"}
+
+
+@app.get("/api/scans/{sid}")
+def get_scan(sid: int):
+    s = db.get_scan(sid)
+    if s is None:
+        raise HTTPException(404, "Unknown scan")
+    return s
+
+
 @app.api_route("/robots.txt", methods=["GET", "HEAD"], include_in_schema=False)
 def robots():
     return PlainTextResponse("User-agent: *\nAllow: /\n", headers={"Cache-Control": "public, max-age=86400"})
@@ -410,7 +613,8 @@ def favicon():
 
 app.mount("/static", CachedStatic(directory=config.ROOT / "web"), name="static")
 
-PAGES = {"": "landing", "console": "console", "app": "console", "runs": "runs", "how": "how", "org": "org"}
+PAGES = {"": "landing", "projects": "projects", "console": "console", "app": "console", "runs": "runs", "how": "how",
+         "org": "org"}
 
 
 @app.api_route("/{page}", methods=["GET", "HEAD"])

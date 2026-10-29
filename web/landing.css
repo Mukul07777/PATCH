@@ -139,3 +139,9 @@ body { background: #050505; color: #f2f2f0; }
 @media (prefers-reduced-motion: reduce) {
   .stage .word span, .corner, .ed .art i, .scroll-cue { animation: none !important; }
 }
+
+/* ---------- how it works (replaces the old scripted terminal) ---------- */
+.how-steps ol { margin: 0 0 28px; padding-left: 1.4em; color: #c8c8c4; display: grid; gap: 16px; font-size: 15px; max-width: 52ch; }
+.how-steps b { color: #f2f2f0; }
+.ed-model { font: 12px var(--mono); color: #8a8a86; margin: -4px 0 10px; overflow-wrap: anywhere; }
+.stats-note a { color: #f2f2f0; }

@@ -34,7 +34,7 @@ def run_one(repo):
         elif ev["type"] == "ledger":
             result["trust"] = ev.get("trust")
 
-    emit({"type": "start", "repo": repo or f"case:{config.DEFAULT_CASE}", "t": 0})
+    emit({"type": "start", "repo": repo, "t": 0})
     Agent(run_id, repo, emit).run()
     return {"repo": repo, "run": run_id, "ok": result.get("ok"), "attempts": result.get("attempts"),
             "seconds": result.get("seconds"), "usage": result.get("usage"), "advisories": result.get("advisories"),

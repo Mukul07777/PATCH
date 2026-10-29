@@ -1,0 +1,10 @@
+[project]
+name = "demo"
+version = "0.1.0"
+dependencies = ["PyJWT==1.7.1", "requests>=2.0", "click (==8.0.0)", "pywin32==306; sys_platform == 'win32'"]
+
+[project.optional-dependencies]
+dev = ["pytest==7.0.0"]
+
+[dependency-groups]
+lint = ["ruff"]

@@ -108,15 +108,15 @@ def no_agent(monkeypatch):
 def test_token_auth(no_agent, monkeypatch):
     monkeypatch.setenv("PATCHPILOT_TOKEN", "t0k")
     c = TestClient(server.app)
-    assert c.post("/api/runs", json={}).status_code == 401
-    assert c.post("/api/runs", json={}, headers={"Authorization": "Bearer nope"}).status_code == 401
-    assert c.post("/api/runs", json={}, headers={"Authorization": "Bearer t0k"}).status_code == 200
+    assert c.post("/api/runs", json={"repo": "case:x"}).status_code == 401
+    assert c.post("/api/runs", json={"repo": "case:x"}, headers={"Authorization": "Bearer nope"}).status_code == 401
+    assert c.post("/api/runs", json={"repo": "case:x"}, headers={"Authorization": "Bearer t0k"}).status_code == 200
 
 
 def test_rate_limit(no_agent, monkeypatch):
     monkeypatch.delenv("PATCHPILOT_TOKEN", raising=False)
     c = TestClient(server.app)
-    codes = [c.post("/api/runs", json={}).status_code for _ in range(server.RATE_LIMIT + 1)]
+    codes = [c.post("/api/runs", json={"repo": "case:x"}).status_code for _ in range(server.RATE_LIMIT + 1)]
     assert codes[:-1] == [200] * server.RATE_LIMIT and codes[-1] == 429
 
 

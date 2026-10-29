@@ -124,17 +124,17 @@ def fake_agent(monkeypatch, tmp_path):
 def test_missing_key_or_auth_does_not_consume_rate_limit(fake_agent, monkeypatch, client):
     monkeypatch.setattr(config, "NEBIUS_API_KEY", "")
     for _ in range(server.RATE_LIMIT + 2):
-        assert client.post("/api/runs", json={}).status_code == 400
+        assert client.post("/api/runs", json={"repo": "case:x"}).status_code == 400
     monkeypatch.setenv("PATCHPILOT_TOKEN", "t")
     for _ in range(server.RATE_LIMIT + 2):
-        assert client.post("/api/runs", json={}).status_code == 401
+        assert client.post("/api/runs", json={"repo": "case:x"}).status_code == 401
     assert not server._hits.get("testclient")
 
 
 def test_active_run_cap(fake_agent, monkeypatch, client):
     monkeypatch.setattr(config, "NEBIUS_API_KEY", "k")
     monkeypatch.setattr(server, "MAX_ACTIVE_RUNS", 2)
-    codes = [client.post("/api/runs", json={}).status_code for _ in range(3)]
+    codes = [client.post("/api/runs", json={"repo": "case:x"}).status_code for _ in range(3)]
     assert codes == [200, 200, 429]
 
 
@@ -222,7 +222,7 @@ def test_cases_utf8_and_missing_dir(client, monkeypatch, tmp_path):
 
 
 # ---------- 13 / 20 / 35: pages, HEAD, gzip, static caching ----------
-@pytest.mark.parametrize("url", ["/", "/console", "/app", "/runs", "/how", "/org"])
+@pytest.mark.parametrize("url", ["/", "/projects", "/console", "/app", "/runs", "/how", "/org"])
 def test_pages_get_and_head(client, url):
     assert client.get(url).status_code == 200
     assert client.head(url).status_code == 200

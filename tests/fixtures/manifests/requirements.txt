@@ -1,0 +1,14 @@
+# pinned app deps
+-r base.txt
+-c constraints.txt
+--index-url https://pypi.org/simple
+-e git+https://github.com/acme/lib.git#egg=lib
+Jinja2==2.10  # templating
+requests[socks]==2.19.0 ; python_version >= "3.8"
+flask>=2.0,<3
+urllib3 == 1.24.1 \
+    --hash=sha256:abc
+git+https://github.com/acme/other.git
+pkg @ https://example.com/pkg.whl
+numpy===1.26.0
+

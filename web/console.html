@@ -47,13 +47,13 @@
   </section>
 
   <section class="launch card glass">
-    <div class="cases" id="cases" role="radiogroup" aria-label="Target"></div>
+    <p class="target" id="target" aria-live="polite">Loading…</p>
     <form id="runForm" class="launch-row">
       <label for="repo" class="sr-only">Public GitHub repository URL</label>
-      <input id="repo" name="repo" placeholder="…or paste a public GitHub repo URL (pinned requirements.txt + pytest)" autocomplete="off">
+      <input id="repo" name="repo" placeholder="…or paste a public GitHub repo URL to fix directly (pinned requirements.txt + pytest)" autocomplete="off">
       <button class="btn-run" id="runBtn" type="submit"><span>Launch agent</span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </form>
-    <p class="hint" id="remoteOff" hidden>Remote repos are disabled on this public demo. Pick a case above.</p>
+    <p class="hint" id="remoteOff" hidden>This server does not run remote repositories (ALLOW_REMOTE_REPOS=0), so fix mode is limited to sample projects. Scanning any GitHub repo still works on the <a href="/projects">Projects</a> page.</p>
     <p class="hint no-key" id="noKey" hidden>Server has no NEBIUS_API_KEY, so live runs are off. <a href="#history" id="noKeyLink">Replay a recorded run below</a> or try the <a href="/console?demo=1">guided demo</a>.</p>
     <div class="launch-row small">
       <select id="history" aria-label="Recorded runs"><option value="">▶ Replay a recorded run…</option></select>

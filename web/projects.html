@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PatchPilot Projects</title>
+<meta name="description" content="Add your Python project, scan its dependencies against OSV.dev, and fix vulnerable pins with the PatchPilot agent.">
+<meta property="og:title" content="PatchPilot Projects">
+<meta property="og:description" content="Add your Python project, scan its dependencies against OSV.dev, and fix vulnerable pins with the PatchPilot agent.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-glow" aria-hidden="true"></div>
+<header class="topbar"></header>
+
+<main id="main">
+<div class="page-head"><span class="kicker">Projects</span><h1>Your dependencies, checked.</h1><p>Add a GitHub repository or upload a manifest. Scanning reads your dependency files and checks every pinned version against OSV.dev. It needs no API key and never runs your code.</p></div>
+
+<div class="wrap">
+  <div id="status" class="pj-status" role="status" aria-live="polite"></div>
+
+  <section id="listView" aria-labelledby="listTitle">
+    <div class="filters pj-bar"><h2 id="listTitle">Projects</h2><button type="button" class="btn ghost sm" id="samplesBtn">Add sample projects</button></div>
+    <div id="projects" class="pj-grid"><div class="empty span-all">Loading projects…</div></div>
+
+    <div class="filters"><h2 id="newTitle">New project</h2></div>
+    <form id="newForm" class="card glass pj-form" aria-labelledby="newTitle" novalidate>
+      <fieldset class="pj-modes">
+        <legend>Source</legend>
+        <label><input type="radio" name="mode" value="git" checked> GitHub repository</label>
+        <label><input type="radio" name="mode" value="upload"> Manifest file</label>
+      </fieldset>
+      <div id="gitFields" class="pj-fields">
+        <label for="gitUrl">Repository URL</label>
+        <input id="gitUrl" name="git_url" placeholder="https://github.com/owner/repo" autocomplete="off" inputmode="url">
+        <label for="gitRef">Branch, tag or commit <span class="muted">(optional)</span></label>
+        <input id="gitRef" name="ref" placeholder="main" autocomplete="off">
+      </div>
+      <div id="uploadFields" class="pj-fields" hidden>
+        <label for="file">Choose a file <span class="muted">(requirements.txt, pyproject.toml, poetry.lock, uv.lock or Pipfile.lock, max 200 KB)</span></label>
+        <input id="file" type="file" accept=".txt,.toml,.lock,.in">
+        <label for="filename">File name</label>
+        <input id="filename" name="filename" value="requirements.txt" autocomplete="off">
+        <label for="content">…or paste its contents</label>
+        <textarea id="content" name="content" rows="7" spellcheck="false" placeholder="jinja2==2.10&#10;requests==2.19.0"></textarea>
+      </div>
+      <label for="pname">Name <span class="muted">(optional)</span></label>
+      <input id="pname" name="name" maxlength="100" autocomplete="off">
+      <p class="pj-err" id="formErr" role="alert" hidden></p>
+      <div class="pj-actions"><button class="btn-cta" type="submit" id="createBtn">Add and scan</button></div>
+    </form>
+  </section>
+
+  <section id="detailView" hidden aria-labelledby="pjTitle">
+    <p><a href="/projects" id="backLink">← All projects</a></p>
+    <div class="card glass pj-head">
+      <div><h2 id="pjTitle">Project</h2><p class="muted pj-src" id="pjSrc"></p></div>
+      <div class="pj-actions">
+        <button type="button" class="btn-cta" id="scanBtn">Scan now</button>
+        <a class="btn ghost no-underline" id="fixBtn" href="#" aria-describedby="fixWhy">Fix with agent</a>
+        <button type="button" class="btn ghost" id="deleteBtn">Delete</button>
+      </div>
+      <p class="hint" id="fixWhy"></p>
+    </div>
+    <div class="summary" id="pjCounts"></div>
+    <div class="filters"><h2 id="findingsTitle">Findings</h2></div>
+    <div id="findings" class="card glass"><div class="empty">No scan yet.</div></div>
+    <div class="filters"><h2>Scan history</h2></div>
+    <div id="history" class="card glass"><div class="empty">No scans yet.</div></div>
+  </section>
+</div>
+</main>
+
+<footer class="foot" data-site-foot></footer>
+<script src="/static/site.js"></script>
+<script src="/static/projects.js"></script>
+</body>
+</html>

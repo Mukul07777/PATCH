@@ -260,9 +260,9 @@ class Agent:
             subprocess.run(["git", "clone", "--depth", "1", src, str(self.work)], check=True,
                            capture_output=True, text=True)
         else:
-            name = src.removeprefix("case:") or config.DEFAULT_CASE
+            name = src.removeprefix("case:")
             path = config.CASES_DIR / name
-            if not (path.is_dir() and path.parent == config.CASES_DIR):
+            if not name or not (path.is_dir() and path.parent == config.CASES_DIR):
                 raise RuntimeError(f"Unknown case '{name}'. Use a bundled case or a https:// GitHub URL")
             shutil.copytree(path, self.work, ignore=shutil.ignore_patterns(".git", "__pycache__", ".pytest_cache", "*venv*"))
             subprocess.run(["git", "init", "-q"], cwd=self.work)

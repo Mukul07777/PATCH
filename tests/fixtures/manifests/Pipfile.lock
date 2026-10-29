@@ -1,0 +1,10 @@
+{
+  "_meta": {"hash": {"sha256": "x"}},
+  "default": {
+    "jinja2": {"hashes": [], "version": "==2.10"},
+    "editable-pkg": {"editable": true, "path": "."}
+  },
+  "develop": {
+    "pytest": {"version": "==7.0.0"}
+  }
+}

@@ -2,14 +2,26 @@ const $ = (s) => document.querySelector(s);
 const esc = window.ppEsc;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const STEPS = [
-  ["models", "Connect · Nemotron"], ["checkout", "Check out repo"], ["scan", "Scan · OSV.dev"],
-  ["triage", "Triage · Nemotron Nano"], ["research", "Research via Tavily"], ["plan", "Plan · Nemotron Super"],
-  ["exploit", "Exploit proof"], ["redteam", "Red-team variants"], ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
-];
+// Stage labels name the model behind each tier: configured MODEL_* ids from /api/health, then the ids a run reports.
 const TIERS = ["nano", "super", "ultra"];
+const modelNames = { nano: "Nano tier", super: "Super tier", ultra: "Ultra tier" };
+const shortModel = (id) => String(id || "").split("/").pop().replace(/:free$/, "");
+const STEPS = [
+  ["models", () => "Connect · LLM provider"], ["checkout", () => "Check out repo"], ["scan", () => "Scan · OSV.dev"],
+  ["triage", () => `Triage · ${modelNames.nano}`], ["research", () => "Research via Tavily"], ["plan", () => `Plan · ${modelNames.super}`],
+  ["exploit", () => "Exploit proof"], ["redteam", () => "Red-team variants"], ["test", () => "Upgrade & test"],
+  ["fix", () => `Repair · ${modelNames.super} → ${modelNames.ultra}`], ["pr", () => "Pull request"],
+];
 const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
-let state, source, selectedCase = "", noLLM = false;  // noLLM: server has no NEBIUS_API_KEY, so only replays work
+let state, source, target = null, noLLM = false;  // target: {project} or {repo} to fix; noLLM: no NEBIUS_API_KEY, only replays
+function setModelNames(models) {
+  let changed = false;
+  TIERS.forEach((t) => { if (models && models[t]) { modelNames[t] = shortModel(models[t]); changed = true; } });
+  if (!changed) return;
+  STEPS.forEach(([k, label]) => { const d = document.querySelector(`#s-${k} > div`); if (d && d.firstChild) d.firstChild.nodeValue = label(); });
+  TIERS.forEach((t) => { const tx = document.querySelector(`#n-${t} text:not(.sub)`); if (tx) tx.textContent = graphLabel(t); });
+}
+const graphLabel = (t) => (modelNames[t].length > 19 ? modelNames[t].slice(0, 18) + "…" : modelNames[t]);
 
 // ---------- tabs ----------
 const TAB_BTNS = [...document.querySelectorAll(".tab[data-tab]")];
@@ -40,11 +52,11 @@ function showTab(name) {
 const NODES = {
   repo:    { x: 70,  y: 125, label: "Repository", sub: "requirements.txt", c: "--muted" },
   osv:     { x: 215, y: 55,  label: "OSV.dev", sub: "advisories", c: "--bad" },
-  nano:    { x: 370, y: 55,  label: "Nemotron Nano", sub: "triage", c: "--nano" },
+  nano:    { x: 370, y: 55,  get label() { return graphLabel("nano"); }, sub: "triage", c: "--nano" },
   tavily:  { x: 290, y: 195, label: "Tavily", sub: "migration research", c: "--tavily" },
-  super:   { x: 520, y: 125, label: "Nemotron Super", sub: "plan + repair", c: "--super" },
+  super:   { x: 520, y: 125, get label() { return graphLabel("super"); }, sub: "plan + repair", c: "--super" },
   sandbox: { x: 690, y: 125, label: "Sandbox", sub: "venv + pytest", c: "--info" },
-  ultra:   { x: 690, y: 210, label: "Nemotron Ultra", sub: "escalation", c: "--ultra" },
+  ultra:   { x: 690, y: 210, get label() { return graphLabel("ultra"); }, sub: "escalation", c: "--ultra" },
   pr:      { x: 870, y: 125, label: "Pull request", sub: "verified", c: "--ok" },
 };
 const EDGES = [
@@ -67,7 +79,7 @@ function buildGraph() {
     <g class="node" id="n-${k}" data-css="--c:var(${n.c})" transform="translate(${n.x - NW / 2},${n.y - NH / 2})">
       <rect class="halo" width="${NW}" height="${NH}" rx="12"/>
       <rect width="${NW}" height="${NH}" rx="12"/>
-      <text x="${NW / 2}" y="20">${n.label}</text>
+      <text x="${NW / 2}" y="20">${esc(n.label)}</text>
       <text class="sub" x="${NW / 2}" y="35">${n.sub}</text>
     </g>`).join("");
   g.innerHTML = `<g id="edges">${edges}</g><g id="packets"></g>${nodes}`;
@@ -101,42 +113,23 @@ function phase(t) { $("#phase").textContent = t; }
 
 // ---------- boot ----------
 async function boot() {
-  buildGraph();
-  const [h, cases, runs] = await Promise.all([
+  const [h, runs] = await Promise.all([
     window.ppHealth,
-    fetch("/api/cases").then((r) => r.json()).catch(() => []),
     fetch("/api/runs").then((r) => r.json()).catch(() => []),
   ]);
+  setModelNames(h && h.models);
+  buildGraph();
   if (h && h.nebius === false) {
     noLLM = true; $("#runBtn").disabled = true; $("#runBtn").setAttribute("aria-describedby", "noKey"); $("#noKey").hidden = false;
   }
-  if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Pick a case above"; $("#remoteOff").hidden = false; }
-  const caseList = Array.isArray(cases) ? cases : [], runList = Array.isArray(runs) ? runs : [];
-  $("#cases").innerHTML = caseList.map((c, i) => `<button type="button" class="case ${i === 0 ? "active" : ""}" data-id="${esc(c.id)}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}">
-    <b>case:${esc(c.id)}</b><small>${(c.pins || []).map(esc).join(" · ")}</small></button>`).join("");
-  selectedCase = caseList[0] ? "case:" + caseList[0].id : "";
-  const caseBtns = [...document.querySelectorAll(".case")];
-  const pickCase = (b) => {
-    caseBtns.forEach((x) => { const on = x === b; x.classList.toggle("active", on); x.setAttribute("aria-checked", String(on)); x.tabIndex = on ? 0 : -1; });
-    selectedCase = "case:" + b.dataset.id; $("#repo").value = "";
-  };
-  caseBtns.forEach((b, i) => {
-    b.addEventListener("click", () => pickCase(b));
-    b.addEventListener("keydown", (e) => {
-      const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
-      if (!d) return;
-      e.preventDefault();
-      const nb = caseBtns[(i + d + caseBtns.length) % caseBtns.length]; pickCase(nb); nb.focus();
-    });
-  });
+  if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Remote repos are off on this server"; $("#remoteOff").hidden = false; }
+  const runList = Array.isArray(runs) ? runs : [];
   $("#history").innerHTML = '<option value="">▶ Replay a recorded run…</option>' +
-    runList.map((r) => `<option value="${esc(r.id)}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${esc(r.repo)} · ${esc(r.id)}</option>`).join("");
+    runList.map((r) => `<option value="${esc(r.id)}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${r.sample ? "Sample · " : ""}${esc(r.repo)} · ${esc(r.id)}</option>`).join("");
   reset();
   const qs = new URLSearchParams(location.search), replay = qs.get("replay");
-  if (qs.get("repo") && !$("#repo").disabled) {
-    $("#repo").value = qs.get("repo");
-    caseBtns.forEach((x) => { x.classList.remove("active"); x.setAttribute("aria-checked", "false"); });
-  }
+  await setTarget(qs.get("project"));
+  if (qs.get("repo") && !$("#repo").disabled && !target) $("#repo").value = qs.get("repo");
   if (replay) listen(replay, 4);
   else if (!userStarted) {
     const best = await pickBestRun(runList);
@@ -207,7 +200,7 @@ if ($("#demoBtn")) $("#demoBtn").onclick = (e) => {
 function reset() {
   state = { runId: null, trust: null, vex: null, guard: [], threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
-  $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${esc(t)}<small></small></div></li>`).join("");
+  $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${esc(t())}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
   ["adv", "tests", "att", "tok", "time"].forEach((k) => ($("#k-" + k).textContent = "–"));
   $("#term").innerHTML = "";
@@ -234,21 +227,34 @@ function reset() {
 $("#runForm").onsubmit = async (e) => {
   e.preventDefault();
   userStarted = true; if (source) source.close(); setReplayBadge(false); stopDemo();
-  const repo = $("#repo").value.trim() || selectedCase;
-  const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo }) });
+  const repo = $("#repo").value.trim();
+  const body = repo ? { repo } : target && target.project ? { project: target.project } : null;
+  if (!body) return banner('Choose a project to fix first: open <a href="/projects">Projects</a> and press <b>Fix with agent</b>.', false);
+  const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) return banner(esc((await r.json().catch(() => ({}))).detail || "Could not start run"), false);
   listen((await r.json()).id, 0);
 };
 $("#noKeyLink").onclick = (e) => { e.preventDefault(); $("#history").focus(); };
 $("#replayBtn").onclick = () => { const id = $("#history").value; if (id) { userStarted = true; stopDemo(); listen(id, 4); } };
 
-// highlight the case card that matches a run's repo (replays), without touching a typed URL
-function syncCase(repo) {
-  const m = /^case:(.+)$/.exec(repo || ""), btns = [...document.querySelectorAll(".case")];
-  const hit = m && btns.find((x) => x.dataset.id === m[1]);
-  if (!hit) return;
-  btns.forEach((x) => { const on = x === hit; x.classList.toggle("active", on); x.setAttribute("aria-checked", String(on)); x.tabIndex = on ? 0 : -1; });
-  selectedCase = repo;
+// The fix target: a project from /projects (?project=<id>) or, when remote repos are on, a pasted GitHub URL.
+async function setTarget(pid) {
+  const box = $("#target");
+  target = null;
+  if (!pid || !/^\d+$/.test(pid)) {
+    box.innerHTML = 'Pick what to fix on the <a href="/projects">Projects</a> page (or add the sample projects there), then press <b>Fix with agent</b>.';
+    return;
+  }
+  const p = await fetch(`/api/projects/${pid}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!p) { box.innerHTML = 'That project no longer exists. <a href="/projects">Back to projects</a>.'; return; }
+  const name = `<b>${esc(p.name)}</b> <span class="muted">${esc(p.source_type === "sample" ? "sample project" : p.source)}</span>`;
+  if (p.source_type === "upload" || p.source_type === "path") {
+    box.innerHTML = `${name}<br>${p.source_type === "upload" ? "Uploaded manifests can be scanned but not fixed: the agent needs your code and tests to verify a fix. Add the project as a GitHub repository instead." : "Fix mode is not available for local path projects yet."} <a href="/projects?id=${p.id}">View its scan results</a>.`;
+    $("#runBtn").disabled = true;
+    return;
+  }
+  target = { project: p.id };
+  box.innerHTML = `Fixing ${name} · <a href="/projects?id=${p.id}">project page</a>`;
 }
 
 // provider pill: live runs show the configured host; replays show the host the recorded run used
@@ -298,7 +304,6 @@ function listen(id, replay, opts = {}) {
   src.addEventListener("message", (m) => {
     let ev; try { ev = JSON.parse(m.data); } catch { return; }
     if (ev.type === "done") finished = true;
-    if (ev.type === "start" && replay) syncCase(ev.repo);
     if (replay && (ev.provider || (ev.type === "step" && ev.key === "models" && ev.detail)))
       setProviderPill(replay, ev.provider || (runProvider ? "" : providerFromModels(ev.detail)));
     queue.push(ev); pump();
@@ -362,7 +367,7 @@ function onStep(ev) {
   li.querySelector(".dot").textContent = ev.status === "done" ? "✓" : ev.status === "failed" ? "!" : "";
   if (ev.status === "done" && ev.t != null) li.querySelector("small").textContent = fmtTime(ev.t);
   if (ev.status === "running") { phase(ev.title || ev.key); term("sys", `▸ ${ev.title || ev.key}`, ev.t); }
-  if (ev.key === "models" && ev.detail) { TIERS.forEach((t) => (state.usage[t].model = ev.detail[t] || "")); renderRouting();
+  if (ev.key === "models" && ev.detail) { TIERS.forEach((t) => (state.usage[t].model = ev.detail[t] || "")); renderRouting(); setModelNames(ev.detail);
     TIERS.forEach((t) => term(t, `${t.padEnd(5)} → ${ev.detail[t]}`)); }
   if (ev.key === "scan" && ev.status === "running") { node("osv", "active"); pulse("repo", "osv", "var(--bad)"); }
   if (ev.key === "test" && ev.status === "running") { node("sandbox", "active"); pulse("super", "sandbox"); }

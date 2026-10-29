@@ -51,9 +51,13 @@ RUNS_DIR = ROOT / "runs"
 DEMO_RUNS_DIR = ROOT / "demo-runs"
 WORK_DIR = RUNS_DIR / "work"
 CASES_DIR = ROOT / "cases"
-DEFAULT_CASE = "authsvc"
-# Public deployments should keep this off: remote repos run arbitrary test code on the server
+# SQLite store for projects, scans, findings and the audit log (JSONL files stay the per-run event log)
+DB_PATH = Path(os.getenv("PATCHPILOT_DB", "") or RUNS_DIR / "patchpilot.db")
+# Public deployments should keep this off: remote repos run arbitrary test code on the server.
+# It gates fix mode only; scan-only mode never executes repo code, so it may read remote manifests regardless.
 ALLOW_REMOTE_REPOS = os.getenv("ALLOW_REMOTE_REPOS", "0") == "1"
+# Projects that point at a directory on the server's filesystem (self-hosted use only)
+ALLOW_LOCAL_PATHS = os.getenv("ALLOW_LOCAL_PATHS", "0") == "1"
 
 
 def provider_name(base_url=None):

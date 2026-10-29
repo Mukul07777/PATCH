@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="/static/landing.css">
 </head>
 <body class="ink">
-<nav class="utility" aria-label="Quick links"><span>Find the CVE. Fix the code. Ship the PR.</span><span><a href="/console">Launch agent</a><a href="/runs">Run log</a><a href="/how">Help</a></span></nav>
+<nav class="utility" aria-label="Quick links"><span>Find the CVE. Fix the code. Ship the PR.</span><span><a href="/projects">Projects</a><a href="/runs">Run log</a><a href="/how">Help</a></span></nav>
 <header class="topbar"></header>
 
 <main id="main">
@@ -27,22 +27,22 @@
 <section class="stage" id="stage">
   <h1 class="word disp" id="word" aria-label="Patch"><span>P</span><span>A</span><span>T</span><span>C</span><span>H</span></h1>
   <div class="headline"><h2>Security upgrades that pass your tests and <em>prove the exploit is closed.</em></h2>
-    <p>PatchPilot finds real CVEs in your Python dependencies, upgrades them, rewrites any code the upgrade breaks until your own pytest suite is green, attacks the fix with exploit variants, and hands you a pull request with a signed proof certificate. Powered by NVIDIA Nemotron.</p></div>
+    <p>Add your Python project and PatchPilot checks every pinned dependency against OSV.dev, free and without running your code. Then the agent can upgrade the vulnerable pins, rewrite any code the upgrade breaks until your own pytest suite is green, attack the fix with exploit variants, and prepare a pull request. Powered by NVIDIA Nemotron.</p></div>
   <div class="vignette"></div>
 
   <div class="corner c-tl"><p>Vulnerable is common.<br>Patched is rare.<br>Verified is PatchPilot.</p><span class="rule"></span></div>
-  <div class="corner c-tr"><b>3 models</b><small>Nemotron Nano · Super · Ultra</small></div>
+  <div class="corner c-tr"><b>Scan, then fix</b><small>Scanning needs no API key</small></div>
   <div class="corner c-bl">
-    <a class="btn-solid" href="/console">Launch agent <span aria-hidden="true">→</span></a>
-    <a class="btn-text" href="/console?demo=1"><span aria-hidden="true">▶</span> Guided demo</a>
+    <a class="btn-solid" href="/projects">Add your project <span aria-hidden="true">→</span></a>
+    <a class="btn-text" href="/console?demo=1"><span aria-hidden="true">▶</span> Replay a sample run</a>
     <a class="btn-text" href="/runs">Run log</a>
   </div>
   <div class="corner c-br">Autonomous<br>security · 2026<span class="rule"></span></div>
   <div class="scroll-cue"></div>
 </section>
 
-<!-- PROOF STATS (real numbers from recorded runs; hidden if unavailable) -->
-<section class="stats" id="stats" hidden aria-label="Results from recorded runs"></section>
+<!-- LIVE STATS: counted from this server's database -->
+<section class="stats" id="stats" hidden aria-label="Projects on this server"></section>
 
 <!-- FEATURE STRIP -->
 <section class="strip">
@@ -58,13 +58,16 @@
     <span class="over">The loop</span>
     <h2 class="disp"><span>Find.</span><span>Fix.</span><span>Ship.</span></h2>
     <p>Security PRs rot because version bumps break builds. PatchPilot doesn't stop at the bump: it runs your tests, reads the failures, patches the code and escalates to a bigger model until everything passes.</p>
-    <a class="btn-solid" href="/how">Discover the agent</a>
+    <a class="btn-text" href="/how">Inside the agent <span aria-hidden="true">→</span></a>
   </div>
-  <div class="demo rv" data-css="--d:.1s">
-    <div class="win">
-      <div class="win-bar"><i></i><i></i><i></i><span>patchpilot run case:authsvc · demo</span></div>
-      <pre id="typed"></pre>
-    </div>
+  <div class="rv how-steps" data-css="--d:.1s">
+    <h3 class="sr-only">How it works</h3>
+    <ol>
+      <li><b>Add a project.</b> Paste a GitHub URL, or upload a requirements.txt, pyproject.toml, poetry.lock, uv.lock or Pipfile.lock.</li>
+      <li><b>Scan.</b> Every pinned version is checked on OSV.dev and ranked with EPSS and the CISA KEV list. No API key, no code execution.</li>
+      <li><b>Fix with the agent.</b> For GitHub projects with a test suite, PatchPilot upgrades the pins, repairs the code until tests pass and prepares a PR.</li>
+    </ol>
+    <a class="btn-solid" href="/projects">Go to projects <span aria-hidden="true">→</span></a>
   </div>
 </section>
 
@@ -79,11 +82,11 @@
 
 <!-- TIERS -->
 <section class="editions">
-  <div class="ed-head"><h2>Choose your model</h2><span class="over">Routed automatically per job</span></div>
+  <div class="ed-head"><h2>Three model tiers</h2><span class="over">Fix mode routes each step to a tier</span></div>
   <div class="ed-grid">
-    <div class="ed rv" data-css="--c1:#4cc2ff;--c2:#1e5bff;--c3:#9be8ff"><div class="art"><i></i></div><div class="body"><h3>Nemotron Nano</h3><ul><li>Advisory triage</li><li>Reachability checks</li><li>Fastest tier</li></ul><div class="row"><b>Triage</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" data-css="--c1:#b98cff;--c2:#ff5a8a;--c3:#6b4bff;--d:.08s"><div class="art"><span class="tag">Workhorse</span><i></i></div><div class="body"><h3>Nemotron Super</h3><ul><li>Upgrade planning</li><li>First-pass patches</li><li>Repair loop</li></ul><div class="row"><b>Plan + fix</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" data-css="--c1:#ff7a2f;--c2:#ff2f6d;--c3:#ffd23f;--d:.16s"><div class="art"><i></i></div><div class="body"><h3>Nemotron Ultra</h3><ul><li>Hard failures only</li><li>Deep stack-trace reasoning</li><li>Escalation tier</li></ul><div class="row"><b>Escalate</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#4cc2ff;--c2:#1e5bff;--c3:#9be8ff"><div class="art"><i></i></div><div class="body"><h3>Nano tier</h3><p class="ed-model" data-tier="nano">Model: auto-selected</p><ul><li>Advisory triage</li><li>Reachability checks</li><li>Fastest tier</li></ul><div class="row"><b>Triage</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#b98cff;--c2:#ff5a8a;--c3:#6b4bff;--d:.08s"><div class="art"><span class="tag">Workhorse</span><i></i></div><div class="body"><h3>Super tier</h3><p class="ed-model" data-tier="super">Model: auto-selected</p><ul><li>Upgrade planning</li><li>First-pass patches</li><li>Repair loop</li></ul><div class="row"><b>Plan + fix</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#ff7a2f;--c2:#ff2f6d;--c3:#ffd23f;--d:.16s"><div class="art"><i></i></div><div class="body"><h3>Ultra tier</h3><p class="ed-model" data-tier="ultra">Model: auto-selected</p><ul><li>Hard failures only</li><li>Deep stack-trace reasoning</li><li>Escalation tier</li></ul><div class="row"><b>Escalate</b><a href="/how">Details</a></div></div></div>
     <div class="ed rv" data-css="--c1:#76b900;--c2:#3ce39b;--c3:#d4ff3a;--d:.24s"><div class="art"><span class="tag">Full pipeline</span><i></i></div><div class="body"><h3>All three, routed</h3><ul><li>Cheapest model per step</li><li>Auto-escalation</li><li>Verified PR</li></ul><div class="row"><b>PatchPilot</b><a href="/console">Launch</a></div></div></div>
   </div>
 </section>
@@ -91,10 +94,10 @@
 
 <footer class="bigfoot">
   <div><div class="logo">PATCHPILOT<small>Autonomous security</small></div><p>An agentic DevSecOps tool for software supply chain security. Find the CVE, fix the code, ship the PR.</p></div>
-  <div><h4>Product</h4><a href="/console">Console</a><a href="/runs">Runs</a><a href="/how">How it works</a></div>
+  <div><h4>Product</h4><a href="/projects">Projects</a><a href="/console">Console</a><a href="/runs">Runs</a><a href="/how">How it works</a></div>
   <div><h4>Stack</h4><a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a><a href="https://tavily.com" target="_blank" rel="noopener">Tavily</a><a href="https://build.nvidia.com" target="_blank" rel="noopener">NVIDIA Nemotron</a></div>
   <div><h4>Project</h4><a href="/how">FAQ</a><a href="/runs">Benchmarks</a></div>
-  <div><h4>Try it</h4><p>Paste a public repo with pinned requirements.txt and a pytest suite.</p><form id="tryForm"><input id="tryRepo" name="repo" placeholder="github.com/you/repo" aria-label="Repository URL" autocomplete="off"><button type="submit" aria-label="Open in console"><span aria-hidden="true">→</span></button></form></div>
+  <div><h4>Try it</h4><p>Paste a public GitHub repo to add it as a project and scan its dependencies.</p><form id="tryForm"><input id="tryRepo" name="repo" placeholder="github.com/you/repo" aria-label="Repository URL" autocomplete="off"><button type="submit" aria-label="Add as project"><span aria-hidden="true">→</span></button></form></div>
   <div class="copy" data-site-foot></div>
 </footer>
 

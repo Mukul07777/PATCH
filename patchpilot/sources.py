@@ -36,11 +36,12 @@ def osv_vulns(package, version):
         seen.update(aliases)
         seen.add(v["id"])
         sev = (v.get("database_specific") or {}).get("severity")
+        cvss = next((s.get("score") for s in v.get("severity") or [] if str(s.get("type", "")).startswith("CVSS")), None)
         out.append({
             "id": v["id"], "cve": cve, "summary": v.get("summary") or (v.get("details") or "")[:200],
             "details": (v.get("details") or "")[:1200], "severity": sev, "fixed": sorted(set(fixed), key=_vkey),
             "url": f"https://osv.dev/vulnerability/{v['id']}", "published": v.get("published"),
-            "symbols": sorted(set(symbols)),
+            "symbols": sorted(set(symbols)), "aliases": sorted(set(aliases) | {v["id"]}), "cvss": cvss,
         })
     return out
 

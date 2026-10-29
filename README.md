@@ -13,14 +13,15 @@ Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory
 ## Testing instructions for judges
 
 **Hosted demo, no credentials needed.** <!-- TODO(owner): hosted demo URL (same as "Live demo" above). -->
-1. Open `/console`. If the deployment has recorded runs, one replays automatically (the "LIVE REPLAY" badge); `/console?demo=1` is a guided walkthrough of a recorded run with captions.
+1. Open `/projects`. Add a project (paste a GitHub URL, or upload or paste a `requirements.txt` such as `jinja2==2.10` / `requests==2.19.0`) and it is scanned against OSV.dev straight away, with EPSS, CISA KEV and fixed-in versions. Scanning needs no API key. **Add sample projects** adds the bundled demo cases.
+1. Open `/console`. If the deployment has recorded runs, one replays automatically (the "LIVE REPLAY" badge); `/console?demo=1` is a guided walkthrough of a recorded run with captions. Recorded runs shipped with the repo are labelled **Sample**.
 2. To pick a specific recording, use **Replay a recorded run** under the launch box, or open `/runs` and click **Replay** on any card. Failed runs show their failure reason on the card.
-3. To start a live run, pick a case (e.g. `case:authsvc`) and click **Launch agent**. This needs `NEBIUS_API_KEY` on the server; without it the button is disabled and the console says so and points to replay.
+3. To start a live fix run, open a project (e.g. the `authsvc` sample) and press **Fix with agent**, which opens `/console?project=<id>`; then click **Launch agent**. This needs `NEBIUS_API_KEY` on the server; without it the button is disabled and the page says so and points to replay.
 4. Tabs to look at after a run: **Advisories**, **Evidence (Tavily)**, **Certificate**, **Proof & risk**, **Drift radar**, **Diff**, **PR report**.
 
 Recorded runs: new runs are written to `runs/*.jsonl` (git-ignored). The repo also ships `demo-runs/`, six recorded end-to-end runs on Nebius Token Factory plus their `batch-summary.json`, so a fresh clone or deployment can replay them immediately; the server reads both folders (a live run with the same id takes precedence).
 
-**Judged deployment settings.** Leave `PATCHPILOT_TOKEN` **unset** on the judged deployment: when it is set, `POST /api/runs` requires `Authorization: Bearer <token>`, which the browser console does not send, so judges could not launch runs. Keep `ALLOW_REMOTE_REPOS=0` (only the bundled cases run).
+**Judged deployment settings.** Leave `PATCHPILOT_TOKEN` **unset** on the judged deployment: when it is set, `POST /api/runs` requires `Authorization: Bearer <token>`, which the browser console does not send, so judges could not launch runs. Keep `ALLOW_REMOTE_REPOS=0` (only the sample projects can be fixed; any public GitHub repo can still be scanned, because scanning only downloads and parses manifest files and never runs repository code).
 
 **Local run.** `cp .env.example .env`, set `NEBIUS_API_KEY` (and `TAVILY_API_KEY` for research), then `pip install -r requirements.txt` and `uvicorn patchpilot.server:app --port 8000` (or `run.bat` on Windows); see [Quickstart](#quickstart). Tests: `pytest`.
 
@@ -129,11 +130,19 @@ cp .env.example .env               # add your keys
 uvicorn patchpilot.server:app --port 8000
 ```
 
-CLI / batch mode: `python -m patchpilot.cli`. Container: see `Dockerfile`.
+Then:
 
-- Pages: `/` landing, `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
-- API: `/api/health` (GET/HEAD), `/api/cases`, `/api/runs`, `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`.
-- Demo cases in `cases/` (pins from each `requirements.txt`):
+1. **Create a project**: open http://localhost:8000/projects and paste a GitHub URL (optional branch/tag), or upload or paste a manifest: `requirements.txt`, `pyproject.toml` (PEP 621 or Poetry), `poetry.lock`, `uv.lock` or `Pipfile.lock` (200 KB max). With `ALLOW_LOCAL_PATHS=1`, `POST /api/projects {"path": "/abs/dir"}` also accepts a directory on the server.
+2. **Scan**: runs automatically when the project is added, and again with **Scan now**. No API key needed. Pinned packages are looked up on OSV.dev and enriched with EPSS, CISA KEV and the lowest fixed version; unpinned ones are listed but not checked. Scanning never installs or runs project code (GitHub manifests are fetched as raw files), so it works for remote repos even with `ALLOW_REMOTE_REPOS=0`; that flag only gates fix mode.
+3. **Fix**: on a GitHub or sample project, press **Fix with agent** (needs `NEBIUS_API_KEY`; GitHub projects also need `ALLOW_REMOTE_REPOS=1`). Uploaded manifests can be scanned but not fixed, because the agent needs the code and tests.
+
+Projects, scans, findings and an audit log of every change are stored in SQLite at `PATCHPILOT_DB` (default `runs/patchpilot.db`); each agent run's events stay in `runs/<id>.jsonl`.
+
+CLI / batch mode: `python -m patchpilot.cli case:authsvc ...`. Container: see `Dockerfile`.
+
+- Pages: `/` landing, `/projects` projects and scan results, `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
+- API: `/api/health` (GET/HEAD; includes configured model ids per tier, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`. Mutating project endpoints use the same `PATCHPILOT_TOKEN` bearer check and per-IP rate limit as runs.
+- Sample projects come from `cases/` (pins from each `requirements.txt`):
   - `authsvc`: PyJWT 1.7.1 + requests 2.25.1
   - `fetcher`: urllib3 1.26.17
   - `mailer`: Jinja2 2.11.3 + MarkupSafe 2.0.1
@@ -202,7 +211,7 @@ MODEL_ULTRA=nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 On OpenRouter `MODEL_GUARD` defaults to `nvidia/nemotron-3.5-content-safety:free`.
 
-Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, `PATCHPILOT_TOKEN` (requires `Authorization: Bearer <token>` on `POST /api/runs`), and `ALLOW_REMOTE_REPOS=1` to enable remote GitHub repos (off by default: remote repos run arbitrary test code).
+Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, `PATCHPILOT_TOKEN` (requires `Authorization: Bearer <token>` on `POST /api/runs` and on project changes), `ALLOW_REMOTE_REPOS=1` to let fix mode run remote GitHub repos (off by default: fixing runs the repo's test code; scanning is always allowed), `ALLOW_LOCAL_PATHS=1` for projects that point at a server directory, and `PATCHPILOT_DB` for the SQLite file.
 
 ## Built on Nebius
 

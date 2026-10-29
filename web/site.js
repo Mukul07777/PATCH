@@ -29,7 +29,7 @@ window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" 
 })();
 
 (() => {
-  const PAGES = [["/", "Home"], ["/console", "Console"], ["/runs", "Runs"], ["/org", "Org scan"], ["/how", "How it works"]];
+  const PAGES = [["/projects", "Projects"], ["/console", "Console"], ["/runs", "Runs"], ["/org", "Org scan"], ["/how", "How it works"]];
   const path = location.pathname.replace(/\/$/, "") || "/";
   const here = path === "/app" ? "/console" : path;
 

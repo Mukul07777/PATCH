@@ -8,3 +8,5 @@ runs/*.jsonl
 runs/bench.log
 runs/batch-summary.json
 !runs/.gitkeep
+runs/*.db
+runs/*.db-*
