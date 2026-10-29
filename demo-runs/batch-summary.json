@@ -148,31 +148,31 @@
   },
   {
     "repo": "case:sanitizer",
-    "run": "20261029-151849-job",
-    "ok": false,
-    "attempts": 4,
-    "seconds": 112.5,
+    "run": "20261029-153214-job",
+    "ok": true,
+    "attempts": 1,
+    "seconds": 65.4,
     "usage": {
       "tiers": {
         "nano": {
           "calls": 1,
           "in": 1026,
-          "out": 203,
-          "seconds": 1.4924588203430176,
+          "out": 199,
+          "seconds": 6.265506267547607,
           "model": "nvidia/Nemotron-3_5-Lightning"
         },
         "super": {
           "calls": 2,
-          "in": 1950,
-          "out": 2606,
-          "seconds": 13.292039632797241,
+          "in": 2056,
+          "out": 2660,
+          "seconds": 35.833730697631836,
           "model": "nvidia/nemotron-3-super-120b-a12b"
         },
         "ultra": {
-          "calls": 3,
-          "in": 3374,
-          "out": 16109,
-          "seconds": 52.10357403755188,
+          "calls": 0,
+          "in": 0,
+          "out": 0,
+          "seconds": 0.0,
           "model": "nvidia/Nemotron-3-Ultra-550b-a55b"
         }
       },
@@ -186,7 +186,7 @@
       "blocked": 8,
       "total": 8
     },
-    "trust": 64,
+    "trust": 86,
     "provider": "Token Factory",
     "models": {
       "nano": "nvidia/Nemotron-3_5-Lightning",

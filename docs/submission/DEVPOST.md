@@ -34,17 +34,17 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 - **Self-tests**: 44 offline tests pass for the agent itself (after the speed build, per `docs/team/LOG.md`).
 
 ## Challenges (honest)
-- **Free-tier rate limits.** Our first benchmark used OpenRouter `:free` Nemotron models and ran out of daily quota after 3 of 6 cases. We re-ran all six on **Nebius Token Factory**: 5/6 green, 437 s total, 42,770 input / 55,727 output tokens (run ids in the README).
-- **A model that won't add a dependency.** The bleach case (`20261029-151849-job`) failed in 3 of 3 Token Factory runs: bleach 6 needs `tinycss2`, and Nemotron wrote an import fallback that drops `style` attributes instead of adding it to `requirements.txt`. PatchPilot reports it as not green.
+- **Free-tier rate limits.** Our first benchmark used OpenRouter `:free` Nemotron models and ran out of daily quota after 3 of 6 cases. We re-ran all six on **Nebius Token Factory**: 6/6 green, 389.6 s total, 39,502 input / 39,668 output tokens (run ids in the README).
+- **A model that won't add a dependency.** The bleach case (`20261029-151849-job`) failed in 3 of 3 Token Factory runs: bleach 6 needs `tinycss2`, and Nemotron wrote an import fallback that drops `style` attributes instead of adding it to `requirements.txt`. PatchPilot reported it as not green. We fixed this generically: the repair loop now detects missing-module failures, tells the model that adding a pinned requirement beats removing a feature, and adds a PyPI-verified pin itself before the next model call. The rerun (`20261029-153214-job`) went green in 1 attempt with `tinycss2==1.5.1` added.
 - **Thinking budget.** On Token Factory our `reasoning="off"` switch was not being sent, so Nano used its whole 1500-token budget thinking and triage was skipped. Sending vLLM's `enable_thinking: false` cut Nano output from 3,000 to 203-1,721 tokens per run.
-- **Slow free models.** Measured runs took 390–723 s. Nano alone took 279 s in `113639-job`. The speed work added reasoning control, JSON mode, parallel triage and research, and `uv`. With `uv`, venv+install measured 0.19–0.23 s vs 5.8–5.9 s with pip. On Token Factory after the speed work, the six cases took 42-113 s each (authsvc: 75 s vs 723 s on the free tier).
+- **Slow free models.** Measured runs took 390–723 s. Nano alone took 279 s in `113639-job`. The speed work added reasoning control, JSON mode, parallel triage and research, and `uv`. With `uv`, venv+install measured 0.19–0.23 s vs 5.8–5.9 s with pip. On Token Factory after the speed work, the six cases took 42-83 s each (authsvc: 75 s vs 723 s on the free tier).
 - **Model JSON reliability.** Malformed JSON from free models broke steps. We added JSON mode, retries and fallbacks.
 - **Generated exploits are unreliable.** In the fetcher run (`114842-job`), the generated proof was "not proven" and blocked 0/8 variants. In the mailer run (`115625-job`) it was "inconclusive: old version passed the test too". We built a **curated, verified exploit library**: each proof fails on the old version and passes on the new one (e.g. bleach CVE-2021-23980: 9 failed → 9 passed; sqlparse CVE-2024-4340: 6 failed → 8 passed). We report "not proven" when that's the truth.
 - **OSV rarely has symbol data.** Reachability falls back to Nemotron and is labelled `llm-inferred`. OpenVEX never emits `not_affected` from LLM-inferred evidence.
 - **We found a hole in our own agent.** The sandbox originally passed the full `os.environ`, API keys included, to the scanned repo's code. We fixed it with an allow-list and a test (`tests/test_sandbox_env.py`).
 
 ## Accomplishments
-- Nebius Token Factory benchmark: **5/6 cases green**, every case's exploit **proven closed**.
+- Nebius Token Factory benchmark: **6/6 cases green**, every case's exploit **proven closed**.
 - `20261029-151559-job` (authsvc, PyJWT CVE-2022-29217, Token Factory): Super → Ultra escalation, tests green on attempt 3, exploit **proven closed**, red-team **7/8 blocked** (1 reported still open), trust score 85, 75 s.
 - All 6 benchmark CVEs have curated proofs verified fail-old / pass-new.
 - A dependency bot that tells you what it *couldn't* prove: "partial" ledger claims, "still open" variants, "not proven" exploits.
@@ -58,7 +58,6 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 
 ## What's next
 - Per-tier cost table for the Token Factory benchmark (set `PRICE_*`).
-- Teach the repair loop to add missing transitive dependencies (the bleach/`tinycss2` failure).
 - NVIDIA content-safety gate (`patchpilot/guard.py`, in progress): an AST screen plus `nemotron-3.5-content-safety` that screens AI-written code before it runs.
 - <!-- TODO(owner): one real PR on a public repo; add the PR link here once it exists, or delete this line. -->
 - npm support (feasibility done: jsonwebtoken 8.5.1 → 9.0.0, CVE-2022-23540).

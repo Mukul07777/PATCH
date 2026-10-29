@@ -310,6 +310,7 @@ function handle(ev) {
     case "redteam": onRedteam(ev); break;
     case "threat": onThreat(ev); break;
     case "drift": onDrift(ev); break;
+    case "deps": term("dim", `deps › added ${(ev.added || []).map(d => `${d.package}==${d.version}`).join(", ")}`, ev.t); break;
     case "ledger": state.ledger = ev; renderLedger(); if (!demo) setTimeout(() => showTab("ledger"), 2600); break;
     case "diff": state.diff = ev.diff; renderDiff(); break;
     case "report": state.report = ev.markdown; renderReport(); break;

@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from . import config, drift, exploits, guard, reach, sources, vex
+from . import config, deps, drift, exploits, guard, reach, sources, vex
 from .llm import LLMError, Router, parse_json
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -54,6 +54,8 @@ class Agent:
         self.trust = {}
         self.reach = {}
         self.guarded = []  # one entry per screened piece of AI-written code
+        self.dep_hints = []  # missing-module hints for the repair prompt
+        self.deps_added = []  # requirements added deterministically by the dependency pre-repair step
         self.guard_rejects = []  # patch writes blocked by the gate, fed into the next repair attempt
 
     # ---------- event helpers ----------
@@ -147,6 +149,9 @@ class Agent:
         attempts = 0
         self.step("fix", "running", "Repairing breaking changes")
         while not ok and attempts < config.MAX_FIX_ATTEMPTS:
+            ok, summary, output = self._dep_repair(output, sandbox, ok, summary)
+            if ok:
+                break
             attempts += 1
             tier = "super" if attempts == 1 else "ultra"
             self.log(f"Attempt {attempts} with Nemotron {tier.title()}", "fix")
@@ -400,6 +405,9 @@ class Agent:
             "fix every one of them; rejected_writes lists earlier file writes a safety gate blocked and why: do "
             "not repeat them) "
             "code compatible with the new library versions while preserving behaviour and security. "
+            "You MAY edit requirements.txt: if tests fail because a module is missing (see dependency_hints), add a "
+            "pinned requirement for it (e.g. the package behind the library's extra) instead of removing, disabling "
+            "or falling back away from the feature. Never drop functionality the tests expect. "
             "Return the COMPLETE new content of every file you change. In evidence, quote the exact line(s) from "
             "migration_research (with its url) that justify each change; use an empty list if research did not help. "
             "In diagnosis, state the root cause of the failing tests in one or two sentences. Output: "
@@ -409,6 +417,7 @@ class Agent:
             "attempt": attempt, "upgrades": plan["upgrades"], "migration_research": notes,
             "predicted_api_breaks": self.drift,
             "rejected_writes": self.guard_rejects[-6:],
+            "dependency_hints": self.dep_hints,
             "failing_test_output": test_output[-6000:], "source_files": files,
         })
         kw = {"reasoning": "low"} if attempt == 1 and tier == "super" else {}
@@ -426,6 +435,49 @@ class Agent:
                 return parse_json(self.router.last_reasoning)
             except LLMError:
                 raise first
+
+    def _dep_repair(self, output, sandbox, ok, summary):
+        """Deterministic pre-repair: a missing module that exists on PyPI is added pinned, reinstalled and retested
+        before another LLM call. Unknown/nonexistent packages only become prompt hints."""
+        local = {p.stem if p.is_file() else p.name for p in self.work.iterdir()}
+        missing = deps.detect_missing(output, local)
+        req = self.work / "requirements.txt"
+        have = deps.requirement_names(req.read_text(encoding="utf-8")) if req.exists() else set()
+        for h in deps.hints(missing):
+            if h not in self.dep_hints:
+                self.dep_hints.append(h)
+        pins = []
+        for mod in missing:
+            if deps._norm(deps.dist_for(mod)) in have:
+                continue  # already required: the model must fix usage, not the requirement
+            r = deps.resolve(mod)
+            if r:
+                pins.append(r)
+            else:
+                self.log(f"Missing module '{mod}' has no PyPI package '{deps.dist_for(mod)}'; left to the model", "fix")
+        if not pins:
+            return ok, summary, output
+        before = req.read_text(encoding="utf-8")
+        added = deps.add_requirements(req, pins)
+        if not added:
+            return ok, summary, output
+        self.log("Missing dependency detected; adding " + ", ".join(f"{d}=={v}" for d, v in added), "fix")
+        ok_install, out = sandbox.install()
+        if not ok_install:
+            req.write_text(before, encoding="utf-8")
+            self.log("pip install failed for added dependency; reverted: " + out[-600:], "fix")
+            sandbox.install()
+            return ok, summary, output
+        self.deps_added += [{"package": d, "version": v} for d, v in added]
+        for d, v in added:
+            self.evidence.append({"url": f"https://pypi.org/project/{d}/{v}/",
+                                  "quote": f"Tests failed with a missing module; added {d}=={v} (verified on PyPI) "
+                                           f"to requirements.txt instead of removing functionality."})
+        ok, summary, output = sandbox.test()
+        self._emit({"type": "deps", "added": [{"package": d, "version": v} for d, v in added], "missing": missing})
+        self._emit({"type": "test", "label": "after adding dependency", "ok": ok, "summary": summary,
+                    "output": output[-3000:]})
+        return ok, summary, output
 
     # ---------- exploit proof ----------
     def _exploit_before(self, findings, files, research, sandbox):
@@ -865,6 +917,10 @@ class Agent:
         lines += ["", "### Upgrades"]
         for u in plan["upgrades"]:
             lines.append(f"- `{u['package']}` {u['from']} -> **{u['to']}** - {u.get('reason', '')}")
+        if getattr(self, "deps_added", None):
+            lines += ["", "### Dependencies added (missing-module repair)"]
+            lines += [f"- `{d['package']}=={d['version']}` - tests failed with a missing module; pinned to the latest "
+                      f"PyPI release and verified by reinstall + test rerun" for d in self.deps_added]
         lines += ["", "### Verification", f"- Baseline (old pins): `{base}`", f"- Final: `{final}`",
                   f"- Fix attempts: {attempts}", f"- Status: {'all tests passing' if ok else 'needs human review'}"]
         if exploit:

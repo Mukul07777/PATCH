@@ -221,11 +221,13 @@ All six bundled cases were run end-to-end with `python -m patchpilot.cli` agains
 | authsvc (PyJWT) | `20261029-151559-job` | green | 3 (Super, then Ultra) | 75.0 s | proven closed | 7/8 | 85 |
 | fetcher (urllib3) | `20261029-151714-job` | green | 1 | 42.2 s | proven closed | 7/7 | 86 |
 | mailer (Jinja2) | `20261029-151757-job` | green | 2 | 51.7 s | proven closed | 8/8 | 86 |
-| sanitizer (bleach) | `20261029-151849-job` | **failed** | 4 | 112.5 s | proven closed | 8/8 | 64 |
+| sanitizer (bleach) | `20261029-153214-job` | green | 1 (+ `tinycss2` added by the dependency step) | 65.4 s | proven closed | 8/8 | 86 |
 | sqlfmt (sqlparse) | `20261029-152042-job` | green | 0 (upgrade alone passed) | 82.9 s | proven closed | 5/5 | 83 |
 | webhooks | `20261029-152206-job` | green | 2 | 72.4 s | proven closed | not measured (variant file collected no tests) | 85 |
 
-**5/6 cases green**, 437 s total wall time, 42,770 input / 55,727 output tokens across 26 model calls (Nano 10, Super 12, Ultra 7; Ultra was not needed in fetcher and sqlfmt). Cost was not computed (`PRICE_*` unset). The sanitizer failure is model behaviour, reproduced in 3 of 3 runs: bleach 6 needs `tinycss2` for `CSSSanitizer`; Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency to `requirements.txt`, so `test_allowed_style_kept` still fails, and PatchPilot correctly reports the run as not green.
+**6/6 cases green**, 389.6 s total wall time, 39,502 input / 39,668 output tokens across 26 model calls (Nano 10, Super 12, Ultra 4; Ultra was not needed in fetcher, sanitizer and sqlfmt). Cost was not computed (`PRICE_*` unset).
+
+The sanitizer case first failed in 3 of 3 runs (e.g. `20261029-151849-job`): bleach 6 needs `tinycss2` for `CSSSanitizer`, and Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency, so `test_allowed_style_kept` failed and PatchPilot reported the run as not green. The repair loop now detects missing-module failures (`No module named X`, bleach's `NoCssSanitizerWarning`), tells the model that editing `requirements.txt` is preferred over removing features, and runs a deterministic dependency step before the next LLM call: a missing module that exists on PyPI is added pinned to its latest release, reinstalled and retested (reverted if the install fails), recorded as a `deps` event and evidence, and listed in the PR report (`patchpilot/deps.py`). In `20261029-153214-job`, Super's first patch moved to `css_sanitizer=CSSSanitizer(...)`, the test run hit `No module named 'tinycss2'`, the step added `tinycss2==1.5.1`, and all 5 tests passed. The other five rows are the unchanged round-2 runs; a regression rerun of fetcher after the change (`20261029-153326-job`) was also green in 1 attempt (44.7 s).
 
 A first round on Token Factory (`20261029-150603-job` to `20261029-151314-job`, same 5/6 result) exposed a bug: `reasoning="off"` was not sent to Token Factory, so Nano spent its whole 1500-token budget thinking and symbol inference / triage were skipped. Token Factory honours vLLM's `chat_template_kwargs.enable_thinking` (verified), so it now gets that switch; in the round above Nano's output fell from 3,000 to 203-1,721 tokens per run.
 
@@ -261,7 +263,7 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 ## Limitations
 
 - The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run (Token Factory listed no Nemotron content-safety model for our account).
-- Benchmark: 5/6 on Token Factory; the bleach case fails because the model will not add a new dependency (see [Built on Nebius](#built-on-nebius)).
+- Benchmark: 6/6 on Token Factory, but the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only adds packages that resolve on PyPI, pinned to their latest release.
 - Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
@@ -285,7 +287,7 @@ Every commit in this repository is dated 2026-10-29 (check with `git log --forma
 - **Initial agent** (00:29): security advisory to tested PR on NVIDIA Nemotron + Nebius Token Factory.
 - **Core features**: multipage UI, verified exploit proofs, risk score, reachability, model debate, org scan, red-team variants, proof certificate, Nemotron rerank, threat clock, API drift radar, least-change upgrade, real-world benchmark cases.
 - **Benchmark and self-tests**: benchmark round 1 on the OpenRouter free tier (3/3 completed cases secured; 3 cases blocked by API rate limit), agent self-test suite, provider and models recorded per run.
-- **Nebius benchmark**: full 6-case run on Nebius Token Factory (5/6 green), Token Factory reasoning-switch fix, recorded runs shipped in `demo-runs/`.
+- **Nebius benchmark**: full 6-case run on Nebius Token Factory (6/6 green after the missing-dependency repair step), Token Factory reasoning-switch fix, recorded runs shipped in `demo-runs/`.
 - **Supply-chain depth**: curated exploit proofs for urllib3, Jinja2, bleach and sqlparse CVEs; symbol-level reachability; deps.dev release trust check; OpenVEX export; Nebius model id pinning.
 - **Speed and safety**: reasoning control, parallel triage/research, `uv` sandbox prep, demo mode; API keys kept out of the sandboxed repo's environment; NVIDIA content-safety gate + static AST screen.
 - **UI**: guided demo mode, auto-replay console, trust / OpenVEX / guardrails panels, per-tier charts.
