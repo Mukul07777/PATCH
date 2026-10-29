@@ -168,7 +168,8 @@ class CachedStatic(StaticFiles):
     async def get_response(self, path, scope):
         resp = await super().get_response(path, scope)
         if resp.status_code == 200:
-            resp.headers.setdefault("Cache-Control", "public, max-age=3600")
+            # Revalidate every load (ETag makes it a cheap 304) so a deploy never mixes new HTML with stale CSS/JS
+            resp.headers.setdefault("Cache-Control", "no-cache")
         return resp
 
 

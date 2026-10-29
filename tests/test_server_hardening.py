@@ -234,7 +234,7 @@ def test_unknown_page_404(client):
 
 def test_static_cache_and_gzip(client):
     r = client.get("/static/app.js", headers={"Accept-Encoding": "gzip"})
-    assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=3600"
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
     assert r.headers.get("content-encoding") == "gzip"
     assert client.get("/favicon.svg").headers["content-type"].startswith("image/svg")
 
