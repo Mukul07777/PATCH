@@ -111,3 +111,7 @@
 ## 2026-10-29 ~15:20 — research round 7 (npm feasibility)
 - research-7.md: Node 24 + npm 11 present; OSV npm works; demo case jsonwebtoken 8.5.1→9.0.0 (CVE-2022-23540, offline alg:none proof, real breaking changes). ~9 h. Backlog item added (after security items).
 - Launched UI/UX researcher round 2 (critique of redesigned pages, shots3).
+
+## 2026-10-29 ~15:30 — UI/UX research round 2
+- ui-2.md: 11 issues + 8 changes (landing reveal blanks, demo should end on Certificate, caption bar, surface the "still open" variant, graph node status, neutral replay badge, phone layout). Backlog "UI round 3" added (after current UI builder).
+- Launched submission writer (Devpost text, pitch, video script final) — research angle 8.
