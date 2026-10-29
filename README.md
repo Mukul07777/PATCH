@@ -91,6 +91,19 @@ CLI / batch mode: `python -m patchpilot.cli`. Container: see `Dockerfile`.
 - API: `/api/health`, `/api/cases`, `/api/runs`, `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`.
 - Demo cases in `cases/`: `authsvc` (PyJWT 1.x + requests) and `webhooks` (Werkzeug 2 to 3).
 
+## Tests
+
+Fast, offline unit tests for the agent itself (drift radar, OSV version math, JSON parsing, exploit library,
+risk score and trust ledger). No network, no LLM calls:
+
+```bash
+pip install pytest
+.venv/Scripts/python.exe -m pytest -q
+```
+
+`pytest.ini` limits collection to `tests/`; the bundled `cases/*/tests` suites need their own pinned venvs and
+are run by PatchPilot's sandbox instead.
+
 ## Provider setup
 
 The LLM client is OpenAI-compatible and reads `NEBIUS_API_KEY` and `NEBIUS_BASE_URL`, so any compatible provider works.

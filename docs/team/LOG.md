@@ -28,3 +28,9 @@
 - 3/3 completed cases secured with tests green: authsvc (16 advisories, 3 attempts, exploit proven closed, red team 7/8, trust 93), fetcher (9 adv, 1 attempt, generated exploit NOT proven, generated variants 0/8, trust 79), mailer (4 adv, 1 attempt, exploit inconclusive, trust 92).
 - sanitizer, sqlfmt, webhooks: not run, OpenRouter free-tier 429 at the plan step. Re-run queued.
 - Weakness found: LLM-generated exploit proofs are unreliable. Backlog item added.
+
+## 2026-10-29 ~12:40 — backend build: self-tests + provider logging
+- 17 offline unit tests (drift radar, sources, JSON parsing, exploit extraction, risk, ledger, exploits library). Verified by manager: 17 passed.
+- done events now carry provider, models, proven (ok = tests green; proven = exploit proven closed).
+- Launched exploit curator (urllib3 + Jinja2 curated proofs, no LLM).
+- Next backend build: symbol-level reachability (starting now).

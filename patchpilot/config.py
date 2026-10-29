@@ -35,3 +35,10 @@ CASES_DIR = ROOT / "cases"
 DEFAULT_CASE = "authsvc"
 # Public deployments should keep this off: remote repos run arbitrary test code on the server
 ALLOW_REMOTE_REPOS = os.getenv("ALLOW_REMOTE_REPOS", "1") == "1"
+
+
+def provider_name(base_url=None):
+    """Human name of the OpenAI-compatible LLM host behind NEBIUS_BASE_URL."""
+    host = (base_url or NEBIUS_BASE_URL).split("//")[-1].split("/")[0]
+    return {"openrouter.ai": "OpenRouter", "integrate.api.nvidia.com": "NVIDIA NIM",
+            "api.groq.com": "Groq"}.get(host, "Token Factory")

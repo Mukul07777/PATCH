@@ -39,10 +39,7 @@ def _record(run_id):
 
 @app.get("/api/health")
 def health():
-    host = config.NEBIUS_BASE_URL.split("//")[-1].split("/")[0]
-    provider = {"openrouter.ai": "OpenRouter", "integrate.api.nvidia.com": "NVIDIA NIM",
-                "api.groq.com": "Groq"}.get(host, "Token Factory")
-    return {"nebius": bool(config.NEBIUS_API_KEY), "provider": provider, "tavily": bool(config.TAVILY_API_KEY),
+    return {"nebius": bool(config.NEBIUS_API_KEY), "provider": config.provider_name(), "tavily": bool(config.TAVILY_API_KEY),
             "github": bool(config.GITHUB_TOKEN), "base_url": config.NEBIUS_BASE_URL,
             "remote_repos": config.ALLOW_REMOTE_REPOS}
 

@@ -38,7 +38,9 @@ def run_one(repo):
     Agent(run_id, repo, emit).run()
     return {"repo": repo, "run": run_id, "ok": result.get("ok"), "attempts": result.get("attempts"),
             "seconds": result.get("seconds"), "usage": result.get("usage"), "advisories": result.get("advisories"),
-            "exploit": result.get("exploit"), "redteam": result.get("redteam"), "trust": result.get("trust")}
+            "exploit": result.get("exploit"), "redteam": result.get("redteam"), "trust": result.get("trust"),
+            "provider": result.get("provider") or config.provider_name(), "models": result.get("models"),
+            "proven": result.get("proven")}
 
 
 def main(argv):

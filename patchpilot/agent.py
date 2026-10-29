@@ -60,13 +60,16 @@ class Agent:
     def log(self, msg, key=None):
         self._emit({"type": "log", "key": key, "msg": msg})
 
+    def _meta(self):
+        return {"provider": config.provider_name(), "models": dict(getattr(self.router, "models", None) or {})}
+
     # ---------- pipeline ----------
     def run(self):
         try:
             self._run()
         except Exception as e:  # surface every failure to the UI
             self._emit({"type": "error", "msg": f"{type(e).__name__}: {e}"})
-            self._emit({"type": "done", "ok": False, "usage": self.router.cost_report()})
+            self._emit({"type": "done", "ok": False, "proven": False, **self._meta(), "usage": self.router.cost_report()})
 
     def _run(self):
         self.step("models", "running", "Connecting to Nemotron")
@@ -95,7 +98,7 @@ class Agent:
         self.step("scan", "done", detail={"vulnerable": len(findings),
                                            "advisories": sum(len(f["vulns"]) for f in findings)})
         if not findings:
-            self._emit({"type": "done", "ok": True, "clean": True, "usage": self.router.cost_report()})
+            self._emit({"type": "done", "ok": True, "clean": True, "proven": False, **self._meta(), "usage": self.router.cost_report()})
             return
 
         # 2. Nano triage: is each advisory actually reachable from our code?
@@ -198,7 +201,8 @@ class Agent:
             self.step("pr", "done" if ok else "failed", detail={"patch": "patchpilot.patch"})
             self.log("Patch file ready (set GITHUB_TOKEN and use a GitHub URL to open a real PR)", "pr")
         (config.WORK_DIR / self.run_id / "patchpilot.patch").write_text(diff, encoding="utf-8")
-        self._emit({"type": "done", "ok": ok, "attempts": attempts, "pr": pr,
+        self._emit({"type": "done", "ok": ok, "attempts": attempts, "pr": pr, **self._meta(),
+                    "proven": bool(exploit) and exploit.get("verdict") == "proven closed",
                     "seconds": round(time.time() - self.started, 1), "usage": self.router.cost_report()})
 
     # ---------- steps ----------
