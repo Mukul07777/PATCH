@@ -9,7 +9,7 @@ About 96 words: aim for 30 seconds at a brisk pace, and trim the "In our recorde
 
 ## Delivery notes
 - Lead with the pain (red Dependabot PR), not the tech.
-- Say the three numbers from the recorded run only: attempt three, exploit closed, seven of eight variants blocked.
+- Say the three numbers from the recorded run only: attempt two, exploit closed, seven of eight variants blocked.
 - Close on "proof certificate, not a promise"; pause before it.
 - Recorded run: `20261029-153834-job` (authsvc, Nebius Token Factory): 8 Tavily sources, green on attempt 2 after Super-to-Ultra escalation with 3 changelog lines quoted, exploit proven closed, 7/8 variants blocked, 110.7 s end to end. Full benchmark: 6 of 6 cases green.
 

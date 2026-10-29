@@ -131,3 +131,12 @@
 - After pull: 344 passed, 1 failed (tests/test_hardening.py::test_event_stream_is_not_gzipped) → first task at 03:00.
 - Our guardrails builder stopped on the Claude usage limit; its WIP is stashed (stash@{0}), likely redundant with the collaborator's supply-chain-safe repair.
 - .env: still OpenRouter free models (keys set). Resume scheduled 03:00 to reconcile backlog with PROGRESS.md.
+
+## 2026-10-29 — Round 6 (manager ran all roles inline to keep usage low)
+- Fixed test_event_stream_is_not_gzipped (test relied on demo-runs/, which conftest isolates; it now writes its own run file). Suite green.
+- netguard: PinnedTransport (public httpx/httpcore APIs, httpcore→httpx error mapping) replaces `transport._pool` assignment; DNS pinning unchanged.
+- sandbox: named containers + `docker rm -f` on timeout. Docker not installed on this machine, so no real-daemon run (documented).
+- Split: server.py 1369→~950 + api_admin.py; agent.py 974→~490 + agent_proof/agent_report/agent_common.
+- UI: light "Harbor" palette by default (dark opt-in), all landing/terminal/diff colours now tokens; no hardcoded metrics found (landing stats come from /api/stats).
+- Docs: README (Token Factory acceleration, feedback notes, round 6, honest Docker note), DEVPOST, VIDEO-SCRIPT (Token Factory settings scene, light theme, 2:20), PITCH fix, .env.example pins the three Nemotron ids.
+- Tester: 348 passed, pyflakes clean. Score below in SCORECARD.md.

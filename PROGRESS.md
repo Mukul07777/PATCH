@@ -68,6 +68,9 @@ Practicality score history: **58** (after round 1) â†’ **78** (after round 4) â†
   - [x] Tests for email channel e2e, the auto-fix enqueue path and CycloneDX schema fields.
 - [ ] **Next.** Re-run the full practicality test (three personas: security lead, CI developer, attacker). Feed defects into round 6 and repeat until the product is adoptable (target 95+).
 
+### Round 6 (done)
+- Green suite (348), pyflakes clean; server/agent split into modules; public-API pinned transport; docker timeout cleanup; light Harbor theme; docs refreshed. See docs/team/LOG.md.
+
 ### Planned after the practicality target is met
 - [ ] Re-check the hackathon docs (README, DEVPOST, JUDGE-QA, VIDEO-SCRIPT) against the new product features. The product changed a lot since they were written.
 - [ ] Judged deployment needs `PATCHPILOT_PUBLIC_DEMO=1`, an admin created via `/setup`, and a GitHub token in Settings (the unauthenticated GitHub API limit is 60 requests per hour).

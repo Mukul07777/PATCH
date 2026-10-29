@@ -56,3 +56,12 @@ Date: 2026-10-29 · Scorer: strict judge panel · Basis: repo at `65bd4ce` plus 
 3. **Add a replay mode and a 2-3 minute demo video of a recorded green run with the certificate** (+4, medium effort). Demo.
 4. **Make `ok` reflect the proof (green, partial or unproven) and get one generated exploit through a before-red, after-green flip** (+3, medium effort). Evidence and innovation.
 5. **Open one real PR against a public GitHub repo, plus a small pytest suite for `agent.py`, `drift.py` and `sources.py`** (+3, medium effort). Impact and execution.
+
+## Round 6 score (strict, 2026-10-29)
+| Criterion | Score | Main remaining defect |
+|---|---|---|
+| Technological implementation | 94 | Docker sandbox never run on a real daemon (patchpilot/sandbox.py); Nebius Serverless deploy not executed |
+| Design | 90 | Light theme not yet visually verified in a browser at phone width; screenshots in README are placeholders (docs/screenshots/ missing) |
+| Potential impact | 92 | Python-only; no real public PR yet |
+| Quality of the idea | 95 | Exploit-proof + red-team + certificate is distinctive |
+Overall ~93. Reaching 98 needs owner items: hosted demo URL, video, a real PR, Docker run on a machine with Docker, screenshots, first-hand feedback text.

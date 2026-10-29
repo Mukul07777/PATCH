@@ -390,9 +390,16 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 - The NVIDIA content-safety guard has only had a small live check (n=2 passes over 6 samples via OpenRouter's free tier, [docs/guard-eval.md](docs/guard-eval.md)). It got 10 of 12 verdicts right: it flagged one benign curated proof and missed a base64 `exec` sample once. The static AST screen got all 12 right. Token Factory listed no Nemotron content-safety model for our account, so the recorded demo runs used the static screen only.
 - Benchmark: 6/6 on Token Factory, but the recorded sanitizer run predates Tavily (its Tavily rerun is not recorded yet), and the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only auto-adds a package with a curated import mapping or one the original repo already imported, whose first PyPI release is at least 90 days old, pinned to the newest non-yanked release that supports the sandbox Python; anything else becomes a hint for the model.
 - Python only. Scan mode checks exact versions only (lock files or `==` pins); fix mode needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
-- Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
+- By default fix-mode tests run on the host in a venv. `SANDBOX=docker` runs each step in a locked-down container instead; that mode is unit-tested on its exact `docker run` arguments and timeout cleanup, but has not been run against a real Docker daemon in this submission (none was available on the build machine). Keep `ALLOW_REMOTE_REPOS=0` on public deployments unless Docker mode is on.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
 - Green tests are only as strong as the repo's test suite.
+
+## Where Token Factory accelerated the workflow
+
+- **One endpoint, three model sizes.** Nano, Super and Ultra sit behind the same OpenAI-compatible base URL and key, so per-step routing is a model id switch in `patchpilot/llm.py`, not a second provider integration.
+- **Escalation is cheap to try.** Because Ultra is a call away, the repair loop starts on Super and escalates only on failure: across the six recorded runs Ultra was called once (23 calls: Nano 10, Super 12, Ultra 1).
+- **Wall time.** The same authsvc case took 723 s on a free-tier endpoint and 110.7 s on Token Factory (after the speed work); all six cases finished in 528.6 s (README benchmark table, `demo-runs/batch-summary.json`).
+- **Reasoning control.** Token Factory honours vLLM's `chat_template_kwargs.enable_thinking`, which cut Nano's output from 3,000 to 203-1,721 tokens per run.
 
 ## Feedback on Nebius & NVIDIA tools
 
@@ -403,9 +410,15 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
   - Nebius Serverless Endpoints / Jobs: if used, what worked and what was missing.
   - Differences between NVIDIA NIM and Token Factory (e.g. enable_thinking).
   - One concrete change you would ask each team for. -->
-TODO
+Engineering notes from building and benchmarking on Token Factory (the owner's first-hand notes to be added above this line):
 
-## Changes during the submission period
+- **Token Factory**: the OpenAI-compatible API meant no SDK changes, and `/v1/models` was accurate for discovering the Nemotron ids. Model ids mix casing styles (`Nemotron-3_5-Lightning` vs `nemotron-3-super-120b-a12b`), so exact pinning needs a copy-paste from `/models`; a stable alias per tier would help.
+- **Reasoning switch**: the generic `reasoning` parameter had no effect; only `chat_template_kwargs.enable_thinking` did. A documented, provider-neutral switch would have saved a benchmark round.
+- **Content safety**: no Nemotron content-safety model was listed for our account, so the guard ran its static AST screen only. Listing the safety model next to the chat models would let agent builders gate generated code by default.
+- **Nemotron tiers**: Super handled most repairs on the first attempt; Ultra fixed the one case (PyJWT 2 migration) where Super's patch failed tests. Nano was reliable for short JSON triage once thinking was off.
+
+
+## What was built during the submission period
 
 Every commit in this repository is dated 2026-10-29 (check with `git log --format=%ad`). <!-- TODO(owner): confirm the official submission-period dates and whether any work predates them. --> In order:
 
@@ -418,6 +431,8 @@ Every commit in this repository is dated 2026-10-29 (check with `git log --forma
 - **UI**: guided demo mode, auto-replay console, trust / OpenVEX / guardrails panels, per-tier charts.
 - **Hardening**: auth + rate limits, token-safe PR push, CI, CSP and security headers, no inline scripts, XSS-safe report links, org-scan limits, accessibility, SEO meta, gzip.
 - **Submission drafts**: Devpost text, video script, judge Q&A, 30-second pitch.
+- **Product rounds 3-5**: honest coverage reporting, monorepos, lock files up to 5 MB, OSV batch queries, CVSS severity, EPSS batching, scan queue; scheduled scans, Slack / webhook / email alerts with async delivery and a circuit breaker, SSRF guard with DNS pinning; `python -m patchpilot scan` with SARIF / CycloneDX and CI exit codes, a GitHub Action, exports, auto-fix after scan, Docker sandbox, docker-compose; per-account login limits; self-hosted fonts (CSP `'self'` only).
+- **Round 6**: suite fully green (348 tests, pyflakes clean); `server.py` split (admin routes in `api_admin.py`) and `agent.py` split (`agent_proof.py`, `agent_report.py`, `agent_common.py`); the SSRF-guarded HTTP client now uses a public-API httpx transport instead of setting a private attribute; Docker sandbox containers are named and force-removed on timeout; new light "Harbor" theme with one colour per model tier.
 - **Hardening round 4**: no inline styles (CSP without `style-src 'unsafe-inline'`), `HEAD` on `/api/health` and `/api/runs`, `/robots.txt`, org-scan `reason` field, reduced-motion CSS, this README's Nebius sections.
 
 ## Roadmap

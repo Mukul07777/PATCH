@@ -2,7 +2,7 @@
 
 **Dependabot opens the PR. PatchPilot makes it pass, attacks its own fix, and hands you a proof certificate.**
 
-Built on NVIDIA Nemotron (Nano / Super / Ultra), with OpenAI-compatible endpoints for Nebius Token Factory. External data sources: OSV.dev, PyPI, FIRST EPSS, CISA KEV, deps.dev, Tavily and the GitHub API.
+Runs on **Nebius Token Factory** with NVIDIA Nemotron open models: Nano for fast calls, Super for everyday work, Ultra for the hard reasoning. External data sources: OSV.dev, PyPI, FIRST EPSS, CISA KEV, deps.dev, Tavily and the GitHub API.
 
 **Track:** Coding and Agentic Engineering (NVIDIA Global AI Hackathon).
 
@@ -19,10 +19,10 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 6. **Proves**: a claims ledger checks each claim on its own (tests green, no tests edited, no tests lost, exploit closed, variants blocked). On top of that come a trust score, a SHA-256 certificate, an OpenVEX v0.2.0 document and a deps.dev release trust check (provenance, OpenSSF Scorecard, new transitive deps).
 7. **Ships**: a PR or `.patch` file, with the certificate in the body.
 
-Around the agent it is a small multi-user product: projects with scan history (scan-only mode needs no LLM key and never runs your code), a dashboard (open findings by severity, KEV, riskiest projects and packages, trend, mean time to remediate from new/fixed tracking between scans), per-project policy (severity threshold, ignore list with reason and expiry), local accounts with admin/member roles and API keys, an audit log, and a Settings page where admins set provider keys (encrypted at rest) and model ids without a restart.
+Around the agent it is a small multi-user product: projects with scan history (scan-only mode needs no LLM key and never runs your code), a dashboard (open findings by severity, KEV, riskiest projects and packages, trend, mean time to remediate from new/fixed tracking between scans), per-project policy (severity threshold, ignore list with reason and expiry), local accounts with admin/member roles and API keys, an audit log, and a Settings page where admins set provider keys (encrypted at rest) and model ids without a restart, scheduled scans with Slack / webhook / email alerts (SSRF-guarded, DNS-pinned, with a circuit breaker), a `python -m patchpilot scan` CLI with SARIF / CycloneDX output and CI exit codes, and a GitHub Action.
 
 ## How we built it
-- **Pipeline**: `patchpilot/agent.py` streams every step as SSE (`server.py`) to a multipage web UI (`web/`): landing, live console with a graph, run history with replay, org scan, architecture.
+- **Pipeline**: the agent (`patchpilot/agent.py` plus `agent_proof.py` for exploits / mutations / drift and `agent_report.py` for the ledger, risk and report) streams every step as SSE (`server.py`; admin routes in `api_admin.py`) to a multipage web UI (`web/`): landing, live console with a graph, run history with replay, org scan, architecture.
 - **Model routing**:
   - **Nano** (`nvidia/Nemotron-3_5-Lightning` on Token Factory) does cheap, high-volume work: triage, reachability inference, classification.
   - **Super** (`nvidia/nemotron-3-super-120b-a12b`) writes the first patch attempts.
@@ -33,9 +33,9 @@ Around the agent it is a small multi-user product: projects with scan history (s
 - **deps.dev**: release trust check before we recommend a version.
 - **PyPI**: latest versions for upgrade targets and release metadata for the missing-dependency step.
 - **GitHub API**: opening the pull request (needs `GITHUB_TOKEN`), org scans, and cloning remote repos (only with `ALLOW_REMOTE_REPOS=1`).
-- **Sandbox**: one venv per run (`sandbox.py`), prepared with `uv` in the background. The environment is an allow-list, so no API keys or tokens reach the scanned repo's `setup.py` or `conftest.py`.
+- **Sandbox**: one venv per run (`sandbox.py`), prepared with `uv` in the background, or `SANDBOX=docker`: a locked-down container per step (`--network none` for tests, read-only root, non-root user, no capabilities, memory/CPU/PID limits, named containers force-removed on timeout). The Docker mode is covered by unit tests on the exact `docker run` arguments; it has not been exercised against a real Docker daemon in this submission. The environment is an allow-list, so no API keys or tokens reach the scanned repo's `setup.py` or `conftest.py`.
 - **Exploits**: a curated, verified library in `patchpilot/exploits/` (6 CVEs, each with a proof and mutation variants). Nemotron writes the proof when the CVE isn't in the library.
-- **Self-tests**: 178 offline tests pass for the agent itself (`pytest -q`).
+- **Self-tests**: 348 offline tests pass (`pytest -q`), and `pyflakes` is clean.
 
 ## Challenges (honest)
 - **Free-tier rate limits.** Our first benchmark used OpenRouter `:free` Nemotron models and ran out of daily quota after 3 of 6 cases. We re-ran all six on **Nebius Token Factory**: 6/6 green. The shipped set (five runs with live Tavily research plus the earlier sanitizer run) took 528.6 s in total, with 45,904 input / 39,321 output tokens over 23 model calls. Run ids are in the README.
@@ -63,7 +63,8 @@ Around the agent it is a small multi-user product: projects with scan history (s
 
 ## What's next
 - Per-tier cost table for the Token Factory benchmark (set `PRICE_*`).
-- NVIDIA content-safety gate (`patchpilot/guard.py`, in progress): an AST screen plus `nemotron-3.5-content-safety` that screens AI-written code before it runs.
+- Run the NVIDIA content-safety model on Token Factory as soon as it is listed for our account (the gate in `patchpilot/guard.py` already supports it; today the static AST screen runs).
+- npm and Go ecosystems; a Nebius Serverless Job that runs the nightly scan queue.
 - <!-- TODO(owner): one real PR on a public repo; add the PR link here once it exists, or delete this line. -->
 - npm support (feasibility done: jsonwebtoken 8.5.1 → 9.0.0, CVE-2022-23540).
 - Container sandbox. Today the venv is **not a security boundary**.
