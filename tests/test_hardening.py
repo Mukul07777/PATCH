@@ -99,6 +99,7 @@ def no_agent(monkeypatch):
         def run(self): pass
     monkeypatch.setattr(server, "Agent", A)
     monkeypatch.setattr(server, "_hits", server.collections.defaultdict(server.collections.deque))
+    monkeypatch.setattr(server, "MAX_ACTIVE_RUNS", 1000)
     yield
     for k in [k for k, v in server.RUNS.items() if not v["events"]]:
         server.RUNS.pop(k, None)

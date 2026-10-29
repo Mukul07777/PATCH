@@ -4,9 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PatchPilot Console</title>
-<meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron on Nebius Token Factory">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
+<meta name="description" content="Launch the PatchPilot agent: scan advisories, upgrade dependencies and watch Nemotron repair code until every test passes.">
+<meta property="og:title" content="PatchPilot Console">
+<meta property="og:description" content="Launch the PatchPilot agent: scan advisories, upgrade dependencies and watch Nemotron repair code until every test passes.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/site.css">
@@ -18,7 +25,7 @@
 
 <header class="topbar"></header>
 
-<main>
+<main id="main">
   <section class="story-bar card glass" id="storyBar" hidden aria-live="polite">
     <div class="sb-head"><span class="chip ultra">Guided demo</span><b id="sbTitle">Find</b><button class="btn ghost" type="button" id="sbExit">Exit demo</button></div>
     <ol class="sb-steps" id="sbSteps"></ol>
@@ -43,22 +50,23 @@
   <section class="launch card glass">
     <div class="cases" id="cases" role="radiogroup" aria-label="Target"></div>
     <form id="runForm" class="launch-row">
-      <input id="repo" placeholder="…or paste a public GitHub repo URL (pinned requirements.txt + pytest)" autocomplete="off">
-      <button class="btn-run" id="runBtn" type="submit"><span>Launch agent</span><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <label for="repo" class="sr-only">Public GitHub repository URL</label>
+      <input id="repo" name="repo" placeholder="…or paste a public GitHub repo URL (pinned requirements.txt + pytest)" autocomplete="off">
+      <button class="btn-run" id="runBtn" type="submit"><span>Launch agent</span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </form>
     <div class="launch-row small">
       <select id="history" aria-label="Recorded runs"><option value="">▶ Replay a recorded run…</option></select>
       <button class="btn ghost" type="button" id="replayBtn">Replay</button>
-      <a class="btn ghost" href="/console?demo=1" id="demoBtn">▶ Guided demo</a>
+      <a class="btn ghost" href="/console?demo=1" id="demoBtn"><span aria-hidden="true">▶</span> Guided demo</a>
     </div>
   </section>
 
   <section class="graph card glass">
-    <div class="graph-head"><h2>Agent graph</h2><div class="gh-right"><span class="replay-badge" id="replayBadge" hidden><i></i>LIVE REPLAY</span><button class="btn ghost sm" type="button" id="realBtn" hidden>Run it for real</button><span id="phase" class="phase">idle</span></div></div>
+    <div class="graph-head"><h2>Agent graph</h2><div class="gh-right"><span class="replay-badge" id="replayBadge" hidden><i></i>LIVE REPLAY</span><button class="btn ghost sm" type="button" id="realBtn" hidden>Run it for real</button><span id="phase" class="phase" role="status" aria-live="polite">idle</span></div></div>
     <svg id="graph" viewBox="0 0 960 250" role="img" aria-label="Live agent graph"></svg>
   </section>
 
-  <section class="kpis">
+  <section class="kpis" aria-label="Run metrics">
     <div class="kpi"><span>Advisories</span><b id="k-adv">–</b></div>
     <div class="kpi"><span>Tests</span><b id="k-tests">–</b></div>
     <div class="kpi"><span>Fix attempts</span><b id="k-att">–</b></div>
@@ -73,53 +81,53 @@
     </aside>
 
     <section class="card glass main">
-      <nav class="tabs" role="tablist">
-        <button class="tab active" data-tab="advisories">Advisories</button>
-        <button class="tab" data-tab="terminal">Live terminal</button>
-        <button class="tab" data-tab="ledger">Certificate</button>
-        <button class="tab" data-tab="proof">Proof &amp; risk</button>
-        <button class="tab" data-tab="drift">Drift radar</button>
-        <button class="tab" data-tab="diff">Diff</button>
+      <div class="tabs" role="tablist" aria-label="Run details">
+        <button class="tab active" data-tab="advisories" type="button" role="tab" id="tabbtn-advisories" aria-controls="tab-advisories" aria-selected="true" tabindex="0">Advisories</button>
+        <button class="tab" data-tab="terminal" type="button" role="tab" id="tabbtn-terminal" aria-controls="tab-terminal" aria-selected="false" tabindex="-1">Live terminal</button>
+        <button class="tab" data-tab="ledger" type="button" role="tab" id="tabbtn-ledger" aria-controls="tab-ledger" aria-selected="false" tabindex="-1">Certificate</button>
+        <button class="tab" data-tab="proof" type="button" role="tab" id="tabbtn-proof" aria-controls="tab-proof" aria-selected="false" tabindex="-1">Proof &amp; risk</button>
+        <button class="tab" data-tab="drift" type="button" role="tab" id="tabbtn-drift" aria-controls="tab-drift" aria-selected="false" tabindex="-1">Drift radar</button>
+        <button class="tab" data-tab="diff" type="button" role="tab" id="tabbtn-diff" aria-controls="tab-diff" aria-selected="false" tabindex="-1">Diff</button>
         <div class="more" id="more">
-          <button class="tab more-btn" id="moreBtn" type="button" aria-haspopup="true" aria-expanded="false">More ▾</button>
-          <div class="more-menu" id="moreMenu" role="menu" hidden>
-            <button class="tab" data-tab="evidence" role="menuitem">Evidence</button>
-            <button class="tab" data-tab="reach" role="menuitem">Reachability</button>
-            <button class="tab" data-tab="debate" role="menuitem">Debate</button>
-            <button class="tab" data-tab="report" role="menuitem">PR report</button>
-            <button class="tab" data-tab="bench" role="menuitem">Benchmarks</button>
+          <button class="tab more-btn" id="moreBtn" type="button" aria-controls="moreMenu" aria-expanded="false">More <span aria-hidden="true">▾</span></button>
+          <div class="more-menu" id="moreMenu" role="presentation" hidden>
+            <button class="tab" data-tab="evidence" type="button" role="tab" id="tabbtn-evidence" aria-controls="tab-evidence" aria-selected="false" tabindex="-1">Evidence</button>
+            <button class="tab" data-tab="reach" type="button" role="tab" id="tabbtn-reach" aria-controls="tab-reach" aria-selected="false" tabindex="-1">Reachability</button>
+            <button class="tab" data-tab="debate" type="button" role="tab" id="tabbtn-debate" aria-controls="tab-debate" aria-selected="false" tabindex="-1">Debate</button>
+            <button class="tab" data-tab="report" type="button" role="tab" id="tabbtn-report" aria-controls="tab-report" aria-selected="false" tabindex="-1">PR report</button>
+            <button class="tab" data-tab="bench" type="button" role="tab" id="tabbtn-bench" aria-controls="tab-bench" aria-selected="false" tabindex="-1">Benchmarks</button>
           </div>
         </div>
-      </nav>
-      <div class="panel active" id="tab-advisories"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div>
-      <div class="panel" id="tab-terminal"><pre class="term" id="term"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>
-      <div class="panel" id="tab-evidence"><div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div></div>
-      <div class="panel" id="tab-ledger"><div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div></div>
-      <div class="panel" id="tab-proof"><div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div></div>
-      <div class="panel" id="tab-drift"><div class="empty">Before any test runs, PatchPilot inspects the old and new library APIs and predicts exactly which of your lines will break.</div></div>
-      <div class="panel" id="tab-reach"><div class="empty">Where your code calls each vulnerable package.</div></div>
-      <div class="panel" id="tab-debate"><div class="empty">When a fix fails, each model's diagnosis appears here side by side.</div></div>
-      <div class="panel" id="tab-diff"><div class="empty">The verified patch appears here.</div></div>
-      <div class="panel" id="tab-report"><div class="empty">The pull-request description appears here.</div></div>
-      <div class="panel" id="tab-bench"><div class="empty">Run <code>python -m patchpilot.cli</code> to benchmark every case.</div></div>
+      </div>
+      <div class="panel active" id="tab-advisories" role="tabpanel" aria-labelledby="tabbtn-advisories" tabindex="0"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div>
+      <div class="panel" id="tab-terminal" role="tabpanel" aria-labelledby="tabbtn-terminal" tabindex="0" hidden><pre class="term" id="term" aria-live="off"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>
+      <div class="panel" id="tab-evidence" role="tabpanel" aria-labelledby="tabbtn-evidence" tabindex="0" hidden><div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div></div>
+      <div class="panel" id="tab-ledger" role="tabpanel" aria-labelledby="tabbtn-ledger" tabindex="0" hidden><div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div></div>
+      <div class="panel" id="tab-proof" role="tabpanel" aria-labelledby="tabbtn-proof" tabindex="0" hidden><div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div></div>
+      <div class="panel" id="tab-drift" role="tabpanel" aria-labelledby="tabbtn-drift" tabindex="0" hidden><div class="empty">Before any test runs, PatchPilot inspects the old and new library APIs and predicts exactly which of your lines will break.</div></div>
+      <div class="panel" id="tab-reach" role="tabpanel" aria-labelledby="tabbtn-reach" tabindex="0" hidden><div class="empty">Where your code calls each vulnerable package.</div></div>
+      <div class="panel" id="tab-debate" role="tabpanel" aria-labelledby="tabbtn-debate" tabindex="0" hidden><div class="empty">When a fix fails, each model's diagnosis appears here side by side.</div></div>
+      <div class="panel" id="tab-diff" role="tabpanel" aria-labelledby="tabbtn-diff" tabindex="0" hidden><div class="empty">The verified patch appears here.</div></div>
+      <div class="panel" id="tab-report" role="tabpanel" aria-labelledby="tabbtn-report" tabindex="0" hidden><div class="empty">The pull-request description appears here.</div></div>
+      <div class="panel" id="tab-bench" role="tabpanel" aria-labelledby="tabbtn-bench" tabindex="0" hidden><div class="empty">Run <code>python -m patchpilot.cli</code> to benchmark every case.</div></div>
     </section>
 
     <aside class="side">
       <div class="card glass">
         <h2>Model routing</h2>
-        <div id="routing" class="routing"></div>
+        <div id="routing" class="routing" role="status" aria-live="polite"></div>
         <p class="hint" id="costNote"></p>
-        <button class="btn ghost" id="speak" type="button" hidden style="margin-top:12px;width:100%">🔊 Brief me</button>
+        <button class="btn ghost btn-block" id="speak" type="button" hidden><span aria-hidden="true">🔊</span> Brief me</button>
       </div>
       <div class="card glass">
         <h2>Test timeline</h2>
-        <ol id="tests" class="tests"><li class="muted">No test runs yet</li></ol>
+        <ol id="tests" class="tests" aria-live="polite"><li class="muted">No test runs yet</li></ol>
       </div>
     </aside>
   </div>
-  <div id="banner" class="banner" hidden></div>
+  <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
 </main>
-<footer>Built with NVIDIA Nemotron · Advisories from OSV.dev · Research by Tavily · MIT licensed</footer>
+<footer class="foot" data-site-foot></footer>
 <script src="/static/site.js"></script>
 <script src="/static/app.js"></script>
 </body>

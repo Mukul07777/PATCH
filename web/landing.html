@@ -1,12 +1,19 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PatchPilot</title>
-<meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
+<meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
+<meta property="og:title" content="PatchPilot">
+<meta property="og:description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/site.css">
@@ -59,7 +66,7 @@
   .stats b { display: block; font: 900 clamp(30px, 3.2vw, 44px) Archivo; letter-spacing: -.03em; color: #f2f2f0; }
   .stats b small { font-size: .5em; color: #8a8a86; margin-left: 4px; }
   .stats span { color: #8a8a86; font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-  .stats-note { grid-column: 1 / -1; padding: 0 28px 16px; color: #5a5a56; font: 11px var(--mono); }
+  .stats-note { grid-column: 1 / -1; padding: 0 28px 16px; color: #8a8a86; font: 11px var(--mono); }
   /* ---------- feature strip ---------- */
   .strip { display: grid; grid-template-columns: repeat(4, 1fr); background: #000; border-block: 1px solid rgba(255,255,255,.08); }
   .strip > div { padding: 34px 28px 30px; border-right: 1px solid rgba(255,255,255,.08); position: relative; overflow: hidden; min-height: 250px; display: flex; flex-direction: column; }
@@ -120,7 +127,9 @@
   .bigfoot form { display: flex; border: 1px solid rgba(255,255,255,.15); }
   .bigfoot input { background: transparent; border: 0; border-radius: 0; color: #fff; padding: 12px; }
   .bigfoot button { background: #f2f2f0; border: 0; padding: 0 16px; cursor: pointer; font-weight: 800; }
-  .copy { grid-column: 1 / -1; text-align: center; color: #5a5a56; font-size: 11px; border-top: 1px solid rgba(255,255,255,.06); padding-top: 22px; margin-top: 10px; }
+  .copy a { display: inline; margin: 0 0 0 18px; } .copy nav { display: inline; }
+  #typed .caret { display: inline-block; width: 8px; height: 14px; background: #9be22d; }
+  .copy { grid-column: 1 / -1; text-align: center; color: #8a8a86; font-size: 11px; border-top: 1px solid rgba(255,255,255,.06); padding-top: 22px; margin-top: 10px; }
 
   @media (max-width: 1000px) {
     .strip, .ed-grid { grid-template-columns: repeat(2, 1fr); }
@@ -156,6 +165,7 @@
 <div class="utility"><span>Find the CVE. Fix the code. Ship the PR.</span><span><a href="/console">Launch agent</a><a href="/runs">Run log</a><a href="/how">Help</a></span></div>
 <header class="topbar"></header>
 
+<main id="main">
 <!-- HERO -->
 <section class="stage" id="stage">
   <h1 class="word disp" id="word" aria-label="Patch"><span>P</span><span>A</span><span>T</span><span>C</span><span>H</span></h1>
@@ -166,8 +176,8 @@
   <div class="corner c-tl"><p>Vulnerable is common.<br>Patched is rare.<br>Verified is PatchPilot.</p><span class="rule"></span></div>
   <div class="corner c-tr"><b>3 models</b><small>Nemotron Nano · Super · Ultra</small></div>
   <div class="corner c-bl">
-    <a class="btn-solid" href="/console">Launch agent →</a>
-    <a class="btn-text" href="/console?demo=1">▶ Guided demo</a>
+    <a class="btn-solid" href="/console">Launch agent <span aria-hidden="true">→</span></a>
+    <a class="btn-text" href="/console?demo=1"><span aria-hidden="true">▶</span> Guided demo</a>
     <a class="btn-text" href="/runs">Run log</a>
   </div>
   <div class="corner c-br">Autonomous<br>security · 2026<span class="rule"></span></div>
@@ -179,10 +189,10 @@
 
 <!-- FEATURE STRIP -->
 <section class="strip">
-  <div class="rv" style="--g:#ff5a3d"><span class="ic">🛰️</span><h3>Scan the threat</h3><p>Every pinned dependency is checked against OSV.dev, and a threat clock shows how long each CVE has been public.</p><a href="/how">Explore pipeline →</a></div>
-  <div class="rv" style="--g:#4cc2ff;--d:.08s"><span class="ic">🔎</span><h3>Predict the break</h3><p>Drift radar diffs the old and new library APIs and predicts which of your lines will break. Tavily cites the migration guide.</p><a href="/how">See evidence →</a></div>
-  <div class="rv" style="--g:#b98cff;--d:.16s"><span class="ic">🛠️</span><h3>Fix, then attack</h3><p>Nemotron patches breaking call-sites, then a red team fires exploit variants at the fix.</p><a href="/console">Watch it work →</a></div>
-  <div class="rv" style="--g:#76b900;--d:.24s"><span class="ic">🚀</span><h3>Ship with proof</h3><p>No PR leaves until your tests are green, and every claim it makes is in a signed proof certificate.</p><a href="/runs">View runs →</a></div>
+  <div class="rv" style="--g:#ff5a3d"><span class="ic" aria-hidden="true">🛰️</span><h3>Scan the threat</h3><p>Every pinned dependency is checked against OSV.dev, and a threat clock shows how long each CVE has been public.</p><a href="/how">Explore pipeline <span aria-hidden="true">→</span></a></div>
+  <div class="rv" style="--g:#4cc2ff;--d:.08s"><span class="ic" aria-hidden="true">🔎</span><h3>Predict the break</h3><p>Drift radar diffs the old and new library APIs and predicts which of your lines will break. Tavily cites the migration guide.</p><a href="/how">See evidence <span aria-hidden="true">→</span></a></div>
+  <div class="rv" style="--g:#b98cff;--d:.16s"><span class="ic" aria-hidden="true">🛠️</span><h3>Fix, then attack</h3><p>Nemotron patches breaking call-sites, then a red team fires exploit variants at the fix.</p><a href="/console">Watch it work <span aria-hidden="true">→</span></a></div>
+  <div class="rv" style="--g:#76b900;--d:.24s"><span class="ic" aria-hidden="true">🚀</span><h3>Ship with proof</h3><p>No PR leaves until your tests are green, and every claim it makes is in a signed proof certificate.</p><a href="/runs">View runs <span aria-hidden="true">→</span></a></div>
 </section>
 
 <!-- STORY -->
@@ -203,11 +213,11 @@
 
 <!-- ICON ROW -->
 <section class="icons">
-  <div class="rv"><span class="ic">⏱️</span><div><b>Threat clock</b><span>How long each CVE has been exploitable</span></div></div>
-  <div class="rv" style="--d:.05s"><span class="ic">📡</span><div><b>Drift radar</b><span>Predicts which lines an upgrade breaks</span></div></div>
-  <div class="rv" style="--d:.1s"><span class="ic">🗡️</span><div><b>Red team</b><span>Attack variants fired at every fix</span></div></div>
-  <div class="rv" style="--d:.15s"><span class="ic">📜</span><div><b>Proof certificate</b><span>Every PR claim verified and hashed</span></div></div>
-  <div class="rv" style="--d:.2s"><span class="ic">⏪</span><div><b>Full replay</b><span>Audit any run, event by event</span></div></div>
+  <div class="rv"><span class="ic" aria-hidden="true">⏱️</span><div><b>Threat clock</b><span>How long each CVE has been exploitable</span></div></div>
+  <div class="rv" style="--d:.05s"><span class="ic" aria-hidden="true">📡</span><div><b>Drift radar</b><span>Predicts which lines an upgrade breaks</span></div></div>
+  <div class="rv" style="--d:.1s"><span class="ic" aria-hidden="true">🗡️</span><div><b>Red team</b><span>Attack variants fired at every fix</span></div></div>
+  <div class="rv" style="--d:.15s"><span class="ic" aria-hidden="true">📜</span><div><b>Proof certificate</b><span>Every PR claim verified and hashed</span></div></div>
+  <div class="rv" style="--d:.2s"><span class="ic" aria-hidden="true">⏪</span><div><b>Full replay</b><span>Audit any run, event by event</span></div></div>
 </section>
 
 <!-- TIERS -->
@@ -220,92 +230,18 @@
     <div class="ed rv" style="--c1:#76b900;--c2:#3ce39b;--c3:#d4ff3a;--d:.24s"><div class="art"><span class="tag">Full pipeline</span><i></i></div><div class="body"><h3>All three, routed</h3><ul><li>Cheapest model per step</li><li>Auto-escalation</li><li>Verified PR</li></ul><div class="row"><b>PatchPilot</b><a href="/console">Launch</a></div></div></div>
   </div>
 </section>
+</main>
 
 <footer class="bigfoot">
   <div><div class="logo">PATCHPILOT<small>Autonomous security</small></div><p>An agentic DevSecOps tool for software supply chain security. Find the CVE, fix the code, ship the PR.</p></div>
   <div><h4>Product</h4><a href="/console">Console</a><a href="/runs">Runs</a><a href="/how">How it works</a></div>
   <div><h4>Stack</h4><a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a><a href="https://tavily.com" target="_blank" rel="noopener">Tavily</a><a href="https://build.nvidia.com" target="_blank" rel="noopener">NVIDIA Nemotron</a></div>
   <div><h4>Project</h4><a href="/how">FAQ</a><a href="/runs">Benchmarks</a></div>
-  <div><h4>Try it</h4><p>Paste a public repo with pinned requirements.txt and a pytest suite.</p><form onsubmit="event.preventDefault();location.href='/console'"><input placeholder="github.com/you/repo" aria-label="Repository URL"><button aria-label="Go">→</button></form></div>
-  <div class="copy">© 2026 PatchPilot · MIT licensed</div>
+  <div><h4>Try it</h4><p>Paste a public repo with pinned requirements.txt and a pytest suite.</p><form id="tryForm"><input id="tryRepo" name="repo" placeholder="github.com/you/repo" aria-label="Repository URL" autocomplete="off"><button type="submit" aria-label="Open in console"><span aria-hidden="true">→</span></button></form></div>
+  <div class="copy" data-site-foot></div>
 </footer>
 
 <script src="/static/site.js"></script>
-<script>
-(() => {
-  document.documentElement.dataset.theme = "dark";
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // ---------- parallax: letters drift on scroll ----------
-  const word = document.getElementById("word");
-  if (!reduced) addEventListener("scroll", () => {
-    const y = scrollY; if (y > innerHeight) return;
-    word.style.transform = `translateY(calc(-46% + ${y * .35}px)) scale(${1 + y / 4000})`;
-  }, { passive: true });
-
-  // ---------- proof stats: computed from real recorded runs only ----------
-  (async () => {
-    const get = (u) => fetch(u).then((r) => (r.ok ? r.json() : [])).catch(() => []);
-    const [bench, runs] = await Promise.all([get("/api/bench"), get("/api/runs")]);
-    const latest = new Map();
-    (Array.isArray(runs) ? runs : []).forEach((r) => { if (r.ok === true && !latest.has(r.repo)) latest.set(r.repo, r.id); });
-    (Array.isArray(bench) ? bench : []).forEach((r) => { if (r.ok && r.run && !latest.has(r.repo)) latest.set(r.repo, r.run); });
-    const evs = await Promise.all([...latest.values()].map((id) => fetch(`/api/runs/${id}/events`).then((r) => (r.ok ? r.text() : "")).catch(() => "")
-      .then((t) => t.split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => { try { return JSON.parse(l.slice(6)); } catch { return null; } }).filter(Boolean))));
-    let closed = 0, blocked = 0, total = 0, sawRt = false; const trusts = [];
-    evs.forEach((list) => list.forEach((e) => {
-      if (e.type === "exploit" && e.stage === "after" && e.closed) closed++;
-      if (e.type === "redteam" && e.stage === "after" && Array.isArray(e.rows)) { sawRt = true; total += e.rows.length; blocked += e.rows.length - (e.open || 0); }
-      if (e.type === "ledger" && typeof e.trust === "number") trusts.push(e.trust);
-    }));
-    const stats = [];
-    if (latest.size) stats.push([latest.size, "", "repos secured, tests green"]);
-    if (closed) stats.push([closed, "", "exploits proven closed"]);
-    if (sawRt && total) stats.push([blocked, `/${total}`, "attack variants blocked"]);
-    if (trusts.length) stats.push([Math.round(trusts.reduce((a, b) => a + b, 0) / trusts.length), "/100", "avg certificate trust"]);
-    if (!stats.length) return;
-    const el = document.getElementById("stats");
-    el.innerHTML = stats.map(([n, suf, label]) => `<div><b>${n}<small>${suf}</small></b><span>${label}</span></div>`).join("") +
-      `<div class="stats-note">Computed live from ${latest.size} recorded run${latest.size === 1 ? "" : "s"} on this server (latest successful run per target).</div>`;
-    el.style.setProperty("--n", stats.length);
-    el.hidden = false;
-  })();
-
-  // ---------- scripted terminal demo (illustrative, not live data) ----------
-  const L = [
-    ['<span class="d">$</span> <span class="k">patchpilot</span> run case:authsvc', 0],
-    ['<span class="d">▸</span> scan · OSV.dev', 500],
-    ['  <span class="b">HIGH</span>     CVE-2022-29217  PyJWT 1.7.1', 250],
-    ['  <span class="b">MODERATE</span> CVE-2023-32681  requests 2.25.1', 200],
-    ['<span class="b">threat clock</span> › CVE-2022-29217 public for 4+ years, exploit published', 500],
-    ['<span class="n">nano</span>  › triage advisories … <span class="g">✓</span>', 600],
-    ['<span class="t">tavily</span> › "PyJWT 2.0 migration guide"', 500],
-    ['<span class="s">super</span> › plan PyJWT 1.7.1 → 2.x <span class="t">[breaking]</span>', 600],
-    ['<span class="s">drift radar</span> › predicts 2 call-sites break: jwt.decode(), token.decode()', 600],
-    ['<span class="b">exploit</span> › key-confusion attack WORKS on old pins', 500],
-    ['<span class="d">pytest</span> › upgrade: <span class="b">FAIL</span>', 700],
-    ['<span class="s">super</span> › patch #1: add algorithms=[…] to decode()', 600],
-    ['<span class="d">pytest</span> › attempt 1: <span class="b">FAIL</span>', 700],
-    ['<span class="u">ultra</span> › escalate: bytes/str token handling', 600],
-    ['<span class="d">pytest</span> › attempt 2: <span class="g">PASS</span>', 700],
-    ['<span class="u">red team</span> › after fix: <span class="g">7/8 variants blocked</span>', 600],
-    ['<span class="g">exploit</span> › proven closed', 400],
-    ['<span class="g">certificate</span> › trust 93 · sha256 9f2c…e41a', 500],
-    ['<span class="g">✔ secured</span> · PR ready', 400],
-  ];
-  const pre = document.getElementById("typed");
-  let started = false;
-  new IntersectionObserver(([e]) => { if (e.isIntersecting && !started) { started = true; play(); } }, { threshold: .3 }).observe(pre);
-  async function play() {
-    for (;;) {
-      pre.innerHTML = "";
-      for (const [html, wait] of L) { await new Promise((r) => setTimeout(r, reduced ? 0 : wait)); pre.insertAdjacentHTML("beforeend", html + "\n"); }
-      pre.insertAdjacentHTML("beforeend", '<span style="display:inline-block;width:8px;height:14px;background:#9be22d"></span>');
-      if (reduced) return;
-      await new Promise((r) => setTimeout(r, 4500));
-    }
-  }
-})();
-</script>
+<script src="/static/landing.js"></script>
 </body>
 </html>

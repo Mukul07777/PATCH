@@ -1,5 +1,5 @@
 const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = window.ppEsc;
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const STEPS = [
@@ -12,18 +12,33 @@ const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
 let state, source, selectedCase = "";
 
 // ---------- tabs ----------
-document.querySelectorAll(".tab[data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+const TAB_BTNS = [...document.querySelectorAll(".tab[data-tab]")];
+TAB_BTNS.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
 const moreMenu = $("#moreMenu"), moreBtn = $("#moreBtn");
 function setMore(open) { moreMenu.hidden = !open; moreBtn.setAttribute("aria-expanded", String(open)); }
-moreBtn.onclick = (e) => { e.stopPropagation(); setMore(moreMenu.hidden); };
+moreBtn.addEventListener("click", (e) => { e.stopPropagation(); setMore(moreMenu.hidden); });
 document.addEventListener("click", (e) => { if (!e.target.closest("#more")) setMore(false); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMore(false); });
+// WAI-ARIA tabs: arrow keys / Home / End move between tabs (tabs in the "More" overflow included).
+$(".tabs[role=tablist]").addEventListener("keydown", (e) => {
+  const i = TAB_BTNS.indexOf(document.activeElement);
+  if (i < 0) return;
+  const n = TAB_BTNS.length, to = { ArrowRight: (i + 1) % n, ArrowDown: (i + 1) % n, ArrowLeft: (i - 1 + n) % n, ArrowUp: (i - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
+  if (to == null) return;
+  e.preventDefault();
+  showTab(TAB_BTNS[to].dataset.tab);
+  if (moreMenu.contains(TAB_BTNS[to])) setMore(true);
+  TAB_BTNS[to].focus();
+});
 function showTab(name) {
-  document.querySelectorAll(".tab[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
-  const inMore = !!moreMenu.querySelector(`[data-tab="${name}"]`);
-  moreBtn.classList.toggle("active", inMore);
-  moreBtn.textContent = inMore ? `${moreMenu.querySelector(`[data-tab="${name}"]`).textContent} ▾` : "More ▾";
+  TAB_BTNS.forEach((b) => {
+    const on = b.dataset.tab === name;
+    b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1;
+  });
+  document.querySelectorAll(".panel").forEach((p) => { const on = p.id === "tab-" + name; p.classList.toggle("active", on); p.hidden = !on; });
+  const inMore = moreMenu.querySelector(`[data-tab="${name}"]`);
+  moreBtn.classList.toggle("active", !!inMore);
+  moreBtn.innerHTML = `${inMore ? esc(inMore.textContent) : "More"} <span aria-hidden="true">▾</span>`;
   setMore(false);
   if (name === "bench") loadBench();
 }
@@ -99,21 +114,35 @@ async function boot() {
     fetch("/api/runs").then((r) => r.json()).catch(() => []),
   ]);
   if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Remote repos are disabled on this public demo. Pick a case above."; }
-  $("#cases").innerHTML = cases.map((c, i) => `<button type="button" class="case ${i === 0 ? "active" : ""}" data-id="${esc(c.id)}" role="radio">
-    <b>case:${esc(c.id)}</b><small>${c.pins.map(esc).join(" · ")}</small></button>`).join("");
-  selectedCase = cases[0] ? "case:" + cases[0].id : "";
-  document.querySelectorAll(".case").forEach((b) => (b.onclick = () => {
-    document.querySelectorAll(".case").forEach((x) => x.classList.toggle("active", x === b));
+  const caseList = Array.isArray(cases) ? cases : [], runList = Array.isArray(runs) ? runs : [];
+  $("#cases").innerHTML = caseList.map((c, i) => `<button type="button" class="case ${i === 0 ? "active" : ""}" data-id="${esc(c.id)}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}">
+    <b>case:${esc(c.id)}</b><small>${(c.pins || []).map(esc).join(" · ")}</small></button>`).join("");
+  selectedCase = caseList[0] ? "case:" + caseList[0].id : "";
+  const caseBtns = [...document.querySelectorAll(".case")];
+  const pickCase = (b) => {
+    caseBtns.forEach((x) => { const on = x === b; x.classList.toggle("active", on); x.setAttribute("aria-checked", String(on)); x.tabIndex = on ? 0 : -1; });
     selectedCase = "case:" + b.dataset.id; $("#repo").value = "";
-  }));
+  };
+  caseBtns.forEach((b, i) => {
+    b.addEventListener("click", () => pickCase(b));
+    b.addEventListener("keydown", (e) => {
+      const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      const nb = caseBtns[(i + d + caseBtns.length) % caseBtns.length]; pickCase(nb); nb.focus();
+    });
+  });
   $("#history").innerHTML = '<option value="">▶ Replay a recorded run…</option>' +
-    runs.map((r) => `<option value="${r.id}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${esc(r.repo)} · ${r.id}</option>`).join("");
+    runList.map((r) => `<option value="${esc(r.id)}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${esc(r.repo)} · ${esc(r.id)}</option>`).join("");
   reset();
   const qs = new URLSearchParams(location.search), replay = qs.get("replay");
-  if (qs.get("repo")) $("#repo").value = qs.get("repo");
+  if (qs.get("repo") && !$("#repo").disabled) {
+    $("#repo").value = qs.get("repo");
+    caseBtns.forEach((x) => { x.classList.remove("active"); x.setAttribute("aria-checked", "false"); });
+  }
   if (replay) listen(replay, 4);
   else if (!userStarted) {
-    const best = await pickBestRun(runs);
+    const best = await pickBestRun(runList);
     if (best && !userStarted) { if (qs.get("demo")) startDemo(); listen(best, qs.get("demo") ? 8 : 10, { auto: true }); }
   }
 }
@@ -121,7 +150,7 @@ async function boot() {
 // ---------- auto replay + guided demo ----------
 let userStarted = false, autoReplay = false, demo = null;
 async function runTypes(id) {
-  const txt = await fetch(`/api/runs/${id}/events`).then((r) => r.text()).catch(() => "");
+  const txt = await fetch(`/api/runs/${encodeURIComponent(id)}/events`).then((r) => r.text()).catch(() => "");
   const evs = txt.split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => { try { return JSON.parse(l.slice(6)); } catch { return null; } }).filter(Boolean);
   const trust = evs.find((e) => e.type === "ledger")?.trust || 0;
   return { size: new Set(evs.map((e) => e.type)).size, trust };
@@ -223,8 +252,8 @@ function listen(id, replay, opts = {}) {
   $("#runBtn").disabled = true;
   showTab("terminal");
   term("sys", `$ patchpilot run ${id}${replay ? "  --replay" : ""}`);
-  source = new EventSource(`/api/runs/${id}/events?replay=${replay}`);
-  const queue = [], src = source; let pumping = false;
+  source = new EventSource(`/api/runs/${encodeURIComponent(id)}/events?replay=${replay}`);
+  const queue = [], src = source; let pumping = false, finished = false;
   const pump = async () => {
     if (pumping) return; pumping = true;
     while (queue.length && source === src) {
@@ -235,8 +264,15 @@ function listen(id, replay, opts = {}) {
     }
     pumping = false;
   };
-  source.onmessage = (m) => { queue.push(JSON.parse(m.data)); pump(); };
-  source.onerror = () => { source.close(); $("#runBtn").disabled = false; };
+  src.addEventListener("message", (m) => {
+    let ev; try { ev = JSON.parse(m.data); } catch { return; }
+    if (ev.type === "done") finished = true;
+    queue.push(ev); pump();
+  });
+  src.addEventListener("error", () => {
+    src.close(); $("#runBtn").disabled = false;
+    if (!finished && source === src) { banner("Connection lost. The event stream closed before the run finished.", false); phase("disconnected"); }
+  });
 }
 
 // ---------- events ----------
@@ -356,10 +392,11 @@ function onDone(ev) {
     document.querySelectorAll(".sevbar i").forEach((i) => (i.style.width = "0"));
     $("#sevlegend").textContent = `${state.total} advisories resolved · all tests passing`;
     term("ok", `✔ secured: ${state.total} advisories cleared in ${fmtTime(ev.seconds || 0)} with ${ev.attempts} repair attempt(s)`);
-    const pr = ev.pr ? ` <a href="${esc(ev.pr.url)}" target="_blank" rel="noopener">Open PR ↗</a>` : "";
+    const pr = ev.pr && /^https:\/\//i.test(ev.pr.url || "") ? ` <a href="${esc(ev.pr.url)}" target="_blank" rel="noopener">Open PR <span aria-hidden="true">↗</span></a>` : "";
     banner(`Secured. All tests passing after ${ev.attempts} repair attempt(s).` + pr, true);
     confetti(); if (!demo) setTimeout(() => showTab("diff"), 1800);
   } else if (ev.attempts != null) { phase("needs review"); banner("Could not reach green tests. Patch needs human review.", false); }
+  else if (ev.error) { phase("error"); term("bad", `error › ${ev.error}`); banner(esc(ev.error), false); }
   $("#term").insertAdjacentHTML("beforeend", '<span class="cursor"></span>');
 }
 
@@ -497,8 +534,8 @@ function renderLedger() {
     <div class="claims">${L.claims.map((c) => `<div class="claim ${c.status}"><span class="ci">${icon[c.status]}</span>
       <div><b>${esc(c.claim)}</b><small>${esc(c.evidence)}</small></div><span class="cs">${c.status}</span></div>`).join("")}</div>
     <div class="cert-foot"><code title="sha256 of claims + diff">sha256 ${esc(L.sha256.slice(0, 32))}…</code>
-      <span class="cert-btns"><button class="btn ghost" id="dlVex" title="OpenVEX v0.2.0: machine-readable exploitability statements">⇩ OpenVEX</button>
-      <button class="btn ghost" id="dlCert">⇩ Download certificate</button></span></div>
+      <span class="cert-btns"><button class="btn ghost" id="dlVex" title="OpenVEX v0.2.0: machine-readable exploitability statements"><span aria-hidden="true">⇩</span> OpenVEX</button>
+      <button class="btn ghost" id="dlCert"><span aria-hidden="true">⇩</span> Download certificate</button></span></div>
     ${state.vex ? (() => { const n = vexCounts(state.vex); return `<div class="vex-sum"><span class="chip nano">OpenVEX</span>
       <span class="vx ok"><b>${n.fixed}</b> fixed</span><span class="vx bad"><b>${n.affected}</b> affected</span><span class="vx na"><b>${n.not_affected}</b> not affected</span>
       <small class="muted">${(state.vex.statements || []).length} statement(s), static evidence only</small></div>`; })() : ""}</div>`;
@@ -527,7 +564,7 @@ function renderReach() {
     hits.forEach((h) => { const m = /^(.+?):(\d+): (.*)$/.exec(h); if (m) (files[m[1]] ||= []).push([m[2], m[3]]); });
     const fk = Object.keys(files);
     return `<div class="reach"><div class="r-pkg"><span class="sev HIGH">vuln</span><b>${esc(pkg)}</b><small>${hits.length} call-site(s)</small></div>
-      <div class="r-files">${fk.length ? fk.map((f) => `<div class="r-file"><div class="r-name">📄 ${esc(f)}</div>
+      <div class="r-files">${fk.length ? fk.map((f) => `<div class="r-file"><div class="r-name"><span aria-hidden="true">📄</span> ${esc(f)}</div>
         ${files[f].map(([ln, code]) => `<div class="r-line"><span>${ln}</span><code>${esc(code)}</code></div>`).join("")}</div>`).join("")
         : '<div class="muted r-none">Not imported directly. Likely a transitive dependency.</div>'}</div></div>`;
   }).join("");
@@ -537,7 +574,7 @@ function renderDebate() {
   $("#tab-debate").innerHTML = `<div class="debate">${state.patches.map((p) => `<div class="db card glass" style="--c:var(--${p.tier})">
     <div class="db-head"><span class="chip ${p.tier}">${p.tier}</span><b>Attempt #${p.attempt}</b></div>
     <small>Diagnosis</small><p>${esc(p.diagnosis || "—")}</p><small>Fix</small><p>${esc(p.explanation)}</p>
-    <div class="muted">${p.files.map((f) => "✎ " + esc(f)).join("<br>")}</div></div>`).join("")}</div>`;
+    <div class="muted">${p.files.map((f) => "<span aria-hidden=\"true\">✎</span> " + esc(f)).join("<br>")}</div></div>`).join("")}</div>`;
 }
 
 $("#speak").onclick = () => {
@@ -624,7 +661,7 @@ function renderRouting() {
     const u = state.usage[t];
     return `<div class="tier"><div class="top"><span class="chip ${t}">${t}</span><span class="nums">${u.calls}× · ${u.tok.toLocaleString()} tok · ${u.s.toFixed(1)}s</span></div>
       <div class="model" title="${esc(u.model)}">${esc(u.model || "—")}</div>
-      <div class="bar"><i style="width:${(u.tok / max) * 100}%;background:var(--${t});color:var(--${t})"></i></div></div>`;
+      <div class="bar"><i class="t-${t}" style="width:${(u.tok / max) * 100}%"></i></div></div>`;
   }).join("");
 }
 
@@ -642,21 +679,21 @@ function renderDiff() {
     const cls = l.startsWith("+++") || l.startsWith("---") ? "file" : l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "";
     return cls ? `<span class="${cls}">${esc(l)}</span>` : esc(l) + "\n";
   }).join("");
-  $("#tab-diff").innerHTML = `<div class="toolbar"><button class="btn ghost" id="dlPatch">⇩ Download .patch</button></div><pre class="diff">${html}</pre>`;
+  $("#tab-diff").innerHTML = `<div class="toolbar"><button class="btn ghost" id="dlPatch"><span aria-hidden="true">⇩</span> Download .patch</button></div><pre class="diff">${html}</pre>`;
   $("#dlPatch").onclick = () => download("patchpilot.patch", state.diff);
 }
 
 function renderReport() {
   const md = state.report.split("\n").map((l) => {
     let h = esc(l).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) => window.ppMdLink(label, url));
     if (l.startsWith("### ")) return `<h3>${h.slice(4)}</h3>`;
     if (l.startsWith("## ")) return `<h2>${h.slice(3)}</h2>`;
     if (l.startsWith("- ")) return `<li>${h.slice(2)}</li>`;
     if (l.startsWith("&gt; ")) return `<blockquote>${h.slice(5)}</blockquote>`;
     return h ? `<p>${h}</p>` : "";
   }).join("");
-  $("#tab-report").innerHTML = `<div class="toolbar"><button class="btn ghost" id="copyMd">⧉ Copy markdown</button></div><div class="report">${md}</div>`;
+  $("#tab-report").innerHTML = `<div class="toolbar"><button class="btn ghost" id="copyMd"><span aria-hidden="true">⧉</span> Copy markdown</button></div><div class="report">${md}</div>`;
   $("#copyMd").onclick = () => navigator.clipboard?.writeText(state.report).then(() => banner("Copied PR description", true));
 }
 
@@ -667,7 +704,7 @@ async function loadBench() {
   const ok = rows.filter((r) => r.ok).length;
   $("#tab-bench").innerHTML = `<p><b>${ok}/${rows.length}</b> cases fixed with all tests passing.</p>
     <table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Attempts</th><th>Time</th><th>Tokens</th><th>Cost</th><th></th></tr></thead><tbody>
-    ${rows.map((r) => `<tr><td><code>${esc(r.repo)}</code></td><td>${r.ok ? '<span style="color:var(--ok)">✓ green</span>' : '<span style="color:var(--bad)">✗ review</span>'}</td>
+    ${rows.map((r) => `<tr><td><code>${esc(r.repo)}</code></td><td>${r.ok ? '<span class="c-ok"><span aria-hidden="true">✓</span> green</span>' : '<span class="c-bad"><span aria-hidden="true">✗</span> review</span>'}</td>
       <td class="num">${r.attempts ?? "–"}</td><td class="num">${r.seconds ? fmtTime(r.seconds) : "–"}</td>
       <td class="num">${(sum(r, "in") + sum(r, "out")).toLocaleString()}</td>
       <td class="num">${r.usage?.priced ? "$" + r.usage.total.toFixed(4) : "–"}</td>

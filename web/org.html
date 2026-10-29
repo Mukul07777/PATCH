@@ -5,7 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PatchPilot Org Scan</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
+<meta name="description" content="Scan every public Python repo of a GitHub user or organisation against OSV.dev and see a vulnerability heat map.">
+<meta property="og:title" content="PatchPilot Org Scan">
+<meta property="og:description" content="Scan every public Python repo of a GitHub user or organisation against OSV.dev and see a vulnerability heat map.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/site.css">
@@ -15,57 +23,27 @@
 <div class="bg-glow" aria-hidden="true"></div>
 <header class="topbar"></header>
 
+<main id="main">
 <div class="page-head rv"><span class="kicker">Org scan</span><h1>Your whole GitHub, one heat map.</h1><p>Scan every public Python repo of a user or organisation against OSV.dev, then send the agent to fix the worst ones.</p></div>
 
 <div class="wrap">
-  <form class="org-form" id="f">
-    <input id="owner" placeholder="GitHub user or org, e.g. pallets" autocomplete="off" required>
+  <form class="org-form" id="f" role="search">
+    <label for="owner" class="sr-only">GitHub user or organisation</label>
+    <input id="owner" name="owner" placeholder="GitHub user or org, e.g. pallets" autocomplete="off" required>
     <button class="btn-run" type="submit"><span>Scan</span></button>
   </form>
-  <div class="summary" id="sum" hidden>
+  <div class="summary" id="sum" hidden role="status" aria-live="polite">
     <div class="kpi"><span>Repos scanned</span><b id="s-repos">–</b></div>
-    <div class="kpi"><span>Vulnerable repos</span><b id="s-vuln" style="color:var(--bad)">–</b></div>
-    <div class="kpi"><span>Critical + high</span><b id="s-ch" style="color:var(--warn)">–</b></div>
+    <div class="kpi"><span>Vulnerable repos</span><b id="s-vuln" class="c-bad">–</b></div>
+    <div class="kpi"><span>Critical + high</span><b id="s-ch" class="c-warn">–</b></div>
     <div class="kpi"><span>Total advisories</span><b id="s-all">–</b></div>
   </div>
-  <div class="heat" id="heat"><div class="empty" style="grid-column:1/-1">Enter a GitHub owner to scan. Only repos with a pinned <code>requirements.txt</code> are checked.</div></div>
+  <div class="heat" id="heat" role="status" aria-live="polite"><div class="empty span-all">Enter a GitHub owner to scan. Only repos with a pinned <code>requirements.txt</code> are checked.</div></div>
 </div>
+</main>
 
-<footer class="foot"><span>PatchPilot · NVIDIA Nemotron · OSV.dev · Tavily</span><span><a href="/">Home</a><a href="/console">Console</a><a href="/runs">Runs</a></span></footer>
+<footer class="foot" data-site-foot></footer>
 <script src="/static/site.js"></script>
-<script>
-(() => {
-  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const $ = (s) => document.querySelector(s);
-  const q = new URLSearchParams(location.search).get("owner");
-  if (q) { $("#owner").value = q; scan(q); }
-  $("#f").onsubmit = (e) => { e.preventDefault(); const o = $("#owner").value.trim(); history.replaceState(null, "", "?owner=" + encodeURIComponent(o)); scan(o); };
-
-  async function scan(owner) {
-    $("#heat").innerHTML = '<div class="empty" style="grid-column:1/-1">Scanning repos against OSV.dev…</div>';
-    const r = await fetch("/api/org/" + encodeURIComponent(owner));
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) return ($("#heat").innerHTML = `<div class="empty" style="grid-column:1/-1">${esc(data.detail || "Scan failed")}</div>`);
-    const rows = data.repos.filter((x) => x.has_reqs);
-    const total = (x) => x.critical + x.high + x.other;
-    $("#sum").hidden = false;
-    $("#s-repos").textContent = data.scanned;
-    $("#s-vuln").textContent = rows.filter((x) => total(x)).length;
-    $("#s-ch").textContent = rows.reduce((n, x) => n + x.critical + x.high, 0);
-    $("#s-all").textContent = rows.reduce((n, x) => n + total(x), 0);
-    if (!rows.length) return ($("#heat").innerHTML = '<div class="empty" style="grid-column:1/-1">No repos with a requirements.txt found.</div>');
-    $("#heat").innerHTML = rows.map((x, i) => {
-      const t = total(x), c = x.critical ? "var(--bad)" : x.high ? "var(--warn)" : t ? "var(--info)" : "var(--ok)";
-      return `<div class="hc spot rv" style="--d:${Math.min(i, 10) * .03}s;--hc:${c};--heat:radial-gradient(circle at 100% 0%, ${c}, transparent 70%)">
-        <div class="top"><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a><span class="muted">★ ${x.stars}</span></div>
-        <div class="n">${t}</div>
-        <div class="muted" style="font-size:12px">${x.critical} critical · ${x.high} high · ${x.other} other · ${x.pins} pins</div>
-        <div class="pk">${x.packages.slice(0, 3).map((p) => `${esc(p.package)}==${esc(p.version)}`).join(" · ") || "clean"}</div>
-        ${t ? `<a class="btn ghost fix" href="/console?repo=${encodeURIComponent(x.url)}">Fix with agent →</a>` : ""}</div>`;
-    }).join("");
-    window.ppReveal();
-  }
-})();
-</script>
+<script src="/static/org.js"></script>
 </body>
 </html>

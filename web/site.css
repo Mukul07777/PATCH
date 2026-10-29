@@ -175,3 +175,5 @@
   .rv { opacity: 1; transform: none; transition: none; }
   .marquee .track, .float, .l-hero h1 .line > span, .btn-cta::after { animation: none; }
 }
+.filters [role="group"] { display: contents; }
+.chip-bad { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); } .chip-tavily { background: color-mix(in srgb, var(--tavily) 20%, transparent); color: var(--tavily); }
