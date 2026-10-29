@@ -1,0 +1,29 @@
+# One-click deploy on Render (Dashboard -> New -> Blueprint -> this repo).
+# Fill the three secrets marked sync: false when Render asks; everything else is preset for judging.
+services:
+  - type: web
+    name: patchpilot
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: PATCHPILOT_PUBLIC_DEMO      # judges can browse samples and replays without an account
+        value: "1"
+      - key: PATCHPILOT_SECRET_KEY
+        generateValue: true
+      - key: NEBIUS_BASE_URL
+        value: https://api.tokenfactory.nebius.com/v1
+      - key: MODEL_NANO
+        value: nvidia/Nemotron-3_5-Lightning
+      - key: MODEL_SUPER
+        value: nvidia/nemotron-3-super-120b-a12b
+      - key: MODEL_ULTRA
+        value: nvidia/Nemotron-3-Ultra-550b-a55b
+      - key: ALLOW_REMOTE_REPOS          # only bundled samples can be fixed; any GitHub repo can still be scanned
+        value: "0"
+      - key: NEBIUS_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false

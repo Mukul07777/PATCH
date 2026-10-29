@@ -1082,10 +1082,9 @@ def page(request: Request, page: str = ""):
         return RedirectResponse(MERGED[page], 301)
     if page not in PAGES:
         raise HTTPException(404)
-    if page in PROTECTED and principal(request) is None:
+    if page in PROTECTED and principal(request) is None and not (_public_demo() and page in PUBLIC_DEMO_PAGES):
         if auth.user_count() == 0:
             return RedirectResponse("/setup", 302)
-        if not (_public_demo() and page in PUBLIC_DEMO_PAGES):
-            here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-            return RedirectResponse(f"/login?next={quote(here, safe='')}", 302)
+        here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(f"/login?next={quote(here, safe='')}", 302)
     return FileResponse(config.ROOT / "web" / f"{PAGES[page]}.html")

@@ -92,3 +92,14 @@ def test_oversized_ids_are_404_not_500():
                          ("DELETE", f"/api/projects/{big}"), ("DELETE", f"/api/users/{big}")):
         assert c.request(method, path).status_code == 404, path
     assert c.post("/api/runs", json={"project": int(big)}).status_code in (400, 404, 422)
+
+
+def test_fresh_public_demo_shows_pages_not_setup(monkeypatch):
+    # a just-deployed judging server (no admin yet) must show the demo, not the admin setup form
+    from fastapi.testclient import TestClient
+    from patchpilot.app import server
+    monkeypatch.setenv("PATCHPILOT_PUBLIC_DEMO", "1")
+    monkeypatch.delenv("PATCHPILOT_TOKEN", raising=False)
+    anon = TestClient(server.app, follow_redirects=False)
+    assert anon.get("/projects").status_code == 200 and anon.get("/console").status_code == 200
+    assert anon.get("/settings").headers["location"] == "/setup"

@@ -3,3 +3,11 @@
 runs/work
 **/__pycache__
 .git
+# local state: database, encryption key and run logs must never be baked into an image
+runs/
+*.db
+*.db-shm
+*.db-wal
+secret.key
+.pytest_cache
+docs/screenshots
