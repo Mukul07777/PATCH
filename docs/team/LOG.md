@@ -23,3 +23,8 @@
 - Manager did feasibility: 4 items added to top of BACKLOG.md. Next backend build: symbol-level reachability.
 - Launched researcher round 2 (angle: storytelling of winning submissions, NeMo Agent Toolkit fit, Nebius features, judge Q&A prep).
 - Past angles: [1] papers/pain/data sources/winners.
+
+## 2026-10-29 ~12:30 — benchmark round 1 finished
+- 3/3 completed cases secured with tests green: authsvc (16 advisories, 3 attempts, exploit proven closed, red team 7/8, trust 93), fetcher (9 adv, 1 attempt, generated exploit NOT proven, generated variants 0/8, trust 79), mailer (4 adv, 1 attempt, exploit inconclusive, trust 92).
+- sanitizer, sqlfmt, webhooks: not run, OpenRouter free-tier 429 at the plan step. Re-run queued.
+- Weakness found: LLM-generated exploit proofs are unreliable. Backlog item added.

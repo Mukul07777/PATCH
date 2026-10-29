@@ -2,6 +2,8 @@
 
 Format: `- [ ] **Title**: impact 1-5 · effort S/M/L · risk · acceptance test`
 
+- [ ] **Re-run benchmark for sanitizer, sqlfmt, webhooks**: impact 5 · S · free API rate limit (429) stopped them on 2026-10-29 · run `python -m patchpilot.cli case:sanitizer case:sqlfmt case:webhooks` when quota resets, merge into batch-summary.json
+- [ ] **Stronger generated exploit proofs**: impact 4 · M · LLM-heavy · generated proofs were 'not proven' (fetcher) and 'inconclusive' (mailer); add curated proofs for urllib3 CVE-2023-45803 and Jinja2 CVE-2024-22195, and make the generator validate fail-on-old before accepting (retry with feedback)
 - [ ] **Symbol-level reachability (OSV ecosystem_specific.imports)**: impact 5 · S · OSV field may be missing for some advisories (fallback: Nano-inferred, labelled) · each advisory labelled reachable (file:line) / imported-not-called / not reachable; feeds triage, risk, ledger; Reachability tab shows it
 - [ ] **Supply-chain trust check of the fix release (deps.dev)**: impact 4 · S-M · API coverage for PyPI attestations unverified · old vs target: attestation/provenance, OpenSSF Scorecard, new transitive deps; risk term + ledger claim
 - [ ] **OpenVEX output from evidence**: impact 3 · S · depends on symbol reachability · openvex.json download with not_affected/fixed + justification
