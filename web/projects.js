@@ -63,7 +63,7 @@
       return;
     }
     box.innerHTML = list.map((p) => `<a class="pj-card card glass" href="/projects?id=${p.id}">
-        <span class="pj-name">${esc(p.name)}</span>
+        ${p.grade ? `<span class="grade g-${p.grade.letter === "?" ? "na" : p.grade.letter}" title="${esc(p.grade.label)}">${esc(p.grade.letter)}</span>` : ""}<span class="pj-name">${esc(p.name)}</span>
         <span class="pj-meta">${typeTag(p.source_type)} ${esc(p.source_type === "git" ? p.source.replace("https://github.com/", "") + (p.ref ? "@" + p.ref : "") + (p.subdir ? "/" + p.subdir : "") : p.source)}</span>
         <span class="pj-sev">${scanState(p.last_scan)}</span>
         <span class="pj-when">Last scan: ${esc(when(p.last_scan_at))}</span></a>`).join("");
@@ -234,8 +234,21 @@
       return s;
     }
     if (s.status !== "done") return s;
-    findings = s.findings; renderCounts(s); renderFindings(s); loadSupply(s);
+    findings = s.findings; renderCounts(s); renderFindings(s); loadSupply(s).then(() => loadReport());
     return s;
+  }
+
+  // ---------- grade + plain-language to-do ----------
+  async function loadReport() {
+    const box = $("#report"), id = current.id;
+    let r;
+    try { r = await api(`/api/projects/${id}/report`); } catch { box.hidden = true; return; }
+    if (current.id !== id) return;
+    const g = r.grade, when = { now: "Do now", soon: "Do soon", later: "When you can" };
+    box.innerHTML = `<div class="rep-grade g-${g.letter === "?" ? "na" : g.letter}"><b>${esc(g.letter)}</b><span>${esc(g.label)}</span></div>
+      <div class="rep-body"><h3>In plain words</h3><p>We checked <b>${r.checked}</b> of your ${r.dependencies} dependencies. ${g.reasons.map(esc).join(". ")}.</p>
+      ${r.todo.length ? `<h3>What to do</h3><ol class="todo">${r.todo.slice(0, 8).map((t) => `<li><span class="pri ${t.priority}">${when[t.priority]}</span>${esc(t.text)}</li>`).join("")}</ol>` : "<p><b>Nothing to do.</b> Re-scan from time to time: new holes are found every week.</p>"}</div>`;
+    box.hidden = false;
   }
 
   // ---------- supply chain, fixed manifest, badge ----------

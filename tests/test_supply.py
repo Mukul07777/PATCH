@@ -93,3 +93,44 @@ def test_fixed_manifest_supply_and_badge_endpoints(monkeypatch):
     assert "1 vulnerability" in anon.get(path).text
     assert anon.get(f"/badge/{pid}/0000.svg").status_code == 404
     assert db.get_project(pid) is not None
+
+
+def test_grade_rules():
+    from patchpilot.intel import grade
+    assert grade.grade({"CRITICAL": 0, "HIGH": 0, "MODERATE": 0, "LOW": 0, "UNKNOWN": 0})["letter"] == "A"
+    assert grade.grade({"MODERATE": 2})["letter"] == "A"  # 90
+    assert grade.grade({"HIGH": 2, "MODERATE": 9})["letter"] == "D"
+    assert grade.grade({"LOW": 1}, kev=1)["letter"] == "F"  # exploited right now beats everything
+    assert grade.grade({}, supply={"summary": {"malicious": 1}})["letter"] == "F"
+    assert grade.grade({}, coverage={"state": "unverified"})["letter"] == "?"
+    g = grade.grade({"HIGH": 1}, supply={"summary": {"typosquat": 1}})
+    assert g["letter"] == "D" and any("fake copy" in r for r in g["reasons"])
+
+
+def test_todo_is_plain_and_ordered():
+    from patchpilot.intel import grade
+    summary = {"vulnerable_packages": [{"package": "jinja2", "version": "2.10", "advisories": 6, "safe": "3.1.6"},
+                                       {"package": "requests", "version": "2.19.0", "advisories": 5, "safe": "2.33.0"}],
+               "unpinned": ["flask"]}
+    sup = {"packages": [{"package": "reqeusts", "version": "1.0", "license": "unknown", "license_class": "unknown",
+                         "health": {}, "flags": [{"kind": "typosquat", "level": "high",
+                                                  "text": "Possible typosquat: 1 edit away from 'requests'"}]}]}
+    steps = grade.todo(summary, sup, [{"package": "requests", "kev": True}])
+    assert steps[0]["text"].startswith("Check reqeusts") and "'requests'" in steps[0]["text"]
+    assert steps[1]["priority"] == "now" and steps[1]["text"].startswith("Upgrade requests from 2.19.0 to 2.33.0")
+    assert steps[-1]["text"].startswith("Pin exact versions for 1 package")
+
+
+def test_report_endpoint_and_card_grade(monkeypatch):
+    monkeypatch.setattr(server, "_spawn", lambda fn, *a: fn(*a))
+    monkeypatch.setattr(sources, "osv_batch", osv_from(lambda n, v: [
+        {"id": "GHSA-1", "cve": "", "severity": "HIGH", "fixed": ["3.1.6"], "summary": "x"}] if n == "jinja2" else []))
+    monkeypatch.setattr(sources, "pypi_latest", lambda n: "3.1.6")
+    monkeypatch.setattr(supply, "_pypi", lambda n: _doc("2015-01-01", "2026-01-01"))
+    c = TestClient(server.app, headers={**AUTH, "X-Requested-With": "patchpilot"})
+    pid = c.post("/api/projects", json={"filename": "requirements.txt", "content": "jinja2==2.10\n"}).json()["id"]
+    c.post(f"/api/projects/{pid}/scan")
+    r = c.get(f"/api/projects/{pid}/report").json()
+    assert r["grade"]["letter"] == "B" and r["todo"][0]["text"].startswith("Upgrade jinja2 from 2.10 to 3.1.6")
+    card = next(p for p in c.get("/api/projects").json() if p["id"] == pid)
+    assert card["grade"]["letter"] == "B"

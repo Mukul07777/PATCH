@@ -7,10 +7,10 @@ const TIERS = ["nano", "super", "ultra"];
 const modelNames = { nano: "Nano tier", super: "Super tier", ultra: "Ultra tier" };
 const shortModel = (id) => String(id || "").split("/").pop().replace(/:free$/, "");
 const STEPS = [
-  ["models", () => "Connect · LLM provider"], ["checkout", () => "Check out repo"], ["scan", () => "Scan · OSV.dev"],
-  ["triage", () => `Triage · ${modelNames.nano}`], ["research", () => "Research via Tavily"], ["plan", () => `Plan · ${modelNames.super}`],
-  ["exploit", () => "Exploit proof"], ["redteam", () => "Red-team variants"], ["lock", () => "Behaviour lock"], ["test", () => "Upgrade & test"],
-  ["fix", () => `Repair · ${modelNames.super} → ${modelNames.ultra}`], ["pr", () => "Pull request"],
+  ["models", () => "Connect to the AI models"], ["checkout", () => "Download the code"], ["scan", () => "Look up known security holes"],
+  ["triage", () => "Check which ones your code really uses"], ["research", () => "Read the upgrade guides"], ["plan", () => "Choose safe versions"],
+  ["exploit", () => "Prove the attack works today"], ["redteam", () => "Try variations of the attack"], ["lock", () => "Record how your code behaves"], ["test", () => "Upgrade and run your tests"],
+  ["fix", () => "AI repairs what the upgrade broke"], ["pr", () => "Hand over the fix"],
 ];
 const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
 let state, source, target = null, noLLM = false;  // target: {project} or {repo} to fix; noLLM: no NEBIUS_API_KEY, only replays
@@ -140,16 +140,31 @@ async function boot() {
   reset();
   const qs = new URLSearchParams(location.search), replay = qs.get("replay");
   await setTarget(qs.get("project"));
+  if (qs.get("project") || replay) document.body.classList.remove("idle");
   if (qs.get("repo") && !$("#repo").disabled && !target) $("#repo").value = qs.get("repo");
   if (replay) listen(replay, 4);
   else if (!userStarted) {
     const best = await pickBestRun(runList);
-    if (best && !userStarted) { if (qs.get("demo")) startDemo(); listen(best, qs.get("demo") ? 8 : 10, { auto: true }); }
+    bestRun = best;
+    if (best && !userStarted && qs.get("demo")) { startDemo(); listen(best, 8, { auto: true }); }
   }
 }
 
 // ---------- auto replay + guided demo ----------
-let userStarted = false, autoReplay = false, demo = null;
+let userStarted = false, autoReplay = false, demo = null, bestRun = null;
+// start screen: the console stays still until the visitor picks something; the busy panels appear with a run
+document.body.classList.add("idle");
+$("#optDemo").onclick = async () => {
+  const id = bestRun || await pickBestRun(await fetch("/api/runs").then((r) => r.json()).catch(() => []));
+  if (!id) return banner("No recorded run is available on this server yet.", false);
+  userStarted = true; startDemo(); listen(id, 8, { auto: true });
+  $("#storyBar").scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+};
+$("#optRescue").onclick = () => {
+  const r = $("#repo");
+  r.placeholder = "Paste a pull request link, e.g. https://github.com/you/app/pull/42";
+  r.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" }); r.focus({ preventScroll: true });
+};
 async function runTypes(id) {
   const txt = await fetch(`/api/runs/${encodeURIComponent(id)}/events`).then((r) => r.text()).catch(() => "");
   const evs = txt.split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => { try { return JSON.parse(l.slice(6)); } catch { return null; } }).filter(Boolean);
@@ -298,6 +313,7 @@ function setProviderPill(replay, name) {
 
 function listen(id, replay, opts = {}) {
   if (source) source.close();
+  document.body.classList.remove("idle");
   reset();
   runProvider = "";
   setProviderPill(replay);
@@ -479,7 +495,7 @@ function onDone(ev) {
   }
   if (ev.seconds) $("#k-time").textContent = fmtTime(ev.seconds);
   if (ev.clean) { phase("clean"); return banner("No known advisories. Nothing to patch.", true); }
-  state.done = ev; $("#speak").hidden = false; renderSummary(ev);
+  state.done = ev; $("#speak").hidden = false; renderSummary(ev); renderAdvisories();
   if (ev.ok) {
     phase("secured ✓"); node("pr", "active"); pulse("sandbox", "pr", "var(--ok)");
     $("#exposure").classList.remove("hot"); $("#exposure").classList.add("safe"); countTo($("#expNum"), 0, 1300);
@@ -733,31 +749,55 @@ function indexTriage(tri) {
   return out;
 }
 
+// ---------- plain language ----------
+const plainDays = (d) => (d >= 730 ? `${Math.floor(d / 365)} years` : d >= 60 ? `${Math.round(d / 30)} months` : `${d} days`);
+const plainVerdict = (t) => t
+  .replace(/Vulnerable symbol is called from project code \(static AST match\)\.?/i, "Your code calls the exact function that has the hole.")
+  .replace(/Package is imported but the vulnerable symbol is never called\.?/i, "Your code uses this package, but never the part with the hole.")
+  .replace(/Package is never imported by project code\.?/i, "Your code never uses this package directly (another package pulls it in).");
+function plainSummary() {
+  const F = state.findings, total = F.reduce((n, f) => n + f.vulns.length, 0);
+  if (!F.length) return "";
+  const used = F.reduce((n, f) => n + f.vulns.filter((v) => { const t = state.triage[v.id] || state.triage[v.cve]; const r = t && (t.affected ?? t.reachable); return r === true || r === "yes"; }).length, 0);
+  const kev = state.threat?.kev || 0;
+  const ups = (state.plan?.upgrades || []).map((u) => `<b>${esc(u.package)}</b> ${esc(u.from)} → <b>${esc(u.to)}</b>`);
+  const d = state.done;
+  const result = !d ? "PatchPilot is working on it. Each step on the left explains itself as it runs."
+    : d.ok ? `Fixed. The upgrade is applied, your tests pass${state.exploit?.closed ? ", and the attack that worked before is now blocked" : ""}. The changes are in the Changes tab.`
+    : "Not fully fixed yet. The upgrade broke something the AI could not repair, so a person should review it.";
+  return `<div class="plain card glass"><h3>In plain words</h3>
+    <p>Your project uses <b>${F.length}</b> package${F.length === 1 ? "" : "s"} with <b>${total}</b> known security hole${total === 1 ? "" : "s"}.
+    ${state.reachability || Object.keys(state.triage).length ? `In <b>${used}</b> of them your own code calls the broken part, so ${used ? "those matter most" : "the risk today is low"}.` : ""}
+    ${kev ? `<b class="c-bad">${kev} ${kev === 1 ? "is" : "are"} being attacked right now.</b>` : "None of them is on the list of flaws being attacked right now."}</p>
+    ${ups.length ? `<p><b>The fix:</b> upgrade ${ups.join(", ")}.</p>` : ""}
+    <p><b>Status:</b> ${result}</p></div>`;
+}
+
 function renderAdvisories() {
   if (!state.findings.length) return ($("#tab-advisories").innerHTML = '<div class="empty">No advisories found.</div>');
   const T = state.threat;
   const clock = T ? `<div class="threat card glass">
-      <div><small>CISA known exploited</small><b class="${T.kev ? "hot" : ""}">${T.kev}</b></div>
-      <div><small>Highest EPSS (30-day exploit odds)</small><b>${T.max_epss != null ? (T.max_epss * 100).toFixed(2) + "%" : "–"}</b></div>
-      <div><small>Exposed for</small><b>${T.oldest_days != null ? T.oldest_days.toLocaleString() + " days" : "–"}</b></div>
+      <div><small title="CISA's list of flaws criminals are using right now">Being attacked right now</small><b class="${T.kev ? "hot" : ""}">${T.kev ? T.kev + " hole(s)" : "None"}</b></div>
+      <div><small title="EPSS: FIRST.org's estimate of the chance this flaw is exploited in the next 30 days">Chance of an attack in the next 30 days</small><b>${T.max_epss != null ? (T.max_epss * 100).toFixed(2) + "%" : "–"}</b></div>
+      <div><small>Oldest hole has been public for</small><b>${T.oldest_days != null ? plainDays(T.oldest_days) : "–"}</b></div>
     </div>` : "";
-  $("#tab-advisories").innerHTML = clock + state.findings.map((f) => {
+  $("#tab-advisories").innerHTML = plainSummary() + clock + state.findings.map((f) => {
     const up = state.plan?.upgrades.find((u) => u.package.toLowerCase() === f.package.toLowerCase());
     const vulns = [...f.vulns].sort((a, b) => (SEV_RANK[a.severity] ?? 4) - (SEV_RANK[b.severity] ?? 4));
     return `<div class="pkg"><div class="pkg-head"><b>${esc(f.package)}</b>${f.transitive ? '<span class="chip nano" title="Not in requirements.txt: installed as a dependency of a dependency">via dependency</span>' : ""}<span class="ver">${esc(f.current)}</span><span class="muted">→</span>
-      <span class="to">${esc(up ? up.to : "…")}</span><span class="tag">${f.vulns.length} advisories</span>
-      ${f.min_safe && f.min_safe !== f.latest ? `<span class="tag" title="Smallest release that clears every advisory">least-change: ${esc(f.min_safe)}</span>` : ""}
-      ${up?.breaking ? '<span class="tag brk">⚠ breaking upgrade</span>' : ""}</div>
+      <span class="to">${esc(up ? up.to : "…")}</span><span class="tag">${f.vulns.length} security hole${f.vulns.length === 1 ? "" : "s"}</span>
+      ${f.min_safe && f.min_safe !== f.latest ? `<span class="tag" title="The smallest upgrade that fixes every hole">smallest safe upgrade: ${esc(f.min_safe)}</span>` : ""}
+      ${up?.breaking ? '<span class="tag brk" title="A major version jump: some of your code may need changing, which the AI handles">⚠ big jump: code may need changes</span>' : ""}</div>
       ${vulns.map((v) => {
         const tr = state.triage[v.id] || state.triage[v.cve];
         const r = tr ? (tr.affected ?? tr.reachable ?? tr.exploitable) : null;
         const yes = r === true || r === "yes", no = r === false || r === "no";
         const th = T?.advisories[v.id];
-        const badges = th ? `<div class="thb">${th.kev ? '<span class="kev">KEV · exploited in the wild</span>' : ""}${th.epss != null ? `<span title="EPSS percentile ${Math.round(th.percentile * 100)}">EPSS ${(th.epss * 100).toFixed(2)}%</span>` : ""}${th.days != null ? `<span>${th.days.toLocaleString()} days public</span>` : ""}</div>` : "";
+        const badges = th ? `<div class="thb">${th.kev ? '<span class="kev">being attacked right now</span>' : ""}${th.epss != null ? `<span title="EPSS: chance of exploitation in the next 30 days">${(th.epss * 100).toFixed(2)}% attack chance</span>` : ""}${th.days != null ? `<span>public for ${plainDays(th.days)}</span>` : ""}</div>` : "";
         return `<div class="adv"><span class="sev ${v.severity || "NA"}">${v.severity || "N/A"}</span>
           <a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.cve || v.id)}</a>
-          <div><div>${esc(v.summary)}</div>${badges}${tr ? `<div class="verdict"><span class="chip nano">nano</span> ${esc(tr.rationale || tr.reason || "")}</div>` : ""}</div>
-          ${tr ? `<span class="tag ${yes ? "yes" : ""}">${yes ? "● reachable" : no ? "○ not reached" : esc(String(r ?? ""))}</span>` : "<span></span>"}</div>`;
+          <div><div>${esc(v.summary)}</div>${badges}${tr ? `<div class="verdict">${esc(plainVerdict(tr.rationale || tr.reason || ""))}</div>` : ""}</div>
+          ${tr ? `<span class="tag ${yes ? "yes" : ""}">${yes ? "● your code uses this" : no ? "○ your code never calls this" : esc(String(r ?? ""))}</span>` : "<span></span>"}</div>`;
       }).join("")}</div>`;
   }).join("");
 }

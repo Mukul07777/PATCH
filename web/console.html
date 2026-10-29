@@ -43,6 +43,16 @@
     </div>
   </section>
 
+  <section class="start card glass" id="startCard" aria-labelledby="startH">
+    <h2 id="startH">What would you like to do?</h2>
+    <p class="muted">Nothing runs until you choose. Every option explains each step as it happens.</p>
+    <div class="start-grid">
+      <button type="button" class="start-opt" id="optDemo"><b>▶ Watch it fix a real project</b><span>A 2-minute guided replay of a real AI run. It finds the security holes, upgrades, repairs the broken code and proves the attack is blocked.</span></button>
+      <a class="start-opt" href="/projects#projects"><b>🛡 Check my own project</b><span>Add a GitHub repo, a requirements file or an SBOM. You get a grade from A to F and a to-do list in plain English. No AI key needed.</span></a>
+      <button type="button" class="start-opt" id="optRescue"><b>🔁 Rescue a failing Dependabot PR</b><span>Paste the link of a red update PR. PatchPilot repairs the code the update broke and pushes the fix onto that PR.</span></button>
+    </div>
+  </section>
+
   <section class="launch card glass">
     <p class="target" id="target" aria-live="polite">Loading…</p>
     <form id="runForm" class="launch-row">
@@ -74,11 +84,11 @@
   </section>
 
   <section class="kpis" aria-label="Run metrics">
-    <div class="kpi"><span>Advisories</span><b id="k-adv">–</b></div>
-    <div class="kpi"><span>Tests</span><b id="k-tests">–</b></div>
-    <div class="kpi"><span>Fix attempts</span><b id="k-att">–</b></div>
-    <div class="kpi"><span>Nemotron tokens</span><b id="k-tok">–</b></div>
-    <div class="kpi"><span>Wall time</span><b id="k-time">–</b></div>
+    <div class="kpi"><span>Security holes found</span><b id="k-adv">–</b></div>
+    <div class="kpi"><span>Your tests passing</span><b id="k-tests">–</b></div>
+    <div class="kpi"><span>AI repair attempts</span><b id="k-att">–</b></div>
+    <div class="kpi"><span>AI work done (tokens)</span><b id="k-tok">–</b></div>
+    <div class="kpi"><span>Time taken</span><b id="k-time">–</b></div>
   </section>
 
   <div class="grid">

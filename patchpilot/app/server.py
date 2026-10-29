@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from patchpilot.app import auth, db, notify, scheduler, settings
 from patchpilot.core import config, sandbox
-from patchpilot.intel import export, manifests, remediate, scanner, sources, supply
+from patchpilot.intel import export, grade, manifests, remediate, scanner, sources, supply
 from patchpilot.agent.pipeline import Agent
 
 
@@ -844,7 +844,13 @@ def create_samples(request: Request):
 @app.get("/api/projects")
 def list_projects(request: Request):
     user = _reader(request)
-    return [p for p in db.list_projects() if user or p["source_type"] == "sample"]
+    out = [p for p in db.list_projects() if user or p["source_type"] == "sample"]
+    for p in out:  # quick grade for the cards: vulnerabilities and coverage (the report adds supply-chain signals)
+        s = p.get("last_scan")
+        if s and s["status"] == "done":
+            cached = _supply_cache.get(s["id"])
+            p["grade"] = grade.grade(s["counts"], db.kev_count(s["id"]), (s["summary"] or {}).get("coverage"), cached)
+    return out
 
 
 @app.get("/api/projects/{pid}")
@@ -877,6 +883,10 @@ def project_supply(pid: int, request: Request):
     scan = _latest_scan(pid)
     if scan is None:
         raise HTTPException(409, "Scan the project first")
+    return _supply_for(scan)
+
+
+def _supply_for(scan):
     if scan["id"] not in _supply_cache:
         deps = [(d[0], d[1]) for d in (scan["summary"] or {}).get("deps") or []]
         mal = {}
@@ -885,6 +895,24 @@ def project_supply(pid: int, request: Request):
                 mal.setdefault(supply.norm(f["package"]), []).append(f["vuln_id"])
         _supply_cache[scan["id"]] = {"scan": scan["id"], **supply.analyse(deps, mal)}
     return _supply_cache[scan["id"]]
+
+
+def _kev_open(findings):
+    return sum(1 for f in findings if f.get("kev") and not f.get("suppressed"))
+
+
+@app.get("/api/projects/{pid}/report")
+def project_report(pid: int, request: Request):
+    """Grade A-F, why, and what to do next, in plain words (vulnerabilities plus supply-chain signals)."""
+    _visible(request, pid)
+    scan = _latest_scan(pid)
+    if scan is None:
+        raise HTTPException(409, "Scan the project first")
+    sup = _supply_for(scan)
+    summary = scan["summary"] or {}
+    g = grade.grade(scan["counts"], _kev_open(scan["findings"]), summary.get("coverage"), sup)
+    return {"scan": scan["id"], "grade": g, "todo": grade.todo(summary, sup, scan["findings"]),
+            "checked": summary.get("pinned", 0), "dependencies": summary.get("dependencies", 0)}
 
 
 @app.get("/api/projects/{pid}/fixed-manifest")

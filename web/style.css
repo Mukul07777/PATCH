@@ -526,3 +526,19 @@ h2::before { content: ""; display: inline-block; width: 14px; height: 2px; backg
 .panel > .sub + .sub { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .sub-h { margin: 0 0 10px; font: 800 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
 .launch, .launch > * { min-width: 0; }
+
+/* console start screen: nothing moves until the visitor chooses */
+body.idle .tierbar, body.idle .graph, body.idle .kpis, body.idle .grid, body.idle .hero .exposure { display: none; }
+body:not(.idle) .start { display: none; }
+.start { padding: 26px 28px; margin-bottom: 18px; }
+.start h2 { margin: 0 0 6px; font-size: 22px; }
+.start-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
+.start-opt { display: grid; gap: 8px; align-content: start; text-align: left; padding: 18px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-2); color: var(--text); font: inherit; cursor: pointer; text-decoration: none; transition: border-color .15s, transform .15s; }
+.start-opt:hover, .start-opt:focus-visible { border-color: var(--ok); transform: translateY(-2px); }
+.start-opt b { font-size: 16px; } .start-opt span { color: var(--muted); font-size: 13px; line-height: 1.5; }
+@media (max-width: 860px) { .start-grid { grid-template-columns: 1fr; } }
+/* plain-English summary above the findings */
+.plain { padding: 16px 20px; margin-bottom: 14px; border-left: 4px solid var(--ok); }
+.plain h3 { margin: 0 0 8px; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.plain p { margin: 6px 0; line-height: 1.6; }

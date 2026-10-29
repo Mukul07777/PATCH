@@ -301,6 +301,11 @@ def _with_last_scan(p):
     return p
 
 
+def kev_count(scan_id):
+    """Open (not suppressed) findings of a scan that CISA lists as exploited right now."""
+    return sum(1 for f in _scan_findings(scan_id) if f.get("kev") and not f.get("suppressed"))
+
+
 def list_projects():
     return [_with_last_scan(p) for p in _q("SELECT * FROM projects ORDER BY id DESC")]
 
