@@ -62,3 +62,7 @@
 - All 6 benchmark cases now have curated, verified exploit proofs.
 - Launched researcher round 4 (angle: speed/latency for a live demo).
 - Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video, [3] real public repos (read-only), [4] speed.
+
+## 2026-10-29 ~13:50 — research round 4 (speed)
+- research-4.md: model calls are 97-98% of wall time (authsvc 723 s: Nano triage 196 s, reranks 83 s, fix loop 413 s). Plan to reach ~55-80 s.
+- SPEED item placed at top of backlog; starts when the OpenVEX builder releases agent.py/llm.py.

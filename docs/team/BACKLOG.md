@@ -2,6 +2,7 @@
 
 Format: `- [ ] **Title**: impact 1-5 · effort S/M/L · risk · acceptance test`
 
+- [ ] **SPEED: demo under 90 s (research-4.md plan)**: impact 5 · M · reasoning-control params unverified for our model ids (test with one call when quota allows) · Nano reasoning low/off + max_tokens 1500; triage ∥ research ∥ reach-inference; skip rerank (use Tavily score) / skip triage when reach conclusive; JSON mode + 45 s cutoff in fix loop; sandbox prep in background thread with uv; PATCHPILOT_DEMO=1 fast path
 - [ ] **Container sandbox (network off)**: impact 4 · M · Docker may not be installed on the demo machine · when Docker is available, run install+pytest in `docker run --network none` (install step with network, test step without); fall back to venv and say so in the ledger
 - [ ] **NeMo Agent Toolkit wrapper (nat mcp serve)**: impact 3 · S-M · register_function API unconfirmed · expose scan + run_one as NAT functions; 10-second 'callable from any agent' demo beat
 - [ ] **Pin Nebius model ids**: impact 3 · S · ids from a third-party list (unverified) · .env.example Nebius block with explicit MODEL_*; auto-discovery also matches 'lightning' for nano
