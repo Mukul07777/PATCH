@@ -1,5 +1,91 @@
 # PatchPilot: Hackathon Progress Tracker
 
+## Handoff: current workstream (last updated 2026-10-29)
+
+This section is the living task list. Anyone picking this up should read it first. Ticked items are done, verified (pytest + pyflakes, and browser checks where relevant) and pushed to `main`.
+
+### How the work is run
+- **Loop.** Research agent → engineer agent implements a round → strict tester agent scores it and lists defects with file:line → the next engineer round fixes them. Each verified round is committed and pushed straight to `main`.
+- **Commands.**
+  - Venv: `python -m venv .venv && pip install -r requirements.txt -r requirements-dev.txt`
+  - Tests: `pytest -q`
+  - Lint: `pyflakes patchpilot tests cases`
+- **Secrets.** Never commit `.env`, `runs/`, `*.db` or `secret.key` (all git-ignored).
+- **Current `.env` setup.** It points at **OpenRouter's free Nemotron models** while Nebius credits are pending. The shipped `demo-runs/` are genuine **Token Factory** recordings. Do not replace them with OpenRouter runs.
+- **Scoring rule set by the owner.** Exclude demo URL, video, feedback text and submission dates from site scores.
+
+### Phase 1: hackathon polish (score 66 → 100 on strict rubric) ✅
+- [x] Hardening rounds 1–11:
+  - auth and rate limits
+  - token-safe PR push
+  - CSP without unsafe-inline
+  - XSS fixes
+  - accessibility (axe-clean)
+  - mobile
+  - SEO
+  - CI
+- [x] Benchmark recorded on Nebius Token Factory: 6/6 green, shipped in `demo-runs/`, with 5 of them showing live Tavily research.
+- [x] Bug fixes found along the way:
+  - `enable_thinking=false` for Token Factory
+  - JSON fence parsing
+  - deterministic missing-dependency repair
+  - SSE no longer gzipped
+- [x] Live NVIDIA guard model evaluation (`docs/guard-eval.md`) plus 3 guard fixes.
+
+### Phase 2: from hardcoded demo to real product
+Practicality score history: **58** (after round 1) → **78** (after round 4) → round 5 in progress.
+
+- [x] **Round 1 (`f198b95`).**
+  - Projects (GitHub URL or uploaded manifest) with SQLite history.
+  - Keyless OSV scan mode.
+  - Parsers for requirements, pyproject, poetry.lock, uv.lock and Pipfile.lock.
+  - Projects UI and sample projects.
+  - Honest landing page with no fake numbers.
+- [x] **Round 2 (`1104c1d`).**
+  - Dashboard built from the DB, with new/fixed tracking.
+  - Encrypted settings UI with connection tests.
+  - Users, sessions, API keys and audit log.
+  - Per-project policy and ignores.
+- [x] **Round 3 (`be49e9e`).**
+  - Honest coverage (no false all-clear).
+  - Monorepos; 5 MB lock files; garbage uploads rejected.
+  - OSV batch with no dependency cap; CVSS-derived severity; EPSS batching.
+  - Scan queue that survives restarts.
+  - Repo and ref validation.
+  - Password change and reset.
+- [x] **Round 4 (`ab5af05`).**
+  - Scheduled re-scans.
+  - Slack, webhook (HMAC-signed) and email alerts.
+  - CLI scan with table/json/SARIF/CycloneDX output and exit codes; GitHub Action; pre-commit hook.
+  - Exports, auto-fix, Docker sandbox and docker-compose.
+- [ ] **Round 5 (in progress, engineer running).** Fixes from the 78/100 test:
+  - [ ] Notifications sent off the scan worker (a dead webhook stalled the queue), with a circuit breaker.
+  - [ ] CLI exits 2 on unverified or errored scans (no false CI pass); single-file scans accept only requirements-like names.
+  - [ ] SSRF protection for webhook, Slack and SMTP targets (block private, loopback and metadata IPs; pin DNS; no redirects).
+  - [ ] Login rate limit counts failures per (IP, email), so an attacker can't lock out the admin; document `--proxy-headers`.
+  - [ ] Invalid requirement lines become warnings and count against coverage.
+  - [ ] Fonts self-hosted, so the CSP is `'self'` only with zero console noise.
+  - [ ] Tests for email channel e2e, the auto-fix enqueue path and CycloneDX schema fields.
+- [ ] **Next.** Re-run the full practicality test (three personas: security lead, CI developer, attacker). Feed defects into round 6 and repeat until the product is adoptable (target 95+).
+
+### Planned after the practicality target is met
+- [ ] Re-check the hackathon docs (README, DEVPOST, JUDGE-QA, VIDEO-SCRIPT) against the new product features. The product changed a lot since they were written.
+- [ ] Judged deployment needs `PATCHPILOT_PUBLIC_DEMO=1`, an admin created via `/setup`, and a GitHub token in Settings (the unauthenticated GitHub API limit is 60 requests per hour).
+- [ ] Real Docker-sandbox run. So far only the docker argv has been unit-tested with mocks; no real containers have run.
+
+### Waiting on the owner
+- [ ] Nebius credits. Then:
+  - switch `.env` back to Token Factory (`NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1`, `MODEL_NANO=nvidia/Nemotron-3_5-Lightning`, `MODEL_SUPER=nvidia/nemotron-3-super-120b-a12b`, `MODEL_ULTRA=nvidia/Nemotron-3-Ultra-550b-a55b`)
+  - re-record the sanitizer case with Tavily
+  - optionally deploy on Nebius Serverless
+- [ ] Hosted demo URL, ≤3-min YouTube video, feedback text (README TODO), submission-period dates, one real PR link.
+- [ ] Confirm GitHub shows "MIT license" in the repo About sidebar.
+- [ ] Rotate the Tavily key after judging (it was pasted in chat).
+
+---
+
+## Earlier tracker (pre-handoff)
+
 ## Hackathon at a glance
 | | |
 |---|---|
