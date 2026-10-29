@@ -106,7 +106,7 @@ async function boot() {
 }
 
 function reset() {
-  state = { exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
+  state = { threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
   $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${t}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
@@ -115,6 +115,7 @@ function reset() {
   $("#tab-advisories").innerHTML = '<div class="empty">Scanning…</div>';
   $("#tab-evidence").innerHTML = '<div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div>';
   $("#tab-diff").innerHTML = '<div class="empty">The verified patch appears here.</div>';
+  $("#tab-drift").innerHTML = '<div class="empty">Before any test runs, PatchPilot inspects the old and new library APIs and predicts exactly which of your lines will break.</div>';
   $("#tab-ledger").innerHTML = '<div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div>';
   $("#tab-proof").innerHTML = '<div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div>';
   $("#tab-reach").innerHTML = '<div class="empty">Where your code calls each vulnerable package.</div>';
@@ -180,6 +181,8 @@ function handle(ev) {
     case "exploit": onExploit(ev); break;
     case "risk": state.risk = ev; renderProof(); break;
     case "redteam": onRedteam(ev); break;
+    case "threat": onThreat(ev); break;
+    case "drift": onDrift(ev); break;
     case "ledger": state.ledger = ev; renderLedger(); setTimeout(() => showTab("ledger"), 2600); break;
     case "diff": state.diff = ev.diff; renderDiff(); break;
     case "report": state.report = ev.markdown; renderReport(); break;
@@ -299,6 +302,24 @@ function renderProof() {
   $("#tab-proof").innerHTML = ex + renderRedteam() + rk;
 }
 
+function onThreat(ev) {
+  state.threat = ev;
+  term(ev.kev ? "bad" : "dim", `threat › ${ev.kev} known-exploited (CISA KEV) · max EPSS ${((ev.max_epss || 0) * 100).toFixed(2)}% · oldest exposure ${ev.oldest_days ?? "?"} days`, ev.t);
+  if (state.findings.length) renderAdvisories();
+}
+
+function onDrift(ev) {
+  state.drift = ev;
+  term(ev.breaks.length ? "super" : "dim", `drift › ${ev.breaks.length} API break(s) predicted before testing (${ev.probed} symbols probed)`, ev.t);
+  ev.breaks.forEach((b) => term("dim", `   ✗ ${b.detail}  @ ${b.sites.join(", ")}`));
+  $("#tab-drift").innerHTML = `<div class="card glass"><div class="pf-head"><span class="chip super">drift radar</span>
+      <b>${ev.breaks.length} predicted break(s)</b><span class="muted">${ev.probed} library symbols your code uses, probed on old and new versions</span></div>
+    ${ev.breaks.length ? ev.breaks.map((b) => `<div class="drift ${b.kind}"><span class="dk">${b.kind === "removed" ? "removed" : "signature"}</span>
+      <div><b>${esc(b.detail)}</b><small>${b.sites.map(esc).join(" · ")}</small></div></div>`).join("")
+      : '<p class="muted">No removed APIs or changed signatures. Remaining failures, if any, come from behaviour changes, which only the tests can catch.</p>'}
+    <p class="hint">Predicted from the installed libraries' real APIs, before a single test ran. Behaviour changes (same API, different results) are left to the test suite.</p></div>`;
+}
+
 function onRedteam(ev) {
   if (ev.stage === "before") {
     state.redteam = { ...ev };
@@ -389,19 +410,28 @@ function indexTriage(tri) {
 
 function renderAdvisories() {
   if (!state.findings.length) return ($("#tab-advisories").innerHTML = '<div class="empty">No advisories found.</div>');
-  $("#tab-advisories").innerHTML = state.findings.map((f) => {
+  const T = state.threat;
+  const clock = T ? `<div class="threat card glass">
+      <div><small>CISA known exploited</small><b class="${T.kev ? "hot" : ""}">${T.kev}</b></div>
+      <div><small>Highest EPSS (30-day exploit odds)</small><b>${T.max_epss != null ? (T.max_epss * 100).toFixed(2) + "%" : "–"}</b></div>
+      <div><small>Exposed for</small><b>${T.oldest_days != null ? T.oldest_days.toLocaleString() + " days" : "–"}</b></div>
+    </div>` : "";
+  $("#tab-advisories").innerHTML = clock + state.findings.map((f) => {
     const up = state.plan?.upgrades.find((u) => u.package.toLowerCase() === f.package.toLowerCase());
     const vulns = [...f.vulns].sort((a, b) => (SEV_RANK[a.severity] ?? 4) - (SEV_RANK[b.severity] ?? 4));
     return `<div class="pkg"><div class="pkg-head"><b>${esc(f.package)}</b><span class="ver">${esc(f.current)}</span><span class="muted">→</span>
       <span class="to">${esc(up ? up.to : "…")}</span><span class="tag">${f.vulns.length} advisories</span>
+      ${f.min_safe && f.min_safe !== f.latest ? `<span class="tag" title="Smallest release that clears every advisory">least-change: ${esc(f.min_safe)}</span>` : ""}
       ${up?.breaking ? '<span class="tag brk">⚠ breaking upgrade</span>' : ""}</div>
       ${vulns.map((v) => {
         const tr = state.triage[v.id] || state.triage[v.cve];
         const r = tr ? (tr.affected ?? tr.reachable ?? tr.exploitable) : null;
         const yes = r === true || r === "yes", no = r === false || r === "no";
+        const th = T?.advisories[v.id];
+        const badges = th ? `<div class="thb">${th.kev ? '<span class="kev">KEV · exploited in the wild</span>' : ""}${th.epss != null ? `<span title="EPSS percentile ${Math.round(th.percentile * 100)}">EPSS ${(th.epss * 100).toFixed(2)}%</span>` : ""}${th.days != null ? `<span>${th.days.toLocaleString()} days public</span>` : ""}</div>` : "";
         return `<div class="adv"><span class="sev ${v.severity || "NA"}">${v.severity || "N/A"}</span>
           <a href="${esc(v.url)}" target="_blank" rel="noopener">${esc(v.cve || v.id)}</a>
-          <div><div>${esc(v.summary)}</div>${tr ? `<div class="verdict"><span class="chip nano">nano</span> ${esc(tr.rationale || tr.reason || "")}</div>` : ""}</div>
+          <div><div>${esc(v.summary)}</div>${badges}${tr ? `<div class="verdict"><span class="chip nano">nano</span> ${esc(tr.rationale || tr.reason || "")}</div>` : ""}</div>
           ${tr ? `<span class="tag ${yes ? "yes" : ""}">${yes ? "● reachable" : no ? "○ not reached" : esc(String(r ?? ""))}</span>` : "<span></span>"}</div>`;
       }).join("")}</div>`;
   }).join("");

@@ -6,9 +6,10 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, exploits, sources
+from . import config, drift, exploits, sources
 from .llm import Router
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -46,6 +47,7 @@ class Agent:
         self.router = Router(self._emit)
         self.started = time.time()
         self.evidence = []
+        self.drift = []
 
     # ---------- event helpers ----------
     def _emit(self, ev):
@@ -86,7 +88,10 @@ class Agent:
             if vulns:
                 findings.append({"package": name, "current": ver, "latest": latest, "vulns": vulns})
             self.log(f"{name}=={ver}: {len(vulns)} advisories, latest {latest}", "scan")
+        for f in findings:
+            f["min_safe"] = sources.min_safe_version(f["current"], f["vulns"])
         self._emit({"type": "findings", "findings": findings})
+        self._threat(findings)
         self.step("scan", "done", detail={"vulnerable": len(findings),
                                            "advisories": sum(len(f["vulns"]) for f in findings)})
         if not findings:
@@ -128,12 +133,16 @@ class Agent:
         self._emit({"type": "test", "label": "baseline", "ok": base_ok, "summary": base_summary})
         exploit = self._exploit_before(findings, original, research, sandbox) if ok_install else None
         mutations = self._mutations_before(exploit, sandbox) if exploit else None
+        usage = drift.usages(original)
+        drift_old = self._probe(sandbox, usage, plan) if ok_install else None
 
         self._apply_pins({u["package"]: u["to"] for u in plan["upgrades"]})
         self.log("Bumped: " + ", ".join(f"{u['package']} -> {u['to']}" for u in plan["upgrades"]), "test")
         ok_install, out = sandbox.install()
         if not ok_install:
             raise RuntimeError("pip install failed after upgrade:\n" + out)
+        if drift_old is not None:
+            self._drift(usage, drift_old, self._probe(sandbox, usage, plan))
         ok, summary, output = sandbox.test()
         self._emit({"type": "test", "label": "after upgrade", "ok": ok, "summary": summary, "output": output[-3000:]})
         self.step("test", "done")
@@ -154,6 +163,11 @@ class Agent:
                 continue
             self.evidence += [e for e in change.get("evidence", []) if isinstance(e, dict) and e.get("quote")]
             self._write_files(change.get("files", []))
+            if any(str(f.get("path", "")).strip("/") == "requirements.txt" for f in change.get("files", [])):
+                self.log("Repair changed requirements.txt; reinstalling", "fix")
+                ok_install, out = sandbox.install()
+                if not ok_install:
+                    self.log("pip install failed after repair:\n" + out[-800:], "fix")
             self._emit({"type": "patch", "attempt": attempts, "tier": tier,
                         "explanation": change.get("explanation", ""), "diagnosis": change.get("diagnosis", ""),
                         "evidence": change.get("evidence", [])[:4],
@@ -307,6 +321,8 @@ class Agent:
         system = (
             "You are an expert Python engineer fixing code broken by a security dependency upgrade. "
             "The dependency versions are FIXED and must not be downgraded. Do not edit tests; make the source "
+            "code compatible (predicted_api_breaks lists APIs that were verified removed or changed, with call sites; "
+            "fix every one of them) "
             "code compatible with the new library versions while preserving behaviour and security. "
             "Return the COMPLETE new content of every file you change. In evidence, quote the exact line(s) from "
             "migration_research (with its url) that justify each change; use an empty list if research did not help. "
@@ -315,6 +331,7 @@ class Agent:
         )
         user = json.dumps({
             "attempt": attempt, "upgrades": plan["upgrades"], "migration_research": notes,
+            "predicted_api_breaks": self.drift,
             "failing_test_output": test_output[-6000:], "source_files": files,
         })
         return self.router.chat_json(tier, system, user, f"Fix attempt {attempt}", max_tokens=8192)
@@ -391,6 +408,62 @@ class Agent:
         ex["verdict"] = ("proven closed" if ex["vulnerable"] and ok else
                          "inconclusive: old version passed the test too" if ok else "not proven")
         self._emit({"type": "exploit", "stage": "after", "after": summary, "closed": ok, "verdict": ex["verdict"]})
+
+    # ---------- threat clock ----------
+    def _threat(self, findings):
+        """Real-world urgency per advisory: EPSS exploit probability, CISA KEV status, days exposed."""
+        cves = [v["cve"] for f in findings for v in f["vulns"] if v["cve"]]
+        try:
+            scores = sources.epss(cves)
+        except Exception as e:
+            self.log(f"EPSS lookup failed: {e}", "scan")
+            scores = {}
+        try:
+            known = sources.kev()
+        except Exception as e:
+            self.log(f"CISA KEV lookup failed: {e}", "scan")
+            known = {}
+        now = datetime.now(timezone.utc)
+        rows = {}
+        for f in findings:
+            for v in f["vulns"]:
+                days = None
+                if v.get("published"):
+                    try:
+                        days = (now - datetime.fromisoformat(v["published"].replace("Z", "+00:00"))).days
+                    except ValueError:
+                        pass
+                e = scores.get(v["cve"] or "", {})
+                rows[v["id"]] = {"epss": e.get("epss"), "percentile": e.get("percentile"),
+                                 "kev": known.get(v["cve"] or ""), "days": days}
+        top = max(rows.values(), key=lambda r: r["epss"] or 0, default={})
+        oldest = max((r["days"] for r in rows.values() if r["days"] is not None), default=None)
+        self._emit({"type": "threat", "advisories": rows, "kev": sum(1 for r in rows.values() if r["kev"]),
+                    "max_epss": top.get("epss"), "oldest_days": oldest,
+                    "least_change": {f["package"]: {"min_safe": f["min_safe"], "latest": f["latest"]} for f in findings}})
+        self.log(f"Threat clock: {sum(1 for r in rows.values() if r['kev'])} in CISA KEV, max EPSS "
+                 f"{(top.get('epss') or 0) * 100:.2f}%, oldest exposure {oldest} days", "scan")
+
+    # ---------- API drift radar ----------
+    def _probe(self, sandbox, usage, plan):
+        try:
+            d = self.work / ".patchpilot"
+            d.mkdir(exist_ok=True)
+            (d / "drift_probe.py").write_text(drift.PROBE, encoding="utf-8")
+            (d / "usage.json").write_text(json.dumps(usage), encoding="utf-8")
+            ok, out = sandbox.python(str(d / "drift_probe.py"), str(d / "usage.json"),
+                                     json.dumps([u["package"] for u in plan["upgrades"]]))
+            return json.loads(out.strip().splitlines()[-1]) if ok else None
+        except Exception as e:
+            self.log(f"Drift probe failed: {e}", "drift")
+            return None
+
+    def _drift(self, usage, old, new):
+        if new is None:
+            return
+        self.drift = drift.diff(usage, old, new)
+        self._emit({"type": "drift", "probed": len(old), "breaks": self.drift})
+        self.log(f"Drift radar: {len(self.drift)} API break(s) predicted across {len(old)} probed symbols", "drift")
 
     # ---------- red-team mutations ----------
     def _mutations_before(self, ex, sandbox):
@@ -494,6 +567,10 @@ class Agent:
                 f"{n - mutations['open']}/{n} variants blocked after the fix ({mutations['closed']} closed by it)"
                 + (f"; still open: {', '.join(r['variant'] for r in mutations['rows'] if r['status'] == 'still open')}"
                    if mutations["open"] else ""))
+        if self.drift:
+            add("Predicted API breaks all repaired", "verified" if ok else "partial",
+                f"{len(self.drift)} break(s) predicted by the drift radar before testing; suite now "
+                + ("green" if ok else "still failing"))
         cited = len(self.evidence)
         add("Code changes cite migration sources", "verified" if cited else "partial",
             f"{cited} quoted line(s) from researched sources" if cited else "no quotes returned by the model")

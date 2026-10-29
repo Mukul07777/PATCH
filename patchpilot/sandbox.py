@@ -37,6 +37,11 @@ class Sandbox:
                         cwd=self.repo)
         return code == 0, out[-4000:]
 
+    def python(self, script, *args):
+        """Run a script with the sandbox interpreter; (ok, stdout+stderr)."""
+        code, out = run([venv_python(self.venv), script, *args], cwd=self.repo, timeout=120)
+        return code == 0, out
+
     def test_cases(self, target):
         """Per-test outcome for one file: {"test_name[param]": True/False}."""
         _, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "--tb=no", target],

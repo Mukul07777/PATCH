@@ -337,3 +337,17 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 30px
 .rt-row.na span { color: var(--muted); }
 .src-list .rr { font: 700 10px var(--mono); color: var(--accent-ink); background: var(--accent); border-radius: 5px; padding: 1px 6px; margin-right: 8px; }
 @media (max-width: 640px) { .claim { grid-template-columns: 28px 1fr; } .claim .cs { display: none; } }
+
+/* ---------- threat clock + drift radar ---------- */
+.threat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.threat small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
+.threat b { font-size: 26px; font-weight: 800; letter-spacing: -.03em; } .threat b.hot { color: var(--bad); }
+.thb { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.thb span { font: 600 10px var(--mono); padding: 2px 7px; border-radius: 5px; background: var(--surface-2); color: var(--muted); }
+.thb .kev { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); font-weight: 800; }
+.drift { display: grid; grid-template-columns: 90px 1fr; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.drift .dk { font: 800 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; padding: 4px 8px; border-radius: 6px; text-align: center;
+  background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.drift.signature .dk { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.drift b { display: block; font: 600 13px var(--mono); } .drift small { color: var(--muted); font: 12px var(--mono); }
+@media (max-width: 640px) { .threat { grid-template-columns: 1fr; } .drift { grid-template-columns: 1fr; } }

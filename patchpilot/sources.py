@@ -34,9 +34,42 @@ def osv_vulns(package, version):
         out.append({
             "id": v["id"], "cve": cve, "summary": v.get("summary") or (v.get("details") or "")[:200],
             "details": (v.get("details") or "")[:1200], "severity": sev, "fixed": sorted(set(fixed), key=_vkey),
-            "url": f"https://osv.dev/vulnerability/{v['id']}",
+            "url": f"https://osv.dev/vulnerability/{v['id']}", "published": v.get("published"),
         })
     return out
+
+
+def epss(cves):
+    """FIRST.org EPSS: probability each CVE is exploited in the wild in the next 30 days."""
+    cves = sorted({c for c in cves if c})
+    if not cves:
+        return {}
+    r = _http.get("https://api.first.org/data/v1/epss", params={"cve": ",".join(cves)})
+    r.raise_for_status()
+    return {d["cve"]: {"epss": float(d["epss"]), "percentile": float(d["percentile"])} for d in r.json().get("data", [])}
+
+
+_kev = None
+
+
+def kev():
+    """CISA Known Exploited Vulnerabilities: {cve: date added}. Cached for the process."""
+    global _kev
+    if _kev is None:
+        r = _http.get("https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json")
+        r.raise_for_status()
+        _kev = {v["cveID"]: v.get("dateAdded") for v in r.json().get("vulnerabilities", [])}
+    return _kev
+
+
+def min_safe_version(current, vulns):
+    """Smallest release that clears every advisory: per advisory, the lowest fixed version above `current`."""
+    need = []
+    for v in vulns:
+        above = [f for f in v["fixed"] if not version_gte(current, f)]
+        if above:
+            need.append(min(above, key=_vkey))
+    return max(need, key=_vkey) if need else None
 
 
 def pypi_latest(package):

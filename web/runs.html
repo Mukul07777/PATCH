@@ -70,9 +70,22 @@
   fetch("/api/bench").then((r) => r.json()).catch(() => []).then((rows) => {
     if (!rows.length) return;
     const sum = (r, k) => Object.values(r.usage?.tiers || {}).reduce((n, t) => n + (t[k] || 0), 0);
-    document.getElementById("bench").innerHTML = `<table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Attempts</th><th>Time</th><th>Tokens</th><th></th></tr></thead><tbody>
+    const ok = rows.filter((r) => r.ok).length, proven = rows.filter((r) => r.exploit === "proven closed").length;
+    const rt = rows.filter((r) => r.redteam), blocked = rt.reduce((n, r) => n + r.redteam.blocked, 0), variants = rt.reduce((n, r) => n + r.redteam.total, 0);
+    const trusts = rows.filter((r) => r.trust != null), adv = rows.reduce((n, r) => n + (r.advisories || 0), 0);
+    const stat = (v, l) => `<div class="kpi"><span>${l}</span><b>${v}</b></div>`;
+    document.getElementById("bench").innerHTML = `<div class="summary">
+        ${stat(`${ok}/${rows.length}`, "Repos secured, tests green")}
+        ${stat(adv || "–", "Real advisories handled")}
+        ${stat(`${proven}/${rows.length}`, "Exploits proven closed")}
+        ${stat(trusts.length ? Math.round(trusts.reduce((n, r) => n + r.trust, 0) / trusts.length) : "–", "Avg certificate trust")}
+      </div>
+      ${variants ? `<p class="muted" style="margin:0 0 14px">Red team: <b style="color:var(--text)">${blocked}/${variants}</b> attack variants blocked after the fix.</p>` : ""}
+      <table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Advisories</th><th>Attempts</th><th>Exploit</th><th>Trust</th><th>Time</th><th>Tokens</th><th></th></tr></thead><tbody>
       ${rows.map((r) => `<tr><td><code>${esc(r.repo)}</code></td><td>${r.ok ? '<span class="status ok">green</span>' : '<span class="status bad">review</span>'}</td>
-      <td class="num">${r.attempts ?? "–"}</td><td class="num">${r.seconds ? fmt(r.seconds) : "–"}</td>
+      <td class="num">${r.advisories ?? "–"}</td><td class="num">${r.attempts ?? "–"}</td>
+      <td>${r.exploit ? `<span class="status ${r.exploit === "proven closed" ? "ok" : "na"}">${esc(r.exploit)}</span>` : '<span class="muted">–</span>'}</td>
+      <td class="num">${r.trust ?? "–"}</td><td class="num">${r.seconds ? fmt(r.seconds) : "–"}</td>
       <td class="num">${(sum(r, "in") + sum(r, "out")).toLocaleString()}</td>
       <td><a class="btn ghost" href="/console?replay=${encodeURIComponent(r.run)}" style="text-decoration:none">Replay</a></td></tr>`).join("")}</tbody></table>`;
   });

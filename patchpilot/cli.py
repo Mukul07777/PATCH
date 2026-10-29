@@ -25,11 +25,20 @@ def run_one(repo):
                   flush=True)
         if ev["type"] == "done":
             result.update(ev)
+        elif ev["type"] == "findings":
+            result["advisories"] = sum(len(f["vulns"]) for f in ev["findings"])
+        elif ev["type"] == "exploit" and ev.get("stage") == "after":
+            result["exploit"] = ev.get("verdict")
+        elif ev["type"] == "redteam" and ev.get("stage") == "after":
+            result["redteam"] = {"blocked": len(ev["rows"]) - ev["open"], "total": len(ev["rows"])}
+        elif ev["type"] == "ledger":
+            result["trust"] = ev.get("trust")
 
     emit({"type": "start", "repo": repo or f"case:{config.DEFAULT_CASE}", "t": 0})
     Agent(run_id, repo, emit).run()
     return {"repo": repo, "run": run_id, "ok": result.get("ok"), "attempts": result.get("attempts"),
-            "seconds": result.get("seconds"), "usage": result.get("usage")}
+            "seconds": result.get("seconds"), "usage": result.get("usage"), "advisories": result.get("advisories"),
+            "exploit": result.get("exploit"), "redteam": result.get("redteam"), "trust": result.get("trust")}
 
 
 def main(argv):
