@@ -18,8 +18,22 @@ def uv_path():
     return shutil.which("uv")
 
 
+# Only what pip/pytest need. The scanned repo's setup.py / conftest.py run with this env,
+# so API keys and tokens must never be in it.
+ENV_ALLOW = {"PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR",
+             "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+             "LANG", "LC_ALL", "PYTHONIOENCODING", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+             "UV_CACHE_DIR", "PIP_CACHE_DIR", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"}
+
+
+def sandbox_env():
+    env = {k: v for k, v in os.environ.items() if k.upper() in ENV_ALLOW}
+    env.update(PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONDONTWRITEBYTECODE="1")
+    return env
+
+
 def run(cmd, cwd, timeout=600):
-    env = dict(os.environ, PIP_DISABLE_PIP_VERSION_CHECK="1", PYTHONDONTWRITEBYTECODE="1")
+    env = sandbox_env()
     p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 

@@ -2,6 +2,11 @@
 
 Format: `- [ ] **Title**: impact 1-5 · effort S/M/L · risk · acceptance test`
 
+- [x] **Strip secrets from sandbox env** (done by manager 14:55): allow-list env for pip/pytest; verified keys absent in child process
+- [ ] **SECURITY: requirements.txt guard + _write_files allow-list**: impact 5 · S · none · reject option/URL lines, only re-pin planned packages (never below fix) or add deps from target metadata; lower-case paths, block dot-dirs (.git/.github), conftest/setup/pyproject/.pth/sitecustomize, Tests/ case-insensitive; guardrail events
+- [ ] **SECURITY: untrusted-text spotlighting + injection scanner + generated-test AST check**: impact 5 · S-M · none · untrusted_* fields, neutralise injection phrases/bidi chars, event with file:line
+- [ ] **Demo case cases/poisoned/**: impact 5 · S · none · planted injection + conftest reading NEBIUS_API_KEY; guardrails card shows neutralised/blocked/0 secrets; fix still ships
+- [ ] **POST /api/runs auth/rate limit**: impact 3 · S · none · token or localhost-only by default
 - [ ] **NVIDIA content-safety gate on AI-written code**: impact 4 · S-M · free on OpenRouter (nvidia/nemotron-3.5-content-safety:free); needs quota · screen generated exploits/patches before sandbox execution; verdict in ledger + UI; skip gracefully on 429 (backend, after speed builder)
 - [ ] **Per-tier cost/latency chart**: impact 3 · S · none · Runs page chart of tokens/seconds per tier from done.usage across recorded runs (UI, after UI builder)
 - [ ] **Nemotron Embed rerank**: impact 3 · S · needs owner's nvapi key · cosine rerank of Tavily results with nemotron-3.5-embed-1b

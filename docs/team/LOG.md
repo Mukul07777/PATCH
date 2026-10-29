@@ -97,3 +97,8 @@
 - Reasoning control per provider (+400 fallback), JSON mode, 90 s fix cap with escalation, triage ∥ research, Tavily-score rerank (no LLM), triage skipped when reachability conclusive, uv + background sandbox prep, PATCHPILOT_DEMO=1. 44 tests pass (verified).
 - Measured: uv venv+install 0.19-0.23 s vs 5.8-5.9 s with pip. End-to-end timing NOT measured: OpenRouter free daily limit (50 req) exhausted (429).
 - Next backend: NVIDIA content-safety gate (built with graceful skip; verified live when quota resets).
+
+## 2026-10-29 ~14:55 — research round 6 (agent self-security) + urgent fix
+- research-6.md: 11-row threat model. CRITICAL found in our code: sandbox passed full os.environ (API keys/tokens) to the scanned repo's setup.py/conftest.py.
+- FIXED by manager: sandbox env allow-list (patchpilot/sandbox.py), tests/test_sandbox_env.py; verified real uv install + 9 passed, child process sees no keys.
+- Backlog: requirements/_write_files guard, injection spotlighting, poisoned demo case, /api/runs rate limit.
