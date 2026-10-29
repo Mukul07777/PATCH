@@ -19,8 +19,7 @@
       <stop offset=".5" stop-color="#fff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <ellipse cx="200" cy="420" rx="200" ry="110" fill="url(#smoke)"/>
-  <ellipse cx="200" cy="470" rx="120" ry="14" fill="#101828" opacity=".18"/>
+  <ellipse cx="200" cy="486" rx="110" ry="12" fill="#101828" opacity=".16"/>
   <path d="M200 30 L352 86 V232 C352 336 286 410 200 452 C114 410 48 336 48 232 V86 Z" fill="url(#body)"/>
   <path d="M200 30 L352 86 V232 C352 336 286 410 200 452 C114 410 48 336 48 232 V86 Z" fill="none" stroke="url(#edge)" stroke-width="4"/>
   <path d="M200 30 L200 452 C114 410 48 336 48 232 V86 Z" fill="url(#shine)"/>
