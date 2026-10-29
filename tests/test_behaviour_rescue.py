@@ -72,3 +72,11 @@ def test_transitive_findings_and_plan_use_least_change():
     assert findings == found and plan["upgrades"] == [{"package": "urllib3", "from": "1.23", "to": "1.24.2",
         "breaking": False, "transitive": True,
         "reason": "Transitive dependency: pinned to the smallest release that clears every advisory"}]
+
+
+def test_default_db_file_name_survives_restructure(monkeypatch):
+    # the package move once renamed this string to patchpilot.app.db, silently starting an empty database
+    import importlib
+    from patchpilot.core import config
+    monkeypatch.delenv("PATCHPILOT_DB", raising=False)
+    assert importlib.reload(config).DB_PATH.name == "patchpilot.db"
