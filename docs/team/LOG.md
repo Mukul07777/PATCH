@@ -124,3 +124,4 @@
 ## 2026-10-29 ~15:55 — UI round 2 landed; team PAUSED until 03:00 (owner request)
 - UI: supply-chain trust card, OpenVEX download + counts, Guardrails card (+ "Sandbox env: API keys withheld"), per-tier SVG charts on Runs (88% of tokens below Ultra across newest 8 runs). trust/vex/guard panels verified only with injected example events.
 - Owner asked to pause until 03:00. No new agents until then. Guardrails builder and submission writer finish their current task and get pushed.
+- ~16:00 Submission drafts landed (docs/submission/: DEVPOST, VIDEO-SCRIPT, JUDGE-QA, PITCH-30S). Paused.
