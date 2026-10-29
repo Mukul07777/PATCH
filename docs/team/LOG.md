@@ -107,3 +107,7 @@
 - Dark by default; 6 primary tabs + "More"; console auto-replays the best recorded run (LIVE REPLAY badge, "Run it for real"); guided demo /console?demo=1 with Find→Prioritize→Predict→Fix→Attack→Prove→Ship story bar; landing headline + live stat row from real runs; demo terminal shows the payoff; timeline wrap fixed. Also includes the reachability chips UI.
 - Manager checked screenshots (landing + guided demo): good.
 - Launched UI builder round 2: panels for trust check, VEX download, guard events, per-tier cost/latency chart.
+
+## 2026-10-29 ~15:20 — research round 7 (npm feasibility)
+- research-7.md: Node 24 + npm 11 present; OSV npm works; demo case jsonwebtoken 8.5.1→9.0.0 (CVE-2022-23540, offline alg:none proof, real breaking changes). ~9 h. Backlog item added (after security items).
+- Launched UI/UX researcher round 2 (critique of redesigned pages, shots3).
