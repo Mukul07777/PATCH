@@ -47,6 +47,8 @@ def _price(name):
 PRICES = {"nano": _price("PRICE_NANO"), "super": _price("PRICE_SUPER"), "ultra": _price("PRICE_ULTRA")}
 
 RUNS_DIR = ROOT / "runs"
+# Tracked, read-only recorded runs shipped with the repo so fresh clones/deploys have something to replay
+DEMO_RUNS_DIR = ROOT / "demo-runs"
 WORK_DIR = RUNS_DIR / "work"
 CASES_DIR = ROOT / "cases"
 DEFAULT_CASE = "authsvc"

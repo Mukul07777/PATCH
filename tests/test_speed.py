@@ -49,6 +49,10 @@ def test_nim_reasoning_and_other_hosts(monkeypatch):
     assert "chat_template_kwargs" not in bodies[1]
     bodies.clear()
     r = _router(monkeypatch, "https://api.tokenfactory.nebius.com/v1", _capture(bodies))
+    r.chat("nano", "s", "u", "p", reasoning="off")  # Token Factory is vLLM: same switch as NIM
+    assert bodies[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    bodies.clear()
+    r = _router(monkeypatch, "https://example.com/v1", _capture(bodies))
     r.chat("nano", "s", "u", "p", reasoning="off")
     assert set(bodies[0]) == {"model", "messages", "max_tokens", "temperature"}
 

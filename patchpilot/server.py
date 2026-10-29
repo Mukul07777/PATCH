@@ -99,6 +99,17 @@ def _ip(request):
     return request.client.host if request.client else "?"
 
 
+def _run_path(run_id):
+    """Recorded run file for a validated id: live RUNS_DIR first, then the shipped demo folder."""
+    if not RUN_ID.fullmatch(run_id):
+        return None
+    for d in (config.RUNS_DIR, config.DEMO_RUNS_DIR):
+        p = d / f"{run_id}.jsonl"
+        if p.is_file():
+            return p
+    return None
+
+
 def _read_events(path):
     out = []
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -170,12 +181,14 @@ def cases():
 
 @app.get("/api/bench")
 def bench():
-    p = config.RUNS_DIR / "batch-summary.json"
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return data if isinstance(data, list) else []
+    for d in (config.RUNS_DIR, config.DEMO_RUNS_DIR):
+        try:
+            data = json.loads((d / "batch-summary.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, list) and data:
+            return data
+    return []
 
 
 @app.get("/api/org/{owner}")
@@ -299,8 +312,12 @@ def start_run(req: RunRequest, request: Request):
 
 @app.api_route("/api/runs", methods=["GET", "HEAD"])
 def list_runs():
-    out = []
-    for p in sorted(config.RUNS_DIR.glob("*.jsonl"), reverse=True):
+    out, seen = [], {}
+    for d in (config.RUNS_DIR, config.DEMO_RUNS_DIR):  # live runs shadow demo runs with the same id
+        for p in d.glob("*.jsonl"):
+            if RUN_ID.fullmatch(p.stem):
+                seen.setdefault(p.stem, p)
+    for p in sorted(seen.values(), key=lambda p: p.stem, reverse=True):
         try:
             evs = _read_events(p)
         except OSError:
@@ -322,10 +339,8 @@ def list_runs():
 async def events(run_id: str, replay: float = Query(0, ge=0, le=100, allow_inf_nan=False)):
     run = RUNS.get(run_id)
     if run is None:
-        if not RUN_ID.fullmatch(run_id):
-            raise HTTPException(404)
-        path = config.RUNS_DIR / f"{run_id}.jsonl"
-        if not path.exists():
+        path = _run_path(run_id)
+        if path is None:
             raise HTTPException(404)
         evs = _read_events(path)
         with _runs_lock:
@@ -358,10 +373,8 @@ async def events(run_id: str, replay: float = Query(0, ge=0, le=100, allow_inf_n
 def run_vex(run_id: str):
     evs = RUNS.get(run_id, {}).get("events")
     if evs is None:
-        if not RUN_ID.fullmatch(run_id):
-            raise HTTPException(404, "unknown run")
-        path = config.RUNS_DIR / f"{run_id}.jsonl"
-        if not path.exists():
+        path = _run_path(run_id)
+        if path is None:
             raise HTTPException(404, "unknown run")
         evs = _read_events(path)
     doc = next((e["document"] for e in reversed(evs) if e.get("type") == "vex"), None)

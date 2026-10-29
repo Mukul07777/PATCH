@@ -22,9 +22,9 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 ## How we built it
 - **Pipeline**: `patchpilot/agent.py` streams every step as SSE (`server.py`) to a multipage web UI (`web/`): landing, live console with a graph, run history with replay, org scan, architecture.
 - **Model routing**:
-  - **Nano** (`nemotron-3.5-lightning`) does cheap, high-volume work: triage, reachability inference, classification.
-  - **Super** (`nemotron-3.5-super-vl`) writes the first patch attempts.
-  - **Ultra** (`nemotron-3-ultra-550b-a55b`) only joins after Super fails, so the most expensive tier runs only when it is needed. In run `20261029-113639-job` Super's attempts failed, Ultra was called twice, and the run ended green on attempt 3.
+  - **Nano** (`nvidia/Nemotron-3_5-Lightning` on Token Factory) does cheap, high-volume work: triage, reachability inference, classification.
+  - **Super** (`nvidia/nemotron-3-super-120b-a12b`) writes the first patch attempts.
+  - **Ultra** (`nvidia/Nemotron-3-Ultra-550b-a55b`) only joins after Super fails, so the most expensive tier runs only when it is needed. In Token Factory run `20261029-151559-job` Super's attempts failed, Ultra was called twice, and the run ended green on attempt 3; in fetcher and sqlfmt Ultra was never called.
   - Every `done` event records usage per tier: calls, tokens, seconds, model id and provider.
 - **Tavily**: a live runtime call on every run with advisories (`sources.tavily_search`, `search_depth: "advanced"`, 8 results) for each vulnerable package: "`<package>` upgrade `<old>` to `<new>` breaking changes migration guide". Results are ranked by Tavily's relevance score with no extra LLM call (Nemotron Nano reranks only if scores are missing); the top 4 go to the repair model, which must quote the lines it used with their URL. The console shows them under "Research via Tavily" in the Evidence tab, and the PR report lists them as "Sources consulted (Tavily)". Research runs in parallel with triage.
 - **OSV / EPSS / KEV**: vulnerability, exploit-likelihood and known-exploited data (`sources.py`).
@@ -34,15 +34,18 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 - **Self-tests**: 44 offline tests pass for the agent itself (after the speed build, per `docs/team/LOG.md`).
 
 ## Challenges (honest)
-- **Free-tier rate limits.** All recorded runs used OpenRouter `:free` Nemotron models. The daily limit (50 requests) ran out mid-benchmark: sanitizer, sqlfmt and webhooks (`20261029-120256/120418/120442-job`) ended `ok:false` with a 429 at the plan step. The benchmark is 3/6 completed, not 6/6.
-- **Slow free models.** Measured runs took 390–723 s. Nano alone took 279 s in `113639-job`. The speed work added reasoning control, JSON mode, parallel triage and research, and `uv`. With `uv`, venv+install measured 0.19–0.23 s vs 5.8–5.9 s with pip. **End-to-end time after the speed work is not measured yet** (quota ran out).
+- **Free-tier rate limits.** Our first benchmark used OpenRouter `:free` Nemotron models and ran out of daily quota after 3 of 6 cases. We re-ran all six on **Nebius Token Factory**: 5/6 green, 437 s total, 42,770 input / 55,727 output tokens (run ids in the README).
+- **A model that won't add a dependency.** The bleach case (`20261029-151849-job`) failed in 3 of 3 Token Factory runs: bleach 6 needs `tinycss2`, and Nemotron wrote an import fallback that drops `style` attributes instead of adding it to `requirements.txt`. PatchPilot reports it as not green.
+- **Thinking budget.** On Token Factory our `reasoning="off"` switch was not being sent, so Nano used its whole 1500-token budget thinking and triage was skipped. Sending vLLM's `enable_thinking: false` cut Nano output from 3,000 to 203-1,721 tokens per run.
+- **Slow free models.** Measured runs took 390–723 s. Nano alone took 279 s in `113639-job`. The speed work added reasoning control, JSON mode, parallel triage and research, and `uv`. With `uv`, venv+install measured 0.19–0.23 s vs 5.8–5.9 s with pip. On Token Factory after the speed work, the six cases took 42-113 s each (authsvc: 75 s vs 723 s on the free tier).
 - **Model JSON reliability.** Malformed JSON from free models broke steps. We added JSON mode, retries and fallbacks.
 - **Generated exploits are unreliable.** In the fetcher run (`114842-job`), the generated proof was "not proven" and blocked 0/8 variants. In the mailer run (`115625-job`) it was "inconclusive: old version passed the test too". We built a **curated, verified exploit library**: each proof fails on the old version and passes on the new one (e.g. bleach CVE-2021-23980: 9 failed → 9 passed; sqlparse CVE-2024-4340: 6 failed → 8 passed). We report "not proven" when that's the truth.
 - **OSV rarely has symbol data.** Reachability falls back to Nemotron and is labelled `llm-inferred`. OpenVEX never emits `not_affected` from LLM-inferred evidence.
 - **We found a hole in our own agent.** The sandbox originally passed the full `os.environ`, API keys included, to the scanned repo's code. We fixed it with an allow-list and a test (`tests/test_sandbox_env.py`).
 
 ## Accomplishments
-- `20261029-113639-job` (authsvc, PyJWT CVE-2022-29217): 16 advisories, Super → Ultra escalation, tests green on attempt 3, exploit **proven closed**, red-team **7/8 blocked** (1 reported still open), trust score 93.
+- Nebius Token Factory benchmark: **5/6 cases green**, every case's exploit **proven closed**.
+- `20261029-151559-job` (authsvc, PyJWT CVE-2022-29217, Token Factory): Super → Ultra escalation, tests green on attempt 3, exploit **proven closed**, red-team **7/8 blocked** (1 reported still open), trust score 85, 75 s.
 - All 6 benchmark CVEs have curated proofs verified fail-old / pass-new.
 - A dependency bot that tells you what it *couldn't* prove: "partial" ledger claims, "still open" variants, "not proven" exploits.
 - A finding from the trust check: the least-change targets (PyJWT 2.4.0, urllib3 1.26.19/2.2.2, Jinja2 3.1.3) have **no PyPI attestation**, while the latest releases do. That gives a data-backed reason to jump to latest.
@@ -54,15 +57,15 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 - An agent that runs untrusted repo code is itself an attack surface.
 
 ## What's next
-- A full recorded benchmark run on **Nebius Token Factory** (ids pinned in `.env.example`, still to be verified), with a per-tier latency/cost table.
+- Per-tier cost table for the Token Factory benchmark (set `PRICE_*`).
+- Teach the repair loop to add missing transitive dependencies (the bleach/`tinycss2` failure).
 - NVIDIA content-safety gate (`patchpilot/guard.py`, in progress): an AST screen plus `nemotron-3.5-content-safety` that screens AI-written code before it runs.
 - <!-- TODO(owner): one real PR on a public repo; add the PR link here once it exists, or delete this line. -->
-- Re-run the 6-case benchmark with curated proofs and publish the results table.
 - npm support (feasibility done: jsonwebtoken 8.5.1 → 9.0.0, CVE-2022-23540).
 - Container sandbox. Today the venv is **not a security boundary**.
 
 ## Testing instructions
-Hosted demo: <!-- TODO(owner): hosted demo URL. --> no login or API key is needed to watch a run. Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment keeps `PATCHPILOT_TOKEN` unset (otherwise the browser cannot start runs) and `ALLOW_REMOTE_REPOS=0`. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.server:app --port 8000`. Recorded runs (`runs/*.jsonl`) are not in git, so a fresh clone has none until the agent runs once. <!-- TODO(owner): confirm the hosted deployment ships with the recorded runs listed below. -->
+Hosted demo: <!-- TODO(owner): hosted demo URL. --> no login or API key is needed to watch a run. Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment keeps `PATCHPILOT_TOKEN` unset (otherwise the browser cannot start runs) and `ALLOW_REMOTE_REPOS=0`. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.server:app --port 8000`. The repo ships six recorded Token Factory runs in `demo-runs/`, so a fresh clone or deployment can replay them without an API key.
 
 ## Proof
 | Run id | Case | Result |

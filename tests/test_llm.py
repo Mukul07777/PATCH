@@ -55,3 +55,10 @@ def test_discover_mini_hint(monkeypatch):
     monkeypatch.setattr(r._client, "get", lambda path: Resp())
     m = r.discover()
     assert m["nano"] == "nvidia/nemotron-mini-4b-instruct" and m["ultra"] == "nvidia/nemotron-super-49b"
+
+
+def test_token_factory_gets_thinking_switch():
+    from patchpilot.llm import reasoning_style
+    assert reasoning_style("https://api.tokenfactory.nebius.com/v1") == "nim"
+    assert reasoning_style("https://openrouter.ai/api/v1") == "openrouter"
+    assert reasoning_style("https://example.com/v1") is None

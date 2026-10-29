@@ -18,7 +18,7 @@ Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory
 3. To start a live run, pick a case (e.g. `case:authsvc`) and click **Launch agent**. This needs `NEBIUS_API_KEY` on the server; without it the button is disabled and the console says so and points to replay.
 4. Tabs to look at after a run: **Advisories**, **Evidence (Tavily)**, **Certificate**, **Proof & risk**, **Drift radar**, **Diff**, **PR report**.
 
-Recorded runs live in `runs/*.jsonl`, which is git-ignored, so a fresh clone has none until you run the agent once. <!-- TODO(owner): confirm the judged deployment ships with recorded runs. -->
+Recorded runs: new runs are written to `runs/*.jsonl` (git-ignored). The repo also ships `demo-runs/`, six recorded end-to-end runs on Nebius Token Factory plus their `batch-summary.json`, so a fresh clone or deployment can replay them immediately; the server reads both folders (a live run with the same id takes precedence).
 
 **Judged deployment settings.** Leave `PATCHPILOT_TOKEN` **unset** on the judged deployment: when it is set, `POST /api/runs` requires `Authorization: Bearer <token>`, which the browser console does not send, so judges could not launch runs. Keep `ALLOW_REMOTE_REPOS=0` (only the bundled cases run).
 
@@ -154,8 +154,9 @@ are run by PatchPilot's sandbox instead.
 
 ## Speed
 
-Recorded runs on free OpenRouter Nemotron endpoints showed that model calls take 97 to 98 % of wall time
-(authsvc: 709 of 723 s, mostly hidden reasoning tokens). The current pipeline makes these changes:
+Early recorded runs on free OpenRouter Nemotron endpoints showed that model calls took 97 to 98 % of wall time
+(authsvc: 709 of 723 s, mostly hidden reasoning tokens). The current pipeline makes these changes (on Nebius Token Factory
+the same authsvc case now finishes in 75 s, see [Built on Nebius](#built-on-nebius)):
 
 - Reasoning control per call (`reasoning="off"|"low"`). It uses OpenRouter's `reasoning` object or NIM/vLLM's
   `enable_thinking`. If the provider rejects the field, PatchPilot retries without it and stops sending it.
@@ -211,7 +212,22 @@ Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PR
   - **Guard** (`MODEL_GUARD`, optional): NVIDIA Nemotron content-safety model screening AI-written code before it runs.
 - Tokens, latency and (with `PRICE_*`) cost are recorded per tier for every run.
 
-<!-- TODO(owner): state whether a recorded end-to-end run on Token Factory exists and link its run id / numbers. Do not claim one until it does. -->
+### Recorded benchmark on Token Factory (2026-10-29)
+
+All six bundled cases were run end-to-end with `python -m patchpilot.cli` against `https://api.tokenfactory.nebius.com/v1`, models pinned to `nvidia/Nemotron-3_5-Lightning` (Nano), `nvidia/nemotron-3-super-120b-a12b` (Super) and `nvidia/Nemotron-3-Ultra-550b-a55b` (Ultra). Tavily was not configured for this round, so the research step was skipped. No guard model was used (Token Factory's `/models` listed no Nemotron content-safety model for this account), so only the static AST screen ran. Recordings are in `demo-runs/`.
+
+| Case | Run id | Result | Fix attempts | Wall time | Exploit | Red-team blocked | Trust |
+|---|---|---|---|---|---|---|---|
+| authsvc (PyJWT) | `20261029-151559-job` | green | 3 (Super, then Ultra) | 75.0 s | proven closed | 7/8 | 85 |
+| fetcher (urllib3) | `20261029-151714-job` | green | 1 | 42.2 s | proven closed | 7/7 | 86 |
+| mailer (Jinja2) | `20261029-151757-job` | green | 2 | 51.7 s | proven closed | 8/8 | 86 |
+| sanitizer (bleach) | `20261029-151849-job` | **failed** | 4 | 112.5 s | proven closed | 8/8 | 64 |
+| sqlfmt (sqlparse) | `20261029-152042-job` | green | 0 (upgrade alone passed) | 82.9 s | proven closed | 5/5 | 83 |
+| webhooks | `20261029-152206-job` | green | 2 | 72.4 s | proven closed | not measured (variant file collected no tests) | 85 |
+
+**5/6 cases green**, 437 s total wall time, 42,770 input / 55,727 output tokens across 26 model calls (Nano 10, Super 12, Ultra 7; Ultra was not needed in fetcher and sqlfmt). Cost was not computed (`PRICE_*` unset). The sanitizer failure is model behaviour, reproduced in 3 of 3 runs: bleach 6 needs `tinycss2` for `CSSSanitizer`; Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency to `requirements.txt`, so `test_allowed_style_kept` still fails, and PatchPilot correctly reports the run as not green.
+
+A first round on Token Factory (`20261029-150603-job` to `20261029-151314-job`, same 5/6 result) exposed a bug: `reasoning="off"` was not sent to Token Factory, so Nano spent its whole 1500-token budget thinking and symbol inference / triage were skipped. Token Factory honours vLLM's `chat_template_kwargs.enable_thinking` (verified), so it now gets that switch; in the round above Nano's output fell from 3,000 to 203-1,721 tokens per run.
 
 ### Deploying on Nebius AI Cloud (how-to)
 
@@ -244,7 +260,8 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 
 ## Limitations
 
-- The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run.
+- The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run (Token Factory listed no Nemotron content-safety model for our account).
+- Benchmark: 5/6 on Token Factory; the bleach case fails because the model will not add a new dependency (see [Built on Nebius](#built-on-nebius)).
 - Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
@@ -267,7 +284,8 @@ Every commit in this repository is dated 2026-10-29 (check with `git log --forma
 
 - **Initial agent** (00:29): security advisory to tested PR on NVIDIA Nemotron + Nebius Token Factory.
 - **Core features**: multipage UI, verified exploit proofs, risk score, reachability, model debate, org scan, red-team variants, proof certificate, Nemotron rerank, threat clock, API drift radar, least-change upgrade, real-world benchmark cases.
-- **Benchmark and self-tests**: benchmark round 1 (3/3 completed cases secured; 3 cases blocked by API rate limit), agent self-test suite, provider and models recorded per run.
+- **Benchmark and self-tests**: benchmark round 1 on the OpenRouter free tier (3/3 completed cases secured; 3 cases blocked by API rate limit), agent self-test suite, provider and models recorded per run.
+- **Nebius benchmark**: full 6-case run on Nebius Token Factory (5/6 green), Token Factory reasoning-switch fix, recorded runs shipped in `demo-runs/`.
 - **Supply-chain depth**: curated exploit proofs for urllib3, Jinja2, bleach and sqlparse CVEs; symbol-level reachability; deps.dev release trust check; OpenVEX export; Nebius model id pinning.
 - **Speed and safety**: reasoning control, parallel triage/research, `uv` sandbox prep, demo mode; API keys kept out of the sandboxed repo's environment; NVIDIA content-safety gate + static AST screen.
 - **UI**: guided demo mode, auto-replay console, trust / OpenVEX / guardrails panels, per-tier charts.

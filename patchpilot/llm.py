@@ -189,7 +189,8 @@ def reasoning_style(base_url=None):
     host = (base_url or config.NEBIUS_BASE_URL).split("//")[-1].split("/")[0]
     if host == "openrouter.ai":
         return "openrouter"
-    if host == "integrate.api.nvidia.com" or "vllm" in host or host.startswith(("localhost", "127.0.0.1")):
+    # Nebius Token Factory serves Nemotron via vLLM and honours chat_template_kwargs (verified 2026-10-29)
+    if host in ("integrate.api.nvidia.com", "api.tokenfactory.nebius.com") or "vllm" in host or host.startswith(("localhost", "127.0.0.1")):
         return "nim"
     return None
 
