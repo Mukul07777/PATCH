@@ -80,3 +80,15 @@ def test_default_db_file_name_survives_restructure(monkeypatch):
     from patchpilot.core import config
     monkeypatch.delenv("PATCHPILOT_DB", raising=False)
     assert importlib.reload(config).DB_PATH.name == "patchpilot.db"
+
+
+def test_oversized_ids_are_404_not_500():
+    from fastapi.testclient import TestClient
+    from conftest import AUTH
+    from patchpilot.app import server
+    c = TestClient(server.app, raise_server_exceptions=False, headers={**AUTH, "X-Requested-With": "patchpilot"})
+    big = "100000000000000000000"
+    for method, path in (("GET", f"/api/projects/{big}"), ("GET", f"/api/scans/{big}"),
+                         ("DELETE", f"/api/projects/{big}"), ("DELETE", f"/api/users/{big}")):
+        assert c.request(method, path).status_code == 404, path
+    assert c.post("/api/runs", json={"project": int(big)}).status_code in (400, 404, 422)

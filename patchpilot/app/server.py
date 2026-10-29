@@ -81,7 +81,7 @@ config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
 class RunRequest(BaseModel):
     repo: str = ""
-    project: int | None = Field(None, ge=1)
+    project: int | None = Field(None, ge=1, le=2**63 - 1)
 
     @field_validator("repo")
     @classmethod
@@ -140,6 +140,12 @@ def _clean_msg(e):
     loc = ".".join(str(x) for x in e.get("loc", ()) if x not in ("body", "query", "path"))
     msg = re.sub(r"^(Value error|Assertion failed), ", "", str(e.get("msg", "invalid value")))
     return f"{loc}: {msg}" if loc and not msg.lower().startswith(loc.lower()) else msg
+
+
+@app.exception_handler(OverflowError)
+async def id_overflow(request: Request, exc: OverflowError):
+    """An id bigger than SQLite's 64-bit INTEGER can never match a row: answer like any unknown id."""
+    return JSONResponse({"detail": "Not found"}, status_code=404)
 
 
 @app.exception_handler(RequestValidationError)
