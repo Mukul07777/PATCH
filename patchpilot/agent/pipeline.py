@@ -21,10 +21,11 @@ from patchpilot.agent.common import PIN, TEXT_EXT, extract_test_code
 __all__ = ["Agent", "PIN", "TEXT_EXT", "extract_test_code"]
 from patchpilot.agent.behaviour import BehaviourMixin, describe as describe_behaviour
 from patchpilot.agent.proof import ProofMixin
+from patchpilot.agent.transitive import MARK as TRANSITIVE_MARK, TransitiveMixin
 from patchpilot.agent.report import ReportMixin
 
 
-class Agent(BehaviourMixin, ProofMixin, ReportMixin):
+class Agent(BehaviourMixin, TransitiveMixin, ProofMixin, ReportMixin):
     def __init__(self, run_id, repo, emit):
         self.run_id = run_id
         self.repo_src = repo
@@ -108,6 +109,15 @@ class Agent(BehaviourMixin, ProofMixin, ReportMixin):
         self._threat(findings)
         self.step("scan", "done", detail={"vulnerable": len(findings),
                                            "advisories": sum(len(f["vulns"]) for f in findings)})
+        trans = None
+        if not findings and not self.pr_info:
+            # no direct pin is vulnerable: only call it clean once the installed dependency tree is clean too
+            ok_install, _ = sandbox.wait_ready()
+            trans = self._transitive(pins, sandbox) if ok_install else []
+            findings += trans
+            if trans:
+                self._emit({"type": "findings", "findings": findings})
+                self._threat(findings)
         if not findings and not self.pr_info:
             self._emit({"type": "done", "ok": True, "clean": True, "proven": False, **self._meta(), "usage": self.router.cost_report()})
             return
@@ -125,6 +135,8 @@ class Agent(BehaviourMixin, ProofMixin, ReportMixin):
         # 5. baseline + apply upgrade
         self.step("test", "running", "Running baseline tests on current pins")
         ok_install, out = sandbox.wait_ready()
+        if ok_install:
+            self._add_transitive(findings, plan, trans if trans is not None else self._transitive(pins, sandbox))
         base_ok, base_summary, _ = sandbox.test() if ok_install else (False, "install failed", out)
         self._emit({"type": "test", "label": "baseline", "ok": base_ok, "summary": base_summary})
         exploit = self._exploit_before(findings, original, research, sandbox) if ok_install else None
@@ -136,6 +148,13 @@ class Agent(BehaviourMixin, ProofMixin, ReportMixin):
         self._apply_pins({u["package"]: u["to"] for u in plan["upgrades"]})
         self.log("Bumped: " + ", ".join(f"{u['package']} -> {u['to']}" for u in plan["upgrades"]), "test")
         ok_install, out = sandbox.install()
+        if not ok_install and any(u.get("transitive") for u in plan["upgrades"]):
+            # an explicit pin can clash with a parent's version range: keep the direct upgrades, drop those pins
+            self.log("Install failed with the transitive pins; retrying without them:\n" + out[-600:], "test")
+            plan["upgrades"] = [u for u in plan["upgrades"] if not u.get("transitive")]
+            self._drop_transitive_pins()
+            self._apply_pins({u["package"]: u["to"] for u in plan["upgrades"]})
+            ok_install, out = sandbox.install()
         if not ok_install:
             raise RuntimeError("pip install failed after upgrade:\n" + out)
         if drift_old is not None:
@@ -321,7 +340,16 @@ class Agent(BehaviourMixin, ProofMixin, ReportMixin):
             if m and m.group(1).lower() in lower:
                 line = f"{m.group(1)}=={lower[m.group(1).lower()]}"
             lines.append(line)
+        present = {m.group(1).lower() for l in lines for m in [PIN.match(l.split("#")[0])] if m}
+        for name, ver in targets.items():  # transitive packages are not in the file yet: pin them explicitly
+            if name.lower() not in present:
+                lines.append(f"{name}=={ver}  {TRANSITIVE_MARK}")
         req.write_text("\n".join(lines) + "\n")
+
+    def _drop_transitive_pins(self):
+        req = self.work / "requirements.txt"
+        keep = [l for l in req.read_text().splitlines() if TRANSITIVE_MARK not in l]
+        req.write_text("\n".join(keep) + "\n")
 
     def _usage_snippets(self, package, files):
         mod = package.lower().replace("-", "_").replace("pyjwt", "jwt")

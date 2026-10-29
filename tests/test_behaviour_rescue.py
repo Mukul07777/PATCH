@@ -48,3 +48,27 @@ def test_run_request_accepts_pull_urls():
     assert RunRequest(repo="https://github.com/o/r/pull/7").repo.endswith("/pull/7")
     with pytest.raises(ValueError):
         RunRequest(repo="https://github.com/o/r/pull/x")
+
+
+def test_transitive_unpinned_skips_pins_and_tooling():
+    from patchpilot.agent import transitive as t
+    inv = [{"name": "requests", "version": "2.19.0"}, {"name": "urllib3", "version": "1.23"},
+           {"name": "pip", "version": "24"}, {"name": "pytest", "version": "8"}]
+    assert t.unpinned(inv, {"Requests": "2.19.0"}) == [{"name": "urllib3", "version": "1.23"}]
+
+
+def test_transitive_findings_and_plan_use_least_change():
+    from patchpilot.agent import transitive as t
+    adv = {"id": "GHSA-x", "fixed": ["1.24.2", "2.0.7"]}
+    found = t.findings_for([{"name": "urllib3", "version": "1.23"}, {"name": "idna", "version": "3.7"}],
+                           {("urllib3", "1.23"): [adv]})
+    assert [f["package"] for f in found] == ["urllib3"] and found[0]["transitive"] and found[0]["min_safe"] == "1.24.2"
+
+    class A(t.TransitiveMixin):
+        _emit = log = lambda self, *a, **k: None
+    plan = {"upgrades": [{"package": "urllib3", "from": "1.23", "to": "2.5.0"}]}
+    findings = []
+    A()._add_transitive(findings, plan, found)
+    assert findings == found and plan["upgrades"] == [{"package": "urllib3", "from": "1.23", "to": "1.24.2",
+        "breaking": False, "transitive": True,
+        "reason": "Transitive dependency: pinned to the smallest release that clears every advisory"}]

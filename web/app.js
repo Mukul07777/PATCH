@@ -741,7 +741,7 @@ function renderAdvisories() {
   $("#tab-advisories").innerHTML = clock + state.findings.map((f) => {
     const up = state.plan?.upgrades.find((u) => u.package.toLowerCase() === f.package.toLowerCase());
     const vulns = [...f.vulns].sort((a, b) => (SEV_RANK[a.severity] ?? 4) - (SEV_RANK[b.severity] ?? 4));
-    return `<div class="pkg"><div class="pkg-head"><b>${esc(f.package)}</b><span class="ver">${esc(f.current)}</span><span class="muted">→</span>
+    return `<div class="pkg"><div class="pkg-head"><b>${esc(f.package)}</b>${f.transitive ? '<span class="chip nano" title="Not in requirements.txt: installed as a dependency of a dependency">via dependency</span>' : ""}<span class="ver">${esc(f.current)}</span><span class="muted">→</span>
       <span class="to">${esc(up ? up.to : "…")}</span><span class="tag">${f.vulns.length} advisories</span>
       ${f.min_safe && f.min_safe !== f.latest ? `<span class="tag" title="Smallest release that clears every advisory">least-change: ${esc(f.min_safe)}</span>` : ""}
       ${up?.breaking ? '<span class="tag brk">⚠ breaking upgrade</span>' : ""}</div>

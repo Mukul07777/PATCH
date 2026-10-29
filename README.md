@@ -13,6 +13,7 @@ Dependency bots bump the version and stop. When the bump breaks your code, the P
 | **Rescues an existing red Dependabot PR in place** | ✗ | ✗ | **✓ (paste the PR URL)** |
 | **Behaviour lock: proves your functions return the same results after the fix, even with no tests** | ✗ | ✗ | **✓** |
 | **Runs the exploit before and after to prove it is closed** | ✗ | ✗ | **✓ (+ red-team variants)** |
+| **Finds and fixes vulnerable *transitive* dependencies your requirements.txt never names** | lockfile only | ✓ (reports) | **✓ (scans the installed tree, pins the least-change fix)** |
 | Predicts which of your lines break *before* running tests | ✗ | ✗ | **✓ (API drift radar)** |
 | Signed certificate of every claim the PR makes | ✗ | ✗ | **✓** |
 
@@ -20,7 +21,9 @@ Dependency bots bump the version and stop. When the bump breaks your code, the P
 
 **2. Behaviour lock.** Tests only check what someone thought to assert, and many repos have almost none. Before upgrading, Nemotron writes calls into *your* public functions. A fixed harness (not the model) records the results twice on the vulnerable pins and drops anything non-deterministic. After the repair, every call must return exactly the same thing. Any difference goes back into the repair loop **even when pytest is green**. On the `authsvc` sample, PyJWT 1.7.1 → 2.10.1 changed 4 of 5 locked behaviours and the lock caught all 4. The time-dependent raw token was correctly dropped as unstable.
 
-**3. Exploit proof.** A pytest attack runs on the old pins (it succeeds), then on the patched code (it is blocked), followed by 5-8 attack variants. A fix is not called "secure" without this evidence.
+**3. Transitive fixes.** Most vulnerable code arrives as a dependency of a dependency. After the baseline install PatchPilot lists every package actually installed in the sandbox, checks the unpinned ones against OSV in one batch, and pins each vulnerable one to the smallest release that clears every advisory. If a pin clashes with a parent's version range it is dropped, and the direct upgrade still goes through. A project whose direct pins are clean is only called clean once its installed tree is too. With `requests==2.19.0`, PatchPilot finds `idna 2.7` and `urllib3 1.23` (14 advisories, neither in requirements.txt), pins them, and a re-scan after the fix finds 0 vulnerable transitive packages.
+
+**4. Exploit proof.** A pytest attack runs on the old pins (it succeeds), then on the patched code (it is blocked), followed by 5-8 attack variants. A fix is not called "secure" without this evidence.
 
 Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory** (the default provider). External data sources: OSV.dev, PyPI, FIRST EPSS, CISA KEV, deps.dev, Tavily and the GitHub API. Any other OpenAI-compatible endpoint (NVIDIA NIM, or OpenRouter as a fallback) also works.
 
