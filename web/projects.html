@@ -23,16 +23,16 @@
 <header class="topbar"></header>
 
 <main id="main">
-<div class="page-head"><span class="kicker">Projects</span><h1>Your dependencies, checked.</h1><p>Add a GitHub repository or upload a manifest. Scanning reads your dependency files and checks every pinned version against OSV.dev. It needs no API key and never runs your code.</p></div>
+<div class="page-head"><span class="kicker">Projects</span><h1>Your dependencies, checked.</h1><p>Add a GitHub repository or upload a manifest. Scanning reads your dependency files and checks every pinned version against OSV.dev. It needs no API key and never runs your code. Only exact versions can be checked, so a lock file gives the most complete result.</p></div>
 
 <div class="wrap">
   <div id="status" class="pj-status" role="status" aria-live="polite"></div>
 
   <section id="listView" aria-labelledby="listTitle">
-    <div class="filters pj-bar"><h2 id="listTitle">Projects</h2><button type="button" class="btn ghost sm" id="samplesBtn">Add sample projects</button></div>
+    <div class="filters pj-bar pj-listhead"><h2 id="listTitle">Projects</h2><button type="button" class="btn ghost sm" id="samplesBtn">Add sample projects</button></div>
     <div id="projects" class="pj-grid"><div class="empty span-all">Loading projects…</div></div>
 
-    <div class="filters"><h2 id="newTitle">New project</h2></div>
+    <div class="filters pj-newhead"><h2 id="newTitle">New project</h2></div>
     <form id="newForm" class="card glass pj-form" aria-labelledby="newTitle" novalidate>
       <fieldset class="pj-modes">
         <legend>Source</legend>
@@ -44,9 +44,12 @@
         <input id="gitUrl" name="git_url" placeholder="https://github.com/owner/repo" autocomplete="off" inputmode="url">
         <label for="gitRef">Branch, tag or commit <span class="muted">(optional)</span></label>
         <input id="gitRef" name="ref" placeholder="main" autocomplete="off">
+        <label for="gitSub">Folder <span class="muted">(optional, monorepos: only scan this sub-folder)</span></label>
+        <input id="gitSub" name="subdir" placeholder="backend" autocomplete="off">
+        <p class="hint">Scans requirements*.txt, pyproject.toml, poetry.lock, uv.lock and Pipfile.lock up to 3 folders deep. A lock file is used instead of the pyproject.toml next to it.</p>
       </div>
       <div id="uploadFields" class="pj-fields" hidden>
-        <label for="file">Choose a file <span class="muted">(requirements.txt, pyproject.toml, poetry.lock, uv.lock or Pipfile.lock, max 200 KB)</span></label>
+        <label for="file">Choose a file <span class="muted">(requirements.txt, pyproject.toml: max 1 MB; poetry.lock, uv.lock, Pipfile.lock: max 5 MB)</span></label>
         <input id="file" type="file" accept=".txt,.toml,.lock,.in">
         <label for="filename">File name</label>
         <input id="filename" name="filename" value="requirements.txt" autocomplete="off">

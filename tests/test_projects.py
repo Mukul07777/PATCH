@@ -7,11 +7,11 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
-from conftest import AUTH
+from conftest import AUTH, osv_from
 
 from patchpilot import config, db, scanner, server, sources
 
-OSV = "https://api.osv.dev/v1/query"
+OSV = "https://api.osv.dev/v1/querybatch"
 VULN = {"id": "GHSA-462w-v97r-4m45", "aliases": ["CVE-2019-10906"], "summary": "Jinja2 sandbox escape",
         "database_specific": {"severity": "HIGH"},
         "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"}],
@@ -29,9 +29,12 @@ def client(monkeypatch):
 
 def _mock_feeds():
     def osv(request):
-        body = json.loads(request.content)
-        return httpx.Response(200, json={"vulns": [VULN]} if body["package"]["name"].lower() == "jinja2" else {})
+        qs = json.loads(request.content)["queries"]
+        return httpx.Response(200, json={"results": [
+            {"vulns": [{"id": VULN["id"], "modified": "2024-01-01T00:00:00Z"}]} if q["package"]["name"].lower() == "jinja2"
+            else {} for q in qs]})
     respx.post(OSV).mock(side_effect=osv)
+    respx.get(f"https://api.osv.dev/v1/vulns/{VULN['id']}").mock(return_value=httpx.Response(200, json=VULN))
     respx.get("https://api.first.org/data/v1/epss").mock(return_value=httpx.Response(
         200, json={"data": [{"cve": "CVE-2019-10906", "epss": "0.42", "percentile": "0.9"}]}))
     respx.get(url__startswith="https://www.cisa.gov/").mock(return_value=httpx.Response(
@@ -74,26 +77,39 @@ def test_scan_osv_outage_reports_error_not_crash(client):
     scan = client.get(f"/api/scans/{client.post(f'/api/projects/{pid}/scan').json()['id']}").json()
     assert scan["status"] == "done" and scan["findings"] == []
     assert any("OSV lookup failed" in e for e in scan["summary"]["errors"])
+    # nothing was checked, so the scan must not read as an all-clear
+    assert scan["summary"]["coverage"] == {"state": "unverified", "total": 3, "pinned": 2, "checked": 0, "unpinned": 1}
+
+
+API = "https://api.github.com/repos/acme/app"
+
+
+def _mock_repo(tree, ref="v1.2", sha="abc123"):
+    respx.get(API).mock(return_value=httpx.Response(200, json={"default_branch": "main"}))
+    respx.get(f"{API}/commits/{ref}").mock(return_value=httpx.Response(200, json={"sha": sha}))
+    respx.get(f"{API}/git/trees/{sha}").mock(return_value=httpx.Response(200, json={
+        "truncated": False, "tree": [{"path": p, "type": "blob", "size": n} for p, n in tree]}))
 
 
 @respx.mock
 def test_git_project_scans_raw_manifests_even_with_remote_repos_off(client, monkeypatch):
     monkeypatch.setattr(config, "ALLOW_REMOTE_REPOS", False)
     _mock_feeds()
-    raw = "https://raw.githubusercontent.com/acme/app/v1.2/"
+    _mock_repo([("requirements.txt", 13), ("README.md", 10)])
+    raw = "https://raw.githubusercontent.com/acme/app/abc123/"
     respx.get(raw + "requirements.txt").mock(return_value=httpx.Response(200, text="Jinja2==2.10\n"))
-    respx.get(url__startswith=raw).mock(return_value=httpx.Response(404))
     p = client.post("/api/projects", json={"git_url": "https://github.com/acme/app.git", "ref": "v1.2"}).json()
     assert p["source"] == "https://github.com/acme/app" and p["ref"] == "v1.2" and p["name"] == "acme/app"
     scan = client.get(f"/api/scans/{client.post(f'/api/projects/{p['id']}/scan').json()['id']}").json()
     assert scan["status"] == "done" and scan["summary"]["files"] == ["requirements.txt"]
-    assert len(scan["findings"]) == 1
+    assert scan["summary"]["commit"] == "abc123" and scan["summary"]["coverage"]["state"] == "verified"
+    assert len(scan["findings"]) == 1 and scan["findings"][0]["source_file"] == "requirements.txt"
 
 
 @respx.mock
 def test_git_project_without_manifest_errors(client):
-    respx.get(url__startswith="https://raw.githubusercontent.com/").mock(return_value=httpx.Response(404))
-    pid = client.post("/api/projects", json={"git_url": "https://github.com/acme/empty"}).json()["id"]
+    _mock_repo([("README.md", 10)], ref="main")
+    pid = client.post("/api/projects", json={"git_url": "https://github.com/acme/app"}).json()["id"]
     scan = client.get(f"/api/scans/{client.post(f'/api/projects/{pid}/scan').json()['id']}").json()
     assert scan["status"] == "error" and "No supported manifest" in scan["summary"]["error"]
 
@@ -107,7 +123,11 @@ def test_git_project_without_manifest_errors(client):
     ({"filename": "requirements.txt", "content": "   "}, 422),
     ({"filename": "requirements.txt", "content": "# only comments\n"}, 422),
     ({"filename": "pyproject.toml", "content": "[broken"}, 422),
-    ({"filename": "requirements.txt", "content": "a==1\n" * 50_001}, 422),
+    ({"filename": "requirements.txt", "content": "a==1\n" * 250_001}, 413),
+    ({"filename": "poetry.lock", "content": "#" * 5_000_001}, 413),
+    ({"filename": "requirements.txt", "content": "\x00\x01binary"}, 422),
+    ({"filename": "requirements.txt", "content": "hello there\nthis is a note\nflask==2.0\n"}, 422),
+    ({"git_url": "https://github.com/a/b", "subdir": "../etc"}, 422),
     ({"path": "/tmp"}, 403),
 ])
 def test_create_project_validation(client, body, code):
@@ -118,7 +138,7 @@ def test_create_project_validation(client, body, code):
 def test_local_path_projects_need_flag(client, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "ALLOW_LOCAL_PATHS", True)
     (tmp_path / "requirements.txt").write_text("six==1.16.0\n")
-    monkeypatch.setattr(sources, "osv_vulns", lambda p, v: [])
+    monkeypatch.setattr(sources, "osv_batch", osv_from(lambda p, v: []))
     p = client.post("/api/projects", json={"path": str(tmp_path)}).json()
     assert p["source_type"] == "path"
     scan = client.get(f"/api/scans/{client.post(f'/api/projects/{p['id']}/scan').json()['id']}").json()
@@ -139,13 +159,13 @@ def test_mutations_need_token_and_are_audited(client, monkeypatch):
 
 
 def test_project_rate_limit(client):
-    codes = [_upload(client).status_code for _ in range(server.RATE_LIMIT + 1)]
-    assert codes[:-1] == [201] * server.RATE_LIMIT and codes[-1] == 429
+    codes = [_upload(client).status_code for _ in range(server.USER_RATE_LIMIT + 1)]
+    assert codes[:-1] == [201] * server.USER_RATE_LIMIT and codes[-1] == 429
 
 
 def test_delete_cascades_scans_and_findings(client, monkeypatch):
-    monkeypatch.setattr(sources, "osv_vulns", lambda p, v: [{"id": "PYSEC-1", "cve": None, "summary": "x", "severity": "LOW",
-                                                            "fixed": ["2.0"], "aliases": []}])
+    monkeypatch.setattr(sources, "osv_batch", osv_from(lambda p, v: [{"id": "PYSEC-1", "cve": None, "summary": "x",
+                                                                      "severity": "LOW", "fixed": ["2.0"], "aliases": []}]))
     monkeypatch.setattr(sources, "pypi_latest", lambda p: "9.9")
     pid = _upload(client, content="six==1.0\n").json()["id"]
     sid = client.post(f"/api/projects/{pid}/scan").json()["id"]

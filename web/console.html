@@ -56,7 +56,7 @@
     <p class="hint" id="remoteOff" hidden>This server does not run remote repositories (ALLOW_REMOTE_REPOS=0), so fix mode is limited to sample projects. Scanning any GitHub repo still works on the <a href="/projects">Projects</a> page.</p>
     <p class="hint no-key" id="noKey" hidden>Server has no NEBIUS_API_KEY, so live runs are off. <a href="#history" id="noKeyLink">Replay a recorded run below</a> or try the <a href="/console?demo=1">guided demo</a>.</p>
     <div class="launch-row small">
-      <select id="history" aria-label="Recorded runs"><option value="">▶ Replay a recorded run…</option></select>
+      <label for="history" class="sr-only">Sample recordings</label><select id="history"><option value="">▶ Sample recordings: replay a run…</option></select>
       <button class="btn ghost" type="button" id="replayBtn">Replay</button>
       <a class="btn ghost" href="/console?demo=1" id="demoBtn"><span aria-hidden="true">▶</span> Guided demo</a>
     </div>

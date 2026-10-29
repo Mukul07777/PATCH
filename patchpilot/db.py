@@ -123,6 +123,12 @@ MIGRATIONS = [
     );
     CREATE INDEX ignores_project ON ignores(project_id)
     """,
+    # 3: monorepo sub-folder per project; the manifest each finding came from and its numeric CVSS base score
+    """
+    ALTER TABLE projects ADD COLUMN subdir TEXT;
+    ALTER TABLE findings ADD COLUMN source_file TEXT;
+    ALTER TABLE findings ADD COLUMN cvss_score REAL
+    """,
 ]
 
 _lock = threading.RLock()
@@ -190,9 +196,9 @@ def _x(sql, args=()):
 
 
 # ---------- projects ----------
-def create_project(name, source_type, source, ref=None, manifest=None):
-    return _x("INSERT INTO projects (name, source_type, source, ref, manifest, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-              (name, source_type, source, ref, manifest, time.time()))
+def create_project(name, source_type, source, ref=None, manifest=None, subdir=None):
+    return _x("INSERT INTO projects (name, source_type, source, ref, manifest, created_at, subdir) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?)", (name, source_type, source, ref, manifest, time.time(), subdir))
 
 
 SEVERITIES = ("CRITICAL", "HIGH", "MODERATE", "LOW", "UNKNOWN")
@@ -294,6 +300,29 @@ def active_scan(project_id):
     return rows[0]["id"] if rows else None
 
 
+def claim_queued_scan():
+    """Atomically move the oldest queued scan-only scan to running; (scan_id, project_id) or None."""
+    with _lock:
+        conn = _connect()
+        row = conn.execute("SELECT id, project_id FROM scans WHERE kind = 'scan' AND status = 'queued' "
+                           "ORDER BY id LIMIT 1").fetchone()
+        if row is None:
+            return None
+        conn.execute("UPDATE scans SET status = 'running' WHERE id = ?", (row["id"],))
+        return row["id"], row["project_id"]
+
+
+def requeue_interrupted():
+    """After a restart nothing is really running: put running scan-only scans back in the queue."""
+    with _lock:
+        return _connect().execute("UPDATE scans SET status = 'queued' WHERE kind = 'scan' AND status = 'running'").rowcount
+
+
+def queued_position(scan_id):
+    return _q("SELECT COUNT(*) AS n FROM scans WHERE kind = 'scan' AND status = 'queued' AND id < ?",
+              (scan_id,))[0]["n"]
+
+
 def _scan_row(s):
     s = dict(s)
     s["summary"] = json.loads(s.pop("summary_json") or "null")
@@ -339,10 +368,11 @@ def add_findings(scan_id, project_id, rows):
         try:
             conn.executemany(
                 "INSERT INTO findings (scan_id, project_id, package, version, vuln_id, aliases, severity, cvss, epss, kev, "
-                "fixed_in, summary, reachable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "fixed_in, summary, reachable, source_file, cvss_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(scan_id, project_id, f["package"], f.get("version"), f["vuln_id"], json.dumps(f.get("aliases") or []),
                   f.get("severity"), f.get("cvss"), f.get("epss"), 1 if f.get("kev") else 0, f.get("fixed_in"),
-                  f.get("summary"), None if f.get("reachable") is None else int(bool(f["reachable"]))) for f in rows])
+                  f.get("summary"), None if f.get("reachable") is None else int(bool(f["reachable"])),
+                  f.get("source_file"), f.get("cvss_score")) for f in rows])
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -517,6 +547,17 @@ def _latest_scans(project_ids=None):
     return {r["project_id"]: r["sid"] for r in rows if project_ids is None or r["project_id"] in project_ids}
 
 
+def coverage_state(summary):
+    """verified | partial | unverified for a finished scan's summary (older scans without coverage: verified
+    when everything was pinned, else partial / unverified from the pinned count)."""
+    cov = (summary or {}).get("coverage")
+    if cov and cov.get("state"):
+        return cov["state"]
+    s = summary or {}
+    pinned, total = s.get("pinned") or 0, s.get("dependencies") or 0
+    return "unverified" if not pinned else "verified" if pinned >= total else "partial"
+
+
 def _day(t):
     return time.strftime("%Y-%m-%d", time.gmtime(t))
 
@@ -531,8 +572,16 @@ def dashboard(project_ids=None, days=30, now=None):
                 if project_ids is None or p["id"] in project_ids}
     latest = _latest_scans(set(projects))
     by_sev, kev, suppressed = _empty_counts(), 0, 0
-    at_risk, packages = [], {}
+    at_risk, packages, unverified, clean = [], {}, [], 0
+    marks_l = ",".join("?" * len(latest)) or "NULL"
+    summaries = {r["id"]: json.loads(r["summary_json"] or "null") for r in _q(
+        f"SELECT id, summary_json FROM scans WHERE id IN ({marks_l})", tuple(latest.values()))}
     for pid, sid in latest.items():
+        state = coverage_state(summaries.get(sid))
+        if state != "verified":
+            cov = (summaries.get(sid) or {}).get("coverage") or {}
+            unverified.append({"id": pid, "name": projects[pid]["name"], "state": state,
+                               "checked": cov.get("checked"), "total": cov.get("total")})
         counts, pkev = _empty_counts(), 0
         for f in _scan_findings(sid, now):
             if f["suppressed"]:
@@ -552,6 +601,8 @@ def dashboard(project_ids=None, days=30, now=None):
             by_sev[k] += n
         kev += pkev
         total = sum(counts.values())
+        if not total and state == "verified":
+            clean += 1
         if total:
             score = 10 * counts["CRITICAL"] + 5 * counts["HIGH"] + 2 * counts["MODERATE"] + counts["LOW"] + 10 * pkev
             at_risk.append({"id": pid, "name": projects[pid]["name"], "counts": counts, "total": total, "kev": pkev,
@@ -588,7 +639,9 @@ def dashboard(project_ids=None, days=30, now=None):
     new7 = _q(f"SELECT COUNT(*) AS n FROM finding_status WHERE first_seen_at >= ? AND project_id IN ({marks})",
               (week, *ids))[0]["n"]
     mttr = sum(r["resolved_at"] - r["first_seen_at"] for r in fixed) / len(fixed) if fixed else None
+    unverified.sort(key=lambda r: r["name"].lower())
     return {"projects": len(projects), "scanned": len(latest), "open": sum(by_sev.values()), "by_severity": by_sev,
+            "clean": clean, "unverified": unverified,
             "kev": kev, "suppressed": suppressed, "at_risk": at_risk[:10], "top_packages": top, "trend": trend,
             "mttr_seconds": mttr, "fixed_total": len(fixed), "new_7d": new7,
             "fixed_7d": sum(1 for r in fixed if r["resolved_at"] >= week)}

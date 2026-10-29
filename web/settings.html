@@ -20,11 +20,27 @@
 <header class="topbar"></header>
 
 <main id="main">
-<div class="page-head"><span class="kicker">Settings</span><h1>Settings</h1><p>Provider keys are stored encrypted on the server and never sent back to the browser. Changes apply to the next run without a restart.</p></div>
+<div class="page-head"><span class="kicker">Settings</span><h1>Settings</h1><p>Your account, and for admins: provider keys are stored encrypted on the server and never sent back to the browser. Changes apply to the next run without a restart.</p></div>
 
 <div class="wrap st-grid">
   <div id="status" class="pj-status" role="status" aria-live="polite"></div>
-  <p id="denied" class="card glass" hidden>Only admins can change settings. Ask an admin of this PatchPilot server.</p>
+  <p id="denied" class="card glass" hidden>Only admins can change server settings, users and API keys. You can manage your own account below.</p>
+
+  <section class="card glass st-sec" id="secAccount" aria-labelledby="acctTitle" hidden>
+    <h2 id="acctTitle">Your account</h2>
+    <p class="muted" id="acctWho"></p>
+    <form id="pwForm" class="fm" novalidate aria-labelledby="pwTitle">
+      <h3 id="pwTitle">Change password</h3>
+      <div class="row2">
+        <div><label for="pw_cur">Current password</label><input id="pw_cur" type="password" autocomplete="current-password"></div>
+        <div><label for="pw_new">New password <span class="muted">(10+ characters)</span></label><input id="pw_new" type="password" autocomplete="new-password"></div>
+      </div>
+      <p class="hint">Changing your password signs out your other sessions.</p>
+      <p class="pj-err" id="pwErr" role="alert" hidden></p>
+      <div class="pj-actions"><button class="btn ghost" type="submit">Change password</button>
+        <button class="btn ghost" type="button" id="logoutAll">Sign out all sessions</button></div>
+    </form>
+  </section>
 
   <section class="card glass st-sec" id="secProviders" aria-labelledby="provTitle" hidden>
     <h2 id="provTitle">Providers</h2>
@@ -64,6 +80,12 @@
   <section class="card glass st-sec" id="secUsers" aria-labelledby="usersTitle" hidden>
     <h2 id="usersTitle">Users</h2>
     <div id="users" class="tbl-wrap"></div>
+    <form id="resetForm" class="fm" novalidate hidden aria-labelledby="resetTitle">
+      <h3 id="resetTitle">Reset password for <span id="resetWho"></span></h3>
+      <div class="row2"><div><label for="r_pw">New password <span class="muted">(10+ characters; their sessions are signed out)</span></label><input id="r_pw" type="password" autocomplete="new-password"></div></div>
+      <p class="pj-err" id="resetErr" role="alert" hidden></p>
+      <div class="pj-actions"><button class="btn ghost" type="submit">Set password</button><button class="btn ghost" type="button" id="resetCancel">Cancel</button></div>
+    </form>
     <form id="userForm" class="fm" novalidate aria-labelledby="newUserTitle">
       <h3 id="newUserTitle">Add a user</h3>
       <div class="row2">

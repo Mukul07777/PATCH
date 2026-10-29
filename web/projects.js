@@ -4,7 +4,10 @@
   const esc = window.ppEsc;
   const SEV = ["CRITICAL", "HIGH", "MODERATE", "LOW", "UNKNOWN"];
   const SEV_RANK = Object.fromEntries(SEV.map((s, i) => [s, i]));
-  const MAX_BYTES = 200_000;
+  // upload limits match the server: lock files list every transitive package, so they get more room
+  const LOCKS = /(^|\/)(poetry\.lock|uv\.lock|pipfile\.lock)$/i;
+  const maxBytes = (name) => (LOCKS.test(name || "") ? 5_000_000 : 1_000_000);
+  const mb = (n) => `${n / 1_000_000} MB`;
   let health = {}, current = null, sort = { key: "severity", dir: 1 }, findings = [], poll = null, lastScanId = null;
 
   const api = window.ppApi;
@@ -12,17 +15,34 @@
   const say = (msg, bad) => { const el = $("#status"); el.textContent = msg || ""; el.classList.toggle("bad", !!bad); };
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "–");
   const sevKey = (s) => { s = (s || "UNKNOWN").toUpperCase(); return s === "MEDIUM" ? "MODERATE" : SEV.includes(s) ? s : "UNKNOWN"; };
-  const typeLabel = { git: "GitHub", upload: "Upload", path: "Local path", sample: "Sample" };
+  const typeLabel = { git: "GitHub", upload: "Upload", path: "Local path", sample: "Demo" };
+  const typeTag = (t) => `<span class="tag${t === "sample" ? " demo" : ""}">${esc(typeLabel[t] || t)}</span>`;
 
-  function countChips(c) {
+  // How much of the dependency set a scan really checked. Older scans have no coverage block: derive it.
+  function coverageOf(sum) {
+    if (!sum) return null;
+    if (sum.coverage) return sum.coverage;
+    const total = sum.dependencies || 0, pinned = sum.pinned || 0;
+    return { state: !pinned ? "unverified" : pinned >= total ? "verified" : "partial", total, pinned, checked: pinned, unpinned: (sum.unpinned || []).length };
+  }
+  function coverageBadge(cov) {
+    if (!cov || cov.state === "verified") return "";
+    if (cov.state === "unverified") return `<span class="status bad">NOT VERIFIED – ${cov.unpinned ? `${cov.unpinned} unpinned` : "nothing checked"}</span>`;
+    return `<span class="status warn">Partially verified (${cov.checked} of ${cov.total} pinned)</span>`;
+  }
+  function countChips(c, cov) {
     if (!c) return "";
     const parts = SEV.filter((s) => c[s]).map((s) => `<span class="sev ${s === "UNKNOWN" ? "NA" : s}">${c[s]} ${s.toLowerCase()}</span>`);
-    return parts.length ? parts.join(" ") : '<span class="status ok">no known vulns</span>';
+    const badge = coverageBadge(cov);
+    // a green all-clear only when every dependency was pinned and checked
+    if (!parts.length) return badge || '<span class="status ok">no known vulns</span>';
+    return parts.join(" ") + (badge ? " " + badge : "");
   }
   function scanState(s) {
     if (!s) return '<span class="status na">not scanned</span>';
-    if (s.status === "done") return countChips(s.counts);
+    if (s.status === "done") return countChips(s.counts, coverageOf(s.summary));
     if (s.status === "error") return '<span class="status bad">scan failed</span>';
+    if (s.status === "queued") return '<span class="status na">queued…</span>';
     return '<span class="status na">scanning…</span>';
   }
 
@@ -42,7 +62,7 @@
     }
     box.innerHTML = list.map((p) => `<a class="pj-card card glass" href="/projects?id=${p.id}">
         <span class="pj-name">${esc(p.name)}</span>
-        <span class="pj-meta"><span class="tag">${esc(typeLabel[p.source_type] || p.source_type)}</span> ${esc(p.source_type === "git" ? p.source.replace("https://github.com/", "") + (p.ref ? "@" + p.ref : "") : p.source)}</span>
+        <span class="pj-meta">${typeTag(p.source_type)} ${esc(p.source_type === "git" ? p.source.replace("https://github.com/", "") + (p.ref ? "@" + p.ref : "") + (p.subdir ? "/" + p.subdir : "") : p.source)}</span>
         <span class="pj-sev">${scanState(p.last_scan)}</span>
         <span class="pj-when">Last scan: ${esc(when(p.last_scan_at))}</span></a>`).join("");
   }
@@ -65,7 +85,7 @@
   $("#file").addEventListener("change", async () => {
     const f = $("#file").files[0];
     if (!f) return;
-    if (f.size > MAX_BYTES) { formErr(`${f.name} is larger than 200 KB.`); $("#file").value = ""; return; }
+    if (f.size > maxBytes(f.name)) { formErr(`${f.name} is larger than ${mb(maxBytes(f.name))}.`); $("#file").value = ""; return; }
     $("#filename").value = f.name; $("#content").value = await f.text(); formErr("");
   });
   function formErr(msg) { const el = $("#formErr"); el.textContent = msg; el.hidden = !msg; }
@@ -77,12 +97,12 @@
       let url = $("#gitUrl").value.trim();
       if (!url) { formErr("Enter a GitHub repository URL."); $("#gitUrl").focus(); return; }
       if (!/^https?:\/\//i.test(url)) url = "https://" + url.replace(/^\/+/, "");
-      Object.assign(body, { git_url: url.replace(/^http:/i, "https:"), ref: $("#gitRef").value.trim() });
+      Object.assign(body, { git_url: url.replace(/^http:/i, "https:"), ref: $("#gitRef").value.trim(), subdir: $("#gitSub").value.trim() });
     } else {
-      const content = $("#content").value;
+      const content = $("#content").value, filename = $("#filename").value.trim() || "requirements.txt";
       if (!content.trim()) { formErr("Choose a manifest file or paste its contents."); $("#content").focus(); return; }
-      if (new Blob([content]).size > MAX_BYTES) { formErr("The manifest is larger than 200 KB."); return; }
-      Object.assign(body, { filename: $("#filename").value.trim() || "requirements.txt", content });
+      if (new Blob([content]).size > maxBytes(filename)) { formErr(`${filename} is larger than ${mb(maxBytes(filename))}.`); return; }
+      Object.assign(body, { filename, content });
     }
     const btn = $("#createBtn"); btn.disabled = true; btn.textContent = "Adding…";
     try {
@@ -110,7 +130,7 @@
     document.title = `${current.name} · PatchPilot`;
     $("#pjTitle").textContent = current.name;
     const src = current.source_type === "git" ? current.source + (current.ref ? ` @ ${current.ref}` : "") : current.source;
-    $("#pjSrc").textContent = `${typeLabel[current.source_type] || current.source_type} · ${src}`;
+    $("#pjSrc").textContent = `${typeLabel[current.source_type] || current.source_type} · ${src}${current.subdir ? ` · folder ${current.subdir}` : ""}`;
     setupFix();
     await loadPolicy();
     await loadHistory();
@@ -215,13 +235,23 @@
   };
   function renderFindings(s) {
     const sum = s.summary || {};
+    const cov = coverageOf(sum);
     const notes = [];
-    if (sum.pinned != null) notes.push(`${sum.pinned} pinned of ${sum.dependencies} dependencies in ${(sum.files || []).map(esc).join(", ")}`);
-    if (sum.unpinned?.length) notes.push(`Not checked (no exact version): ${sum.unpinned.slice(0, 12).map(esc).join(", ")}${sum.unpinned.length > 12 ? "…" : ""}`);
-    if (sum.errors?.length) notes.push(`Warnings: ${sum.errors.slice(0, 5).map(esc).join("; ")}`);
+    if (sum.pinned != null) notes.push(`${sum.pinned} pinned of ${sum.dependencies} dependencies in ${(sum.files || []).map((f) => `<code>${esc(f)}</code>`).join(", ")}${sum.commit ? ` at <code>${esc(sum.commit.slice(0, 10))}</code>` : ""}`);
+    if (sum.unpinned?.length) notes.push(`Not checked (no exact version): ${sum.unpinned.slice(0, 12).map(esc).join(", ")}${sum.unpinned.length > 12 ? `… (+${sum.unpinned.length - 12})` : ""}`);
     if (sum.diff) notes.push(`Since the previous scan: ${sum.diff.new} new, ${sum.diff.fixed} fixed`);
-    const head = `<p class="hint">${notes.join("<br>")}<br>Scanned ${esc(when(s.finished_at))}.</p>`;
-    if (!findings.length) { $("#findings").innerHTML = head + '<div class="empty">No known vulnerabilities in the pinned dependencies.</div>'; return; }
+    const lockHint = "Add a lock file (poetry.lock, uv.lock, Pipfile.lock) or pin exact versions (<code>pip freeze</code> / <code>pip-compile</code>) so every package can be checked.";
+    const banner = !cov || cov.state === "verified" ? ""
+      : cov.state === "unverified"
+        ? `<div class="pj-cov bad" role="note"><b>NOT VERIFIED${cov.unpinned ? ` – ${cov.unpinned} unpinned` : ""}.</b> No dependency could be checked against OSV.dev${cov.pinned ? " (the advisory lookup failed)" : ", because none has an exact version"}. A clean result here proves nothing. ${lockHint}</div>`
+        : `<div class="pj-cov warn" role="note"><b>Partially verified (${cov.checked} of ${cov.total} pinned).</b> ${cov.total - cov.checked} dependenc${cov.total - cov.checked === 1 ? "y was" : "ies were"} not checked. ${lockHint}</div>`;
+    const warns = [...(sum.errors || []), ...(sum.warnings || [])];
+    const warnBox = warns.length ? `<details class="pj-warn"${sum.errors?.length ? " open" : ""}><summary>${warns.length} warning${warns.length === 1 ? "" : "s"}</summary><ul>${warns.slice(0, 50).map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : "";
+    const head = `${banner}<p class="hint">${notes.join("<br>")}<br>Scanned ${esc(when(s.finished_at))}.</p>${warnBox}`;
+    if (!findings.length) {
+      $("#findings").innerHTML = head + `<div class="empty">${cov && cov.state !== "verified" ? `No known vulnerabilities in the ${cov.checked} checked dependenc${cov.checked === 1 ? "y" : "ies"}; the rest were not checked.` : "No known vulnerabilities in the pinned dependencies."}</div>`;
+      return;
+    }
     const rows = [...findings].sort((a, b) => SORTS[sort.key](a, b) * sort.dir);
     const th = (key, label) => {
       const on = sort.key === key;
@@ -231,8 +261,8 @@
       <caption class="sr-only">${findings.length} findings, sorted by ${sort.key}</caption>
       <thead><tr>${th("severity", "Severity")}${th("package", "Package")}<th scope="col">Advisory</th>${th("epss", "EPSS")}<th scope="col">KEV</th><th scope="col">Fixed in</th><th scope="col">Summary</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${rows.map((f) => { const k = sevKey(f.severity); return `<tr class="${f.suppressed ? "suppressed" : ""}">
-        <td><span class="sev ${k === "UNKNOWN" ? "NA" : k}">${k === "UNKNOWN" ? "UNRATED" : k}</span>${f.new ? ' <span class="status ok">new</span>' : ""}${f.suppressed ? `<br><span class="status na" title="${esc(f.suppressed)}">suppressed</span><span class="sr-only"> (${esc(f.suppressed)})</span>` : ""}</td>
-        <td><code>${esc(f.package)}</code> <span class="muted">${esc(f.version || "")}</span></td>
+        <td><span class="sev ${k === "UNKNOWN" ? "NA" : k}">${k === "UNKNOWN" ? "UNRATED" : k}</span>${f.cvss_score != null ? ` <span class="muted" title="CVSS base score">${(+f.cvss_score).toFixed(1)}</span>` : ""}${f.new ? ' <span class="status ok">new</span>' : ""}${f.suppressed ? `<br><span class="status na" title="${esc(f.suppressed)}">suppressed</span><span class="sr-only"> (${esc(f.suppressed)})</span>` : ""}</td>
+        <td><code>${esc(f.package)}</code> <span class="muted">${esc(f.version || "")}</span>${f.source_file ? `<br><span class="pj-file">${esc(f.source_file)}</span>` : ""}</td>
         <td class="pj-adv">${advLink(f)}</td>
         <td class="num">${f.epss != null ? (f.epss * 100).toFixed(1) + "%" : '<span class="muted">–</span>'}</td>
         <td>${f.kev ? '<span class="status bad" title="Listed in CISA Known Exploited Vulnerabilities">KEV</span>' : '<span class="muted">–</span>'}</td>
@@ -288,8 +318,12 @@
       let s;
       try { s = await api(`/api/scans/${id}`); } catch (e) { say(`Lost track of the scan: ${e.message}`, true); return done(); }
       if (!current || current.id !== pid) return;
-      if (s.status === "queued" || s.status === "running") { poll = setTimeout(tick, 1500); return; }
-      if (s.status === "done") say(`Scan finished: ${s.findings.length} finding${s.findings.length === 1 ? "" : "s"}.`);
+      if (s.status === "queued" || s.status === "running") {
+        $("#findings").innerHTML = `<div class="empty">${s.status === "queued" ? "Queued: waiting for a free scan worker…" : "Scanning dependencies against OSV.dev…"}</div>`;
+        poll = setTimeout(tick, 1500); return;
+      }
+      const cov = coverageOf(s.summary);
+      if (s.status === "done") say(`Scan finished: ${s.findings.length} finding${s.findings.length === 1 ? "" : "s"}${cov && cov.state !== "verified" ? ` (${cov.state === "unverified" ? "NOT verified" : `partially verified, ${cov.checked} of ${cov.total}`})` : ""}.`);
       else say(`Scan failed: ${s.summary?.error || "unknown error"}`, true);
       done(); loadHistory();
     };

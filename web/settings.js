@@ -56,10 +56,15 @@
       <tbody>${users.map((u) => `<tr><td>${esc(u.email)}${u.id === me.id ? ' <span class="muted">(you)</span>' : ""}</td><td>${esc(u.name || "")}</td>
         <td><span class="tag">${esc(u.role)}</span></td><td>${esc(when(u.created_at))}</td>
         <td>${u.id === me.id ? "" : `<button type="button" class="btn ghost sm" data-role="${u.id}" data-to="${u.role === "admin" ? "member" : "admin"}">Make ${u.role === "admin" ? "member" : "admin"}<span class="sr-only"> ${esc(u.email)}</span></button>
+          <button type="button" class="btn ghost sm" data-reset="${u.id}" data-email="${esc(u.email)}">Reset password<span class="sr-only"> for ${esc(u.email)}</span></button>
           <button type="button" class="btn ghost sm" data-deluser="${u.id}" data-email="${esc(u.email)}">Remove<span class="sr-only"> ${esc(u.email)}</span></button>`}</td></tr>`).join("")}</tbody></table>`;
     $("#users").querySelectorAll("[data-role]").forEach((b) => b.addEventListener("click", async () => {
       try { await api(`/api/users/${b.dataset.role}/role`, { method: "PUT", body: JSON.stringify({ role: b.dataset.to }) }); say("Role updated."); loadUsers(); loadAudit(); }
       catch (x) { say(x.message, true); }
+    }));
+    $("#users").querySelectorAll("[data-reset]").forEach((b) => b.addEventListener("click", () => {
+      const f = $("#resetForm"); f.dataset.uid = b.dataset.reset; $("#resetWho").textContent = b.dataset.email;
+      f.hidden = false; err("#resetErr", ""); $("#r_pw").focus();
     }));
     $("#users").querySelectorAll("[data-deluser]").forEach((b) => b.addEventListener("click", async () => {
       if (!confirm(`Remove ${b.dataset.email}? Their sessions and API keys stop working.`)) return;
@@ -74,6 +79,36 @@
     try { await api("/api/users", { method: "POST", body: JSON.stringify(body) }); $("#userForm").reset(); say(`Added ${body.email}.`); loadUsers(); loadAudit(); }
     catch (x) { err("#userErr", x.message); }
   });
+
+  $("#resetCancel").onclick = () => { $("#resetForm").hidden = true; $("#resetForm").reset(); };
+  $("#resetForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); err("#resetErr", "");
+    const f = $("#resetForm"), password = $("#r_pw").value;
+    if (password.length < 10) return err("#resetErr", "The new password needs at least 10 characters.");
+    try {
+      const r = await api(`/api/users/${f.dataset.uid}/password`, { method: "POST", body: JSON.stringify({ password }) });
+      say(`Password reset for ${$("#resetWho").textContent}; ${r.sessions_ended} session${r.sessions_ended === 1 ? "" : "s"} signed out.`);
+      f.reset(); f.hidden = true; loadAudit();
+    } catch (x) { err("#resetErr", x.message); }
+  });
+
+  // ---------- your account ----------
+  $("#pwForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); err("#pwErr", "");
+    const body = { current_password: $("#pw_cur").value, new_password: $("#pw_new").value };
+    if (!body.current_password) return err("#pwErr", "Enter your current password.");
+    if (body.new_password.length < 10) return err("#pwErr", "The new password needs at least 10 characters.");
+    try {
+      const r = await api("/api/auth/password", { method: "POST", body: JSON.stringify(body), noRedirect: true });
+      $("#pwForm").reset();
+      say(`Password changed.${r.other_sessions_ended ? ` ${r.other_sessions_ended} other session${r.other_sessions_ended === 1 ? "" : "s"} signed out.` : ""}`);
+    } catch (x) { err("#pwErr", x.message); }
+  });
+  $("#logoutAll").onclick = async () => {
+    if (!confirm("Sign out of PatchPilot everywhere, including this browser?")) return;
+    try { await api("/api/auth/logout-all", { method: "POST" }); } catch {}
+    location.href = "/login";
+  };
 
   // ---------- API keys ----------
   async function loadKeys() {
@@ -121,6 +156,7 @@
   window.ppReady.then(async (a) => {
     me = a.user;
     if (!me) return;
+    if (me.via === "session") { $("#secAccount").hidden = false; $("#acctWho").textContent = `Signed in as ${me.email} (${me.role}).`; }
     if (me.role !== "admin") { $("#denied").hidden = false; return; }
     ["#secProviders", "#secUsers", "#secKeys", "#secAudit"].forEach((s) => ($(s).hidden = false));
     try {

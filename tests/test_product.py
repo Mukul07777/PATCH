@@ -7,7 +7,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
-from conftest import AUTH
+from conftest import AUTH, osv_from
 from patchpilot import auth, config, db, scanner, server, settings, sources
 
 CSRF = {"X-Requested-With": "patchpilot"}
@@ -247,7 +247,7 @@ def _vuln(vid, sev, cve=None):
 @pytest.fixture
 def feeds(monkeypatch):
     table = {}
-    monkeypatch.setattr(sources, "osv_vulns", lambda p, v: table.get((p, v), []))
+    monkeypatch.setattr(sources, "osv_batch", osv_from(lambda p, v: table.get((p, v), [])))
     monkeypatch.setattr(sources, "pypi_latest", lambda p: "99")
     monkeypatch.setattr(sources, "epss", lambda cves: {})
     monkeypatch.setattr(sources, "kev", lambda: {"CVE-2024-0001": {}})
@@ -350,6 +350,7 @@ def test_audit_pagination_records_actor(anon):
 
 
 def test_new_pages_served(anon):
+    _setup(anon)
     for page in ("dashboard", "settings", "login", "setup"):
         r = anon.get(f"/{page}")
         assert r.status_code == 200 and f"{'auth' if page in ('login', 'setup') else page}.js" in r.text

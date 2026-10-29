@@ -1,6 +1,7 @@
 """FastAPI server: start runs, stream events over SSE, replay recorded runs."""
 import asyncio
 import collections
+import contextlib
 import json
 import logging
 import os
@@ -10,11 +11,14 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -31,14 +35,21 @@ class _GZipExceptSSE(GZipMiddleware):
             await super().__call__(scope, receive, send)
 
 
-app = FastAPI(title="PatchPilot")
+@contextlib.asynccontextmanager
+async def _lifespan(_app):
+    _resume_queue()
+    yield
+
+
+app = FastAPI(title="PatchPilot", lifespan=_lifespan)
 app.add_middleware(_GZipExceptSSE, minimum_size=1000)
 RUNS = {}  # run_id -> {"events": [...], "done": bool}
 MAX_RUNS = 50
 MAX_ACTIVE_RUNS = 3
 IDLE_TIMEOUT = 600.0  # seconds an SSE stream may go without new events before it is closed
 ORG_TTL, ORG_MAX_OSV = 600.0, 300
-RATE_LIMIT, RATE_WINDOW = 5, 60.0
+RATE_LIMIT, RATE_WINDOW = 5, 60.0  # strict bucket: anonymous callers, sign-in attempts, LLM fix runs, org scans
+USER_RATE_LIMIT = 60  # signed-in users and API keys: project and scan calls per minute
 _hits = collections.defaultdict(collections.deque)
 _lock = threading.Lock()
 _runs_lock = threading.RLock()
@@ -47,8 +58,9 @@ RUN_ID = re.compile(r"[\w.-]+")
 REPO = re.compile(r"https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}?(?:\.git)?/?")
 CASE = re.compile(r"case:[\w.-]{1,64}")
 REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")
-MAX_UPLOAD = 200_000  # characters of manifest text per uploaded project
-MAX_ACTIVE_SCANS = 4
+MAX_UPLOAD = manifests.MAX_LOCK  # bytes of manifest text per uploaded project (lock files; others 1 MB)
+MAX_BODY = MAX_UPLOAD + 1_000_000  # request bodies above this are refused with 413 before they are parsed
+SUBDIR = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+){0,4}")
 CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
        "img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
@@ -78,6 +90,15 @@ class ProjectRequest(BaseModel):
     filename: str = ""
     content: str = Field("", max_length=MAX_UPLOAD)
     path: str = Field("", max_length=500)
+    subdir: str = Field("", max_length=200)
+
+    @field_validator("subdir")
+    @classmethod
+    def _subdir(cls, v):
+        v = v.strip().strip("/")
+        if v and (not SUBDIR.fullmatch(v) or ".." in v.split("/")):
+            raise ValueError("subdir must be a relative folder such as backend or services/api")
+        return v
 
     @field_validator("git_url")
     @classmethod
@@ -104,9 +125,34 @@ class ProjectRequest(BaseModel):
         return v
 
 
+def _clean_msg(e):
+    """One validation error as a short sentence: the field and pydantic's message, never the input value."""
+    loc = ".".join(str(x) for x in e.get("loc", ()) if x not in ("body", "query", "path"))
+    msg = re.sub(r"^(Value error|Assertion failed), ", "", str(e.get("msg", "invalid value")))
+    return f"{loc}: {msg}" if loc and not msg.lower().startswith(loc.lower()) else msg
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    if any(e.get("type") == "string_too_long" and "content" in e.get("loc", ()) for e in errors):
+        return JSONResponse({"detail": f"Manifest is larger than {MAX_UPLOAD // 1_000_000} MB"}, status_code=413)
+    if any(e.get("type") == "json_invalid" for e in errors):
+        return JSONResponse({"detail": "Request body is not valid JSON"}, status_code=422)
+    return JSONResponse({"detail": "; ".join(dict.fromkeys(_clean_msg(e) for e in errors)) or "Invalid request"},
+                        status_code=422)
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    resp = await call_next(request)
+    try:
+        too_big = int(request.headers.get("content-length") or 0) > MAX_BODY
+    except ValueError:
+        too_big = False
+    if too_big:
+        resp = JSONResponse({"detail": f"Request body is larger than {MAX_BODY // 1_000_000} MB"}, status_code=413)
+    else:
+        resp = await call_next(request)
     for k, v in SECURITY_HEADERS.items():
         resp.headers.setdefault(k, v)
     return resp
@@ -127,16 +173,29 @@ def _evict():
             del RUNS[k]
 
 
-def _rate_ok(ip, now=None):
+def _rate_ok(ip, now=None, limit=None):
+    return _rate_wait(ip, now, limit) == 0
+
+
+def _rate_wait(key, now=None, limit=None):
+    """Record a hit for `key`; 0 if allowed, else the seconds until the next hit would be."""
     now = time.monotonic() if now is None else now
+    limit = RATE_LIMIT if limit is None else limit
     with _lock:
-        q = _hits[ip]
+        q = _hits[key]
         while q and now - q[0] > RATE_WINDOW:
             q.popleft()
-        if len(q) >= RATE_LIMIT:
-            return False
+        if len(q) >= limit:
+            return max(1, int(RATE_WINDOW - (now - q[0])) + 1)
         q.append(now)
-        return True
+        return 0
+
+
+def _limit(key, msg, limit=None):
+    """429 with a Retry-After header when `key` is over its per-minute budget."""
+    wait = _rate_wait(key, limit=limit)
+    if wait:
+        raise HTTPException(429, msg, headers={"Retry-After": str(wait)})
 
 
 # ---------- authentication ----------
@@ -269,7 +328,8 @@ def _run_agent(run_id, repo, emit):
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     # model ids are the configured MODEL_* values (None = discovered from the provider catalog at run time)
-    return {"nebius": bool(config.llm_api_key()), "provider": config.provider_name(), "tavily": bool(config.tavily_api_key()),
+    llm = bool(config.llm_api_key())
+    return {"nebius": llm, "provider": config.provider_name() if llm else None, "tavily": bool(config.tavily_api_key()),
             "github": bool(config.github_token()), "remote_repos": config.allow_remote_repos(),
             "local_paths": config.ALLOW_LOCAL_PATHS, "fix_mode": bool(config.llm_api_key()), "scan_mode": True,
             "models": {t: (m or None) for t, m in config.model_overrides().items()},
@@ -327,8 +387,7 @@ def org_scan(owner: str, request: Request):
         hit = _org_cache.get(key)
     if hit and time.monotonic() - hit[0] < ORG_TTL:
         return hit[1]
-    if not _rate_ok("org:" + _ip(request)):
-        raise HTTPException(429, "Too many scans; try again in a minute")
+    _limit("org:" + _ip(request), "Too many scans; try again in a minute")
     try:
         with httpx.Client(timeout=20, headers={"Accept": "application/vnd.github+json",
                           **({"Authorization": f"Bearer {config.github_token()}"} if config.github_token() else {})}) as gh:
@@ -442,9 +501,8 @@ def start_run(req: RunRequest, request: Request):
     repo, project_id = _fix_target(req)
     with _runs_lock:
         if sum(1 for v in RUNS.values() if not v["done"]) >= MAX_ACTIVE_RUNS:
-            raise HTTPException(429, "Too many runs in progress; try again shortly")
-    if not _rate_ok(_ip(request)):
-        raise HTTPException(429, "Too many runs; try again in a minute")
+            raise HTTPException(429, "Too many runs in progress; try again shortly", headers={"Retry-After": "30"})
+    _limit(_ip(request), "Too many runs; try again in a minute")
     run_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     with _runs_lock:
         RUNS[run_id] = {"events": [], "done": False}
@@ -551,10 +609,11 @@ def run_vex(run_id: str, request: Request):
 
 # ---------- projects + scan-only mode ----------
 def _mutate(request, bucket="api"):
-    """Guard for mutating project endpoints: a signed-in member (or admin), then a per-IP rate limit."""
+    """Guard for mutating project endpoints: a signed-in member (or admin), then a per-caller rate limit
+    (USER_RATE_LIMIT a minute per account or API key, keyed by IP for the account-less legacy token)."""
     user = _need(request)
-    if not _rate_ok(f"{bucket}:" + _ip(request)):
-        raise HTTPException(429, "Too many requests; try again in a minute")
+    who = f"u{user['id']}" if user.get("id") is not None else _ip(request)
+    _limit(f"{bucket}:{who}", "Too many requests; try again in a minute", USER_RATE_LIMIT)
     return user
 
 
@@ -573,7 +632,17 @@ def _visible(request, pid):
 
 def _spawn(fn, *args):
     """Background scan worker (tests replace this to run inline)."""
-    threading.Thread(target=fn, args=args, daemon=True, name=f"pp-scan-{args[0]}").start()
+    threading.Thread(target=fn, args=args, daemon=True, name="pp-scan-worker").start()
+
+
+def _resume_queue():
+    """Scans that were queued or running when the server stopped are queued again and picked up now."""
+    try:
+        if db.requeue_interrupted() or db._q("SELECT 1 FROM scans WHERE kind = 'scan' AND status = 'queued' LIMIT 1"):
+            for _ in range(scanner.MAX_ACTIVE_SCANS):
+                scanner.kick(lambda fn: _spawn(fn))
+    except Exception:
+        log.warning("could not resume queued scans", exc_info=True)
 
 
 def _project_or_404(pid):
@@ -590,12 +659,17 @@ def create_project(req: ProjectRequest, request: Request):
     if len(given) != 1:
         raise HTTPException(422, "Give exactly one source: git_url, an uploaded manifest (filename + content), or path")
     kind = given[0]
+    if req.subdir and kind == "upload":
+        raise HTTPException(422, "subdir applies to repository and folder projects, not uploads")
     if kind == "upload":
         if not req.filename or not req.content.strip():
             raise HTTPException(422, "An uploaded manifest needs a filename and non-empty content")
-        if len(req.content.encode("utf-8")) > MAX_UPLOAD:
-            raise HTTPException(413, "Manifest is larger than 200 KB")
+        limit = manifests.size_limit(req.filename)
+        if len(req.content.encode("utf-8")) > limit:
+            raise HTTPException(413, f"{req.filename} is larger than {limit // 1_000_000} MB "
+                                     f"(lock files may be up to {manifests.MAX_LOCK // 1_000_000} MB)")
         try:
+            manifests.check_upload(req.filename, req.content)
             deps = manifests.parse(req.filename, req.content)
         except manifests.ManifestError as e:
             raise HTTPException(422, str(e))
@@ -607,12 +681,19 @@ def create_project(req: ProjectRequest, request: Request):
         if not os.path.isabs(req.path) or not os.path.isdir(req.path):
             raise HTTPException(422, "path must be an absolute path to an existing directory")
     _mutate(request)
+    if kind == "git":  # fail now, with a clear reason, rather than on the first scan
+        try:
+            scanner.check_github(req.git_url, req.ref or None)
+        except scanner.GitHubError as e:
+            raise HTTPException(e.status, str(e))
+        except scanner.ScanError as e:
+            raise HTTPException(422, str(e))
     source = {"git": req.git_url, "upload": req.filename, "path": req.path}[kind]
     default = {"git": req.git_url.removeprefix("https://github.com/"), "upload": req.filename,
                "path": os.path.basename(req.path.rstrip("/\\")) or req.path}[kind]
     name = req.name.strip() or default
     pid = db.create_project(name, kind, source, ref=req.ref or None if kind == "git" else None,
-                            manifest=req.content if kind == "upload" else None)
+                            manifest=req.content if kind == "upload" else None, subdir=req.subdir or None)
     _audit(request, "project.create", {"id": pid, "type": kind, "source": source})
     return db.get_project(pid)
 
@@ -667,15 +748,17 @@ def start_scan(pid: int, request: Request):
     _project_or_404(pid)
     running = db.active_scan(pid)
     if running:
-        return {"id": running, "status": "running"}
-    busy = sum(1 for t in threading.enumerate() if t.name.startswith("pp-scan-"))
-    if busy >= MAX_ACTIVE_SCANS:
-        raise HTTPException(429, "Too many scans in progress; try again shortly")
+        return {"id": running, "status": db.get_scan(running)["status"]}
     _mutate(request, "scan")
     sid = db.create_scan(pid, "scan", "queued")
     _audit(request, "scan.start", {"project_id": pid, "scan_id": sid})
-    _spawn(scanner.run_scan, sid, pid)
-    return {"id": sid, "status": "queued"}
+    # at most MAX_ACTIVE_SCANS run at once; the rest stay 'queued' and a worker picks them up in order
+    scanner.kick(lambda fn: _spawn(fn))
+    s = db.get_scan(sid)
+    out = {"id": sid, "status": s["status"]}
+    if s["status"] == "queued":
+        out["position"] = db.queued_position(sid)
+    return out
 
 
 @app.get("/api/scans/{sid}")
@@ -763,6 +846,15 @@ class RoleRequest(BaseModel):
     role: str = Field(..., pattern="^(admin|member)$")
 
 
+class PasswordRequest(BaseModel):
+    current_password: str = Field(..., max_length=200)
+    new_password: str = Field(..., max_length=200)
+
+
+class ResetRequest(BaseModel):
+    password: str = Field(..., max_length=200)
+
+
 class KeyRequest(BaseModel):
     name: str = Field(..., max_length=80)
     role: str = Field("member", pattern="^(admin|member)$")
@@ -804,8 +896,7 @@ def auth_setup(req: SetupRequest, request: Request):
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest, request: Request):
     _csrf(request)
-    if not _rate_ok("login:" + _ip(request)):
-        raise HTTPException(429, "Too many sign-in attempts; try again in a minute")
+    _limit("login:" + _ip(request), "Too many sign-in attempts; try again in a minute")
     user = auth.authenticate(req.email, req.password)
     if user is None:
         db.audit(req.email.strip()[:200], "auth.login_failed", {"ip": _ip(request)})
@@ -818,6 +909,37 @@ def auth_login(req: LoginRequest, request: Request):
 def auth_logout(request: Request):
     _csrf(request)
     auth.end_session(request.cookies.get(auth.SESSION_COOKIE))
+    resp = Response(status_code=204)
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.post("/api/auth/password")
+def change_password(req: PasswordRequest, request: Request):
+    """Change your own password (the current one is required); every other session of yours is signed out."""
+    me = _need(request)
+    if me["id"] is None:
+        raise HTTPException(400, "The legacy token has no account password")
+    _limit("login:" + _ip(request), "Too many attempts; try again in a minute")
+    if auth.authenticate(me["email"], req.current_password) is None:
+        raise HTTPException(403, "Current password is wrong")
+    try:
+        auth.set_password(me["id"], req.new_password)
+    except auth.AuthError as e:
+        raise HTTPException(422, str(e))
+    ended = auth.end_user_sessions(me["id"], keep=request.cookies.get(auth.SESSION_COOKIE))
+    _audit(request, "auth.password_change", {"user_id": me["id"], "other_sessions_ended": ended})
+    return {"ok": True, "other_sessions_ended": ended}
+
+
+@app.post("/api/auth/logout-all", status_code=204)
+def logout_all(request: Request):
+    """Sign out every session of the current user, this one included."""
+    me = _need(request)
+    if me["id"] is None:
+        raise HTTPException(400, "The legacy token has no sessions")
+    ended = auth.end_user_sessions(me["id"])
+    _audit(request, "auth.logout_all", {"user_id": me["id"], "sessions_ended": ended})
     resp = Response(status_code=204)
     resp.delete_cookie(auth.SESSION_COOKIE, path="/")
     return resp
@@ -858,6 +980,19 @@ def set_user_role(uid: int, req: RoleRequest, request: Request):
     auth.set_role(uid, req.role)
     _audit(request, "user.role", {"user_id": uid, "email": target["email"], "role": req.role})
     return auth.get_user(uid)
+
+
+@app.post("/api/users/{uid}/password")
+def reset_user_password(uid: int, req: ResetRequest, request: Request):
+    """Admin: set a new password for another user and sign out all of their sessions."""
+    target = _other_user(request, uid)
+    try:
+        auth.set_password(uid, req.password)
+    except auth.AuthError as e:
+        raise HTTPException(422, str(e))
+    ended = auth.end_user_sessions(uid)
+    _audit(request, "user.password_reset", {"user_id": uid, "email": target["email"], "sessions_ended": ended})
+    return {"ok": True, "sessions_ended": ended}
 
 
 @app.delete("/api/users/{uid}", status_code=204)
@@ -941,8 +1076,7 @@ def _probe(fn):
 @app.post("/api/settings/test/{service}")
 def test_connection(service: str, request: Request):
     _need(request, "admin")
-    if not _rate_ok("probe:" + _ip(request)):
-        raise HTTPException(429, "Too many tests; try again in a minute")
+    _limit("probe:" + _ip(request), "Too many tests; try again in a minute")
     with httpx.Client(timeout=15) as http:
         if service == "llm":
             if not config.llm_api_key():
@@ -982,9 +1116,20 @@ PAGES = {"": "landing", "projects": "projects", "console": "console", "app": "co
          "org": "org", "dashboard": "dashboard", "settings": "settings", "login": "login", "setup": "setup"}
 
 
+# Pages that need a signed-in user; with PATCHPILOT_PUBLIC_DEMO=1 anonymous visitors may still read these
+PROTECTED = {"dashboard", "projects", "console", "app", "runs", "org", "settings"}
+PUBLIC_DEMO_PAGES = {"dashboard", "projects", "console", "app", "runs"}
+
+
 @app.api_route("/{page}", methods=["GET", "HEAD"])
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-def page(page: str = ""):
+def page(request: Request, page: str = ""):
     if page not in PAGES:
         raise HTTPException(404)
+    if page in PROTECTED and principal(request) is None:
+        if auth.user_count() == 0:
+            return RedirectResponse("/setup", 302)
+        if not (_public_demo() and page in PUBLIC_DEMO_PAGES):
+            here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse(f"/login?next={quote(here, safe='')}", 302)
     return FileResponse(config.ROOT / "web" / f"{PAGES[page]}.html")

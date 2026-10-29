@@ -1,14 +1,25 @@
 """Python dependency manifest parsers: requirements.txt, pyproject.toml (PEP 621 + Poetry), poetry.lock, uv.lock,
 Pipfile.lock. Pure text parsing: nothing is installed, imported or executed, and -r/-c includes are never followed."""
 import json
+import posixpath
 import re
 import tomllib
 from collections import namedtuple
+
+from packaging.requirements import InvalidRequirement, Requirement
 
 Dep = namedtuple("Dep", "name version source_file pinned")
 
 # Names checked, in this order, when a project folder or repository is scanned
 MANIFEST_FILES = ("requirements.txt", "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile.lock")
+LOCK_FILES = ("poetry.lock", "uv.lock", "pipfile.lock")
+MAX_MANIFEST = 1_000_000  # bytes: requirements*.txt / pyproject.toml
+MAX_LOCK = 5_000_000  # bytes: lock files list every transitive package and get big
+MAX_DEPTH = 3  # folders below the repository root searched for manifests
+MAX_FILES = 40  # manifests read per scan
+# Folders never searched: virtualenvs, vendored code and test fixtures (their pins are not your dependencies)
+SKIP_DIRS = {"node_modules", ".venv", "venv", "env", ".env", ".tox", ".nox", ".git", "site-packages", "vendor",
+             "vendored", "_vendor", "third_party", "fixtures", "testdata", "test_data", "__pycache__", "build", "dist"}
 NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$")
 EXACT = re.compile(r"^===?\s*([A-Za-z0-9][A-Za-z0-9._+!-]*)$")
 POETRY_EXACT = re.compile(r"^=?=?\s*(\d[A-Za-z0-9._+!-]*)$")
@@ -28,14 +39,59 @@ def kind_of(filename):
     return None
 
 
+def is_lock(filename):
+    return kind_of(filename) in LOCK_FILES
+
+
+def size_limit(filename):
+    return MAX_LOCK if is_lock(filename) else MAX_MANIFEST
+
+
+def is_manifest_path(path):
+    """True for the files a repository scan reads: requirements*.txt (and any .txt in a requirements/ folder),
+    pyproject.toml and the three lock files."""
+    parts = path.replace("\\", "/").split("/")
+    base, dirs = parts[-1].lower(), [d.lower() for d in parts[:-1]]
+    if len(dirs) > MAX_DEPTH or any(d in SKIP_DIRS or (d.startswith(".") and d != ".") for d in dirs):
+        return False
+    if base in ("pyproject.toml", "poetry.lock", "uv.lock", "pipfile.lock"):
+        return True
+    return base.endswith(".txt") and (base.startswith("requirements") or (dirs and dirs[-1] == "requirements"))
+
+
+def select(paths, subdir=""):
+    """Manifest paths to read from a repository listing, lock files preferred: a pyproject.toml is skipped when
+    a lock file sits next to it (the lock has the exact versions). Returns (chosen, notes)."""
+    subdir = subdir.strip("/")
+    cand = [p for p in paths if is_manifest_path(p) and (not subdir or p.startswith(subdir + "/"))]
+    locked = {posixpath.dirname(p) for p in cand if is_lock(p)}
+    notes = []
+    out = []
+    for p in sorted(cand, key=lambda p: (p.count("/"), p.lower())):
+        if posixpath.basename(p).lower() == "pyproject.toml" and posixpath.dirname(p) in locked:
+            continue
+        out.append(p)
+    if len(out) > MAX_FILES:
+        notes.append(f"{len(out)} manifests found; only the {MAX_FILES} nearest the root were read")
+        out = out[:MAX_FILES]
+    return out, notes
+
+
 def parse(filename, text):
+    return parse_ex(filename, text)[0]
+
+
+def parse_ex(filename, text):
+    """(deps, warnings) for one manifest; warnings name lines that were deliberately not followed."""
     kind = kind_of(filename)
     if kind is None:
         raise ManifestError(f"Unsupported manifest '{filename}'. Use requirements.txt, pyproject.toml, poetry.lock, "
                             "uv.lock or Pipfile.lock")
-    fn = {"requirements": parse_requirements, "pyproject.toml": parse_pyproject, "poetry.lock": parse_lock,
-          "uv.lock": parse_lock, "pipfile.lock": parse_pipfile_lock}[kind]
-    return fn(text, filename)
+    if kind == "requirements":
+        return requirements_ex(text, filename)
+    fn = {"pyproject.toml": parse_pyproject, "poetry.lock": parse_lock, "uv.lock": parse_lock,
+          "pipfile.lock": parse_pipfile_lock}[kind]
+    return fn(text, filename), []
 
 
 def pep508(spec, source_file):
@@ -53,8 +109,12 @@ def pep508(spec, source_file):
     return Dep(m.group(1), None, source_file, False)
 
 
-def parse_requirements(text, source_file="requirements.txt"):
-    out, buf = [], ""
+INCLUDE = re.compile(r"^(-r|--requirement|-c|--constraint)\s*=?\s*(\S+)")
+EDITABLE = re.compile(r"^(-e|--editable)\s*=?\s*(\S+)")
+
+
+def _lines(text):
+    buf = ""
     for raw in text.splitlines():
         line = buf + raw
         if line.rstrip().endswith("\\"):  # line continuation
@@ -62,13 +122,65 @@ def parse_requirements(text, source_file="requirements.txt"):
             continue
         buf = ""
         line = re.split(r"(?:^|\s)#", line, 1)[0].strip()
-        if not line or line.startswith("-"):  # options, -r/-c includes, -e editables: never followed
+        if line:
+            yield line
+
+
+def requirements_ex(text, source_file="requirements.txt"):
+    """(deps, warnings). Includes (-r/-c), editables (-e) and URL / VCS requirements are never followed or
+    fetched; each one becomes a warning so the user knows what was not checked."""
+    out, warnings = [], []
+    for line in _lines(text):
+        m = INCLUDE.match(line)
+        if m:
+            what = "constraints file" if m.group(1) in ("-c", "--constraint") else "file"
+            warnings.append(f"{source_file}: '{m.group(1)} {m.group(2)}' not followed; upload that {what} too")
+            continue
+        m = EDITABLE.match(line)
+        if m:
+            warnings.append(f"{source_file}: editable '{m.group(2)[:80]}' not checked (local or VCS source)")
+            continue
+        if line.startswith("-"):  # index / hash / other pip options
             continue
         line = re.split(r"\s--?\w", line, 1)[0]  # trailing per-line options such as --hash
+        if "://" in line or re.match(r"^[\w.-]+\s*(\[[^\]]*\])?\s*@", line):
+            warnings.append(f"{source_file}: '{line[:80]}' is a URL / VCS requirement; not checked against OSV")
+            continue
         dep = pep508(line, source_file)
         if dep:
             out.append(dep)
-    return out
+    return out, warnings
+
+
+def parse_requirements(text, source_file="requirements.txt"):
+    return requirements_ex(text, source_file)[0]
+
+
+def _requirement_ok(line):
+    """True for a line pip would accept: an option, or a PEP 508 requirement (name + valid specifier)."""
+    if line.startswith("-") or "://" in line:
+        return True
+    try:
+        Requirement(re.split(r"\s--?\w", line, 1)[0])
+        return True
+    except InvalidRequirement:
+        return False
+
+
+def check_upload(filename, text):
+    """Reject uploads that are not text manifests (binary, mostly non-printable, or mostly unparsable lines)."""
+    if "\x00" in text:
+        raise ManifestError(f"{filename} is a binary file, not a dependency manifest")
+    sample = text[:200_000]
+    bad = sum(1 for c in sample if not (c.isprintable() or c in "\r\n\t"))
+    if sample and bad / len(sample) > 0.05:
+        raise ManifestError(f"{filename} doesn't look like a text manifest (too many non-printable characters)")
+    if kind_of(filename) == "requirements":
+        lines = list(_lines(text))
+        unparsable = [l for l in lines if not _requirement_ok(l)]
+        if lines and len(unparsable) * 2 > len(lines):
+            raise ManifestError(f"{filename} doesn't look like a requirements file: {len(unparsable)} of "
+                                f"{len(lines)} lines are not valid requirements (e.g. '{unparsable[0][:60]}')")
 
 
 def _toml(text, source_file):

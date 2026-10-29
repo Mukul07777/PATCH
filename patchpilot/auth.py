@@ -171,3 +171,16 @@ def key_user(key):
     user = _public(r)
     user["role"] = "admin" if r["key_role"] == "admin" and r["role"] == "admin" else "member"
     return user, r["prefix"]
+
+
+# ---------- password changes ----------
+def set_password(uid, password):
+    _check_password(password)
+    db._x("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password), uid))
+
+
+def end_user_sessions(uid, keep=None):
+    """Delete every session of a user (except the one whose token is `keep`); returns how many ended."""
+    with db._lock:
+        return db._connect().execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+                                     (uid, _sha(keep) if keep else "")).rowcount

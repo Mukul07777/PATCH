@@ -2,9 +2,11 @@
 EPSS / CISA KEV / PyPI, and store the findings. No LLM, no API key, and no repository code is ever executed:
 manifests are fetched as plain text (GitHub raw files) and parsed, never installed or imported."""
 import logging
+import os
 import re
-from concurrent.futures import ThreadPoolExecutor
+import threading
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
@@ -12,72 +14,168 @@ from . import config, db, manifests, sources
 
 log = logging.getLogger(__name__)
 GITHUB = re.compile(r"https://github\.com/([A-Za-z0-9-]{1,39})/([A-Za-z0-9_.-]{1,100}?)(?:\.git)?/?")
-MAX_MANIFEST = 200_000
-MAX_DEPS = 400  # OSV lookups per scan
+MAX_DEPS = 50_000  # sanity bound per scan; anything beyond it is reported, never dropped silently
+MAX_ACTIVE_SCANS = 4  # scans running at once; more wait in the queue (scans.status = 'queued')
 
 
 class ScanError(RuntimeError):
     pass
 
 
-def _read_dir(root):
-    out = []
-    for name in manifests.MANIFEST_FILES:
-        p = Path(root) / name
-        if p.is_file() and p.stat().st_size <= MAX_MANIFEST:
-            out.append((name, p.read_text(encoding="utf-8", errors="replace")))
-    return out
+class GitHubError(ScanError):
+    """A GitHub lookup failed in a way the user can act on; `status` is the HTTP code the API should answer."""
+    def __init__(self, msg, status=422):
+        super().__init__(msg)
+        self.status = status
 
 
-def _fetch_github(url, ref):
-    m = GITHUB.fullmatch(url)
+# ---------- GitHub ----------
+def _gh_client():
+    token = config.github_token()
+    headers = {"User-Agent": "patchpilot/0.1", "Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return httpx.Client(timeout=20, headers=headers, follow_redirects=True)
+
+
+def _gh_fail(r, not_found):
+    if r.status_code in (403, 429) and (r.headers.get("x-ratelimit-remaining") == "0" or "rate limit" in r.text.lower()):
+        hint = "" if config.github_token() else " (60 requests/hour without a token: add a GitHub token in Settings)"
+        raise GitHubError(f"GitHub API rate limit reached{hint}. Try again later.", 429)
+    if r.status_code == 401:
+        raise GitHubError("GitHub rejected the configured token (HTTP 401). Check it in Settings.")
+    if r.status_code in (404, 422):
+        raise GitHubError(not_found)
+    raise GitHubError(f"GitHub returned HTTP {r.status_code}", 502)
+
+
+def parse_github(url):
+    m = GITHUB.fullmatch(url or "")
     if not m:
         raise ScanError("Only https://github.com/owner/repo URLs can be scanned")
-    owner, repo = m.groups()
-    headers = {"Authorization": f"Bearer {config.github_token()}"} if config.github_token() else {}
-    out = []
-    with httpx.Client(timeout=20, headers={"User-Agent": "patchpilot/0.1", **headers}, follow_redirects=True) as gh:
-        for name in manifests.MANIFEST_FILES:
+    return m.groups()
+
+
+def check_github(url, ref=None, gh=None):
+    """Resolve a repository + ref through the GitHub API: {owner, repo, ref, sha}. Raises GitHubError with a
+    message the user can act on (missing / private repo, unknown branch or tag, rate limit)."""
+    owner, repo = parse_github(url)
+    own = gh is None
+    gh = gh or _gh_client()
+    try:
+        r = gh.get(f"https://api.github.com/repos/{owner}/{repo}")
+        if r.status_code != 200:
+            _gh_fail(r, "Repository not found or private (add a GitHub token in Settings)")
+        ref = ref or r.json().get("default_branch") or "HEAD"
+        c = gh.get(f"https://api.github.com/repos/{owner}/{repo}/commits/{quote(ref, safe='/')}")
+        if c.status_code != 200:
+            _gh_fail(c, f"Branch or tag '{ref}' not found")
+        return {"owner": owner, "repo": repo, "ref": ref, "sha": c.json()["sha"]}
+    except httpx.HTTPError as e:
+        raise GitHubError(f"Could not reach GitHub ({type(e).__name__})", 502) from None
+    finally:
+        if own:
+            gh.close()
+
+
+def _fetch_github(url, ref, subdir=""):
+    """(files, notes): every manifest in the repository tree (monorepos included, up to 3 folders deep)."""
+    notes = []
+    with _gh_client() as gh:
+        info = check_github(url, ref, gh)
+        owner, repo, sha = info["owner"], info["repo"], info["sha"]
+        try:
+            t = gh.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}", params={"recursive": "1"})
+        except httpx.HTTPError as e:
+            raise ScanError(f"Could not reach GitHub ({type(e).__name__})") from None
+        if t.status_code != 200:
+            _gh_fail(t, "Could not list the repository files")
+        data = t.json()
+        if data.get("truncated"):
+            notes.append("The repository is too large for GitHub to list in full; some manifests may be missed")
+        sizes = {e["path"]: e.get("size") or 0 for e in data.get("tree", []) if e.get("type") == "blob"}
+        paths, more = manifests.select(sizes, subdir)
+        notes += more
+        files, skipped = [], []
+        raw_headers = {"Authorization": gh.headers["Authorization"]} if "Authorization" in gh.headers else {}
+        for path in paths:
+            limit = manifests.size_limit(path)
+            if sizes[path] > limit:
+                skipped.append({"path": path, "reason": f"larger than {limit // 1_000_000} MB"})
+                continue
             try:
-                r = gh.get(f"https://raw.githubusercontent.com/{owner}/{repo}/{ref or 'HEAD'}/{name}")
+                r = gh.get(f"https://raw.githubusercontent.com/{owner}/{repo}/{sha}/{quote(path)}", headers=raw_headers)
             except httpx.HTTPError as e:
-                raise ScanError(f"Could not reach GitHub ({type(e).__name__})") from None
-            if r.status_code == 200 and len(r.content) <= MAX_MANIFEST:
-                out.append((name, r.text))
-            elif r.status_code not in (200, 404):
-                raise ScanError(f"GitHub returned HTTP {r.status_code} for {name}")
-    return out
+                skipped.append({"path": path, "reason": f"download failed ({type(e).__name__})"})
+                continue
+            if r.status_code != 200:
+                skipped.append({"path": path, "reason": f"download failed (HTTP {r.status_code})"})
+                continue
+            files.append((path, r.text))
+    return files, notes, skipped, info
+
+
+def _read_dir(root, subdir=""):
+    """(files, notes, skipped) for a folder on disk: the same file selection as a repository scan."""
+    root = Path(root)
+    sizes = {}
+    for d, dirs, names in os.walk(root):
+        rel = Path(d).relative_to(root).as_posix()
+        depth = 0 if rel == "." else rel.count("/") + 1
+        dirs[:] = [x for x in dirs if depth < manifests.MAX_DEPTH and x.lower() not in manifests.SKIP_DIRS
+                   and not x.startswith(".")]
+        for n in names:
+            path = n if rel == "." else f"{rel}/{n}"
+            if manifests.is_manifest_path(path):
+                sizes[path] = (Path(d) / n).stat().st_size
+    paths, notes = manifests.select(sizes, subdir)
+    files, skipped = [], []
+    for path in paths:
+        limit = manifests.size_limit(path)
+        if sizes[path] > limit:
+            skipped.append({"path": path, "reason": f"larger than {limit // 1_000_000} MB"})
+            continue
+        files.append((path, (root / path).read_text(encoding="utf-8", errors="replace")))
+    return files, notes, skipped
 
 
 def fetch_manifests(project):
-    """[(filename, text)] for a project row (with its stored manifest)."""
-    kind, src = project["source_type"], project["source"]
+    """(files, notes, skipped, ref info or None) for a project row (with its stored manifest)."""
+    kind, src, subdir = project["source_type"], project["source"], project.get("subdir") or ""
     if kind == "upload":
-        return [(src, project.get("manifest") or "")]
+        return [(src, project.get("manifest") or "")], [], [], None
     if kind == "git":
-        return _fetch_github(src, project.get("ref"))
+        return _fetch_github(src, project.get("ref"), subdir)
     if kind == "sample":
         path = config.CASES_DIR / src
         if not (path.is_dir() and path.parent == config.CASES_DIR):
             raise ScanError(f"Sample '{src}' no longer exists")
-        return _read_dir(path)
+        return (*_read_dir(path, subdir), None)
     if kind == "path":
         if not config.ALLOW_LOCAL_PATHS:
             raise ScanError("Local path projects are disabled (ALLOW_LOCAL_PATHS=0)")
         if not Path(src).is_dir():
             raise ScanError("Project directory not found")
-        return _read_dir(src)
+        return (*_read_dir(src, subdir), None)
     raise ScanError(f"Unknown project type {kind}")
 
 
 def collect(files):
-    deps, errors = [], []
+    """(merged deps, errors, warnings, {(name, version): [files]})."""
+    deps, errors, warnings = [], [], []
     for name, text in files:
         try:
-            deps += manifests.parse(name, text)
+            found, warn = manifests.parse_ex(name, text)
+            deps += found
+            warnings += warn
         except manifests.ManifestError as e:
             errors.append(str(e))
-    return manifests.merge(deps), errors
+    where = {}
+    for d in deps:
+        where.setdefault((manifests.normalize(d.name), d.version), [])
+        if d.source_file not in where[(manifests.normalize(d.name), d.version)]:
+            where[(manifests.normalize(d.name), d.version)].append(d.source_file)
+    return manifests.merge(deps), errors, warnings, where
 
 
 def _lowest_fix_above(version, fixed):
@@ -85,39 +183,62 @@ def _lowest_fix_above(version, fixed):
     return min(above, key=sources._vkey) if above else None
 
 
+def coverage(total, pinned, checked, unpinned):
+    """How much of the dependency set was actually checked. verified = every dependency had an exact version
+    and was looked up; partial = some; unverified = none (a clean result then proves nothing)."""
+    state = "unverified" if checked == 0 else "verified" if checked >= total else "partial"
+    return {"state": state, "total": total, "pinned": pinned, "checked": checked, "unpinned": len(unpinned)}
+
+
 def scan_project(project):
     """Run one scan synchronously; returns (findings, summary). Raises ScanError for user-facing failures."""
-    files = fetch_manifests(project)
+    files, notes, skipped, info = fetch_manifests(project)
+    warnings = list(notes) + [f"{s['path']} skipped: {s['reason']}" for s in skipped]
     if not files:
-        raise ScanError("No supported manifest found (requirements.txt, pyproject.toml, poetry.lock, uv.lock, Pipfile.lock)")
-    deps, errors = collect(files)
-    pinned = [d for d in deps if d.version][:MAX_DEPS]
+        if skipped:
+            raise ScanError("Every manifest found was skipped: " + "; ".join(warnings))
+        raise ScanError("No supported manifest found (requirements*.txt, pyproject.toml, poetry.lock, uv.lock, "
+                        "Pipfile.lock, up to 3 folders deep)")
+    deps, errors, warn, where = collect(files)
+    warnings += warn
+    pinned = [d for d in deps if d.version]
+    if len(pinned) > MAX_DEPS:
+        warnings.append(f"{len(pinned)} pinned dependencies; only the first {MAX_DEPS} were checked")
+        pinned = pinned[:MAX_DEPS]
     unpinned = sorted({d.name for d in deps if not d.version})
 
-    def lookup(d):
-        try:
-            return d, sources.osv_vulns(d.name, d.version), None
-        except Exception as e:  # one package failing must not sink the whole scan
-            log.warning("OSV lookup failed for %s %s", d.name, d.version, exc_info=True)
-            return d, [], f"{d.name}: OSV lookup failed ({type(e).__name__})"
-
-    with ThreadPoolExecutor(8) as pool:
-        results = list(pool.map(lookup, pinned))
-    errors += [e for _, _, e in results if e]
-    cves = [v["cve"] for _, vulns, _ in results for v in vulns if v.get("cve")]
     try:
-        epss = sources.epss(cves) if cves else {}
-    except Exception:
-        log.warning("EPSS lookup failed", exc_info=True)
-        epss = {}
+        results = sources.osv_batch([(d.name, d.version) for d in pinned]) if pinned else {}
+        checked = len(pinned)
+    except Exception as e:  # OSV down: the scan finishes, but says it verified nothing
+        log.warning("OSV batch lookup failed", exc_info=True)
+        errors.append(f"OSV lookup failed ({type(e).__name__}); no dependency was checked")
+        results, checked = {}, 0
+    cves = [v["cve"] for vulns in results.values() for v in vulns if v.get("cve")]
+    epss, epss_ok = {}, True
+    if cves:
+        try:
+            epss = sources.epss(cves)
+        except Exception:
+            log.warning("EPSS lookup failed", exc_info=True)
+            epss_ok = False
+            warnings.append("EPSS unavailable: exploit probabilities could not be fetched from FIRST.org")
     try:
         kev = sources.kev() if cves else {}
     except Exception:
         log.warning("CISA KEV lookup failed", exc_info=True)
+        warnings.append("CISA KEV catalog unavailable: known-exploited flags may be missing")
         kev = {}
+    try:
+        missing = sorted(sources.pypi_missing([d.name for d in deps]))
+    except Exception:
+        log.warning("PyPI existence check failed", exc_info=True)
+        missing = []
+    warnings += [f"{n}: not on PyPI — private package or typo (possible dependency confusion)" for n in missing]
 
     findings, packages = [], []
-    for d, vulns, _ in results:
+    for d in pinned:
+        vulns = results.get((d.name, d.version)) or []
         if not vulns:
             continue
         latest = None
@@ -125,24 +246,31 @@ def scan_project(project):
             latest = sources.pypi_latest(d.name)
         except Exception:
             log.info("PyPI lookup failed for %s", d.name)
+        source_file = ", ".join(where.get((manifests.normalize(d.name), d.version)) or [d.source_file])
         packages.append({"package": d.name, "version": d.version, "advisories": len(vulns), "latest": latest,
-                         "safe": sources.min_safe_version(d.version, vulns)})
+                         "safe": sources.min_safe_version(d.version, vulns), "source_file": source_file})
         for v in vulns:
             aliases = sorted(set(v.get("aliases") or ([v["cve"]] if v.get("cve") else [])))
             findings.append({
                 "package": d.name, "version": d.version, "vuln_id": v["id"], "aliases": aliases,
                 "severity": (v.get("severity") or "").upper() or None, "cvss": v.get("cvss"),
+                "cvss_score": v.get("cvss_score"),
                 "epss": (epss.get(v.get("cve")) or {}).get("epss"), "kev": v.get("cve") in kev,
                 "fixed_in": _lowest_fix_above(d.version, v.get("fixed") or []), "summary": (v.get("summary") or "")[:500],
-                "reachable": None,
+                "reachable": None, "source_file": source_file,
             })
-    summary = {"files": [n for n, _ in files], "dependencies": len(deps), "pinned": len(pinned),
-               "unpinned": unpinned, "vulnerable_packages": packages, "errors": errors}
+    summary = {"files": [n for n, _ in files], "skipped_files": skipped, "dependencies": len(deps),
+               "pinned": len(pinned), "unpinned": unpinned, "vulnerable_packages": packages, "errors": errors,
+               "warnings": warnings, "not_on_pypi": missing,
+               "coverage": coverage(len(deps), len(pinned), checked, unpinned),
+               "epss": "ok" if epss_ok else "unavailable"}
+    if info:
+        summary["ref"], summary["commit"] = info["ref"], info["sha"]
     return findings, summary
 
 
 def run_scan(scan_id, project_id):
-    """Thread target: fetch -> parse -> OSV -> store; the scan row always ends as done or error."""
+    """Scan one queued/claimed scan row: fetch -> parse -> OSV -> store; the row always ends as done or error."""
     db.update_scan(scan_id, "running")
     try:
         project = db.get_project(project_id, with_manifest=True)
@@ -157,3 +285,38 @@ def run_scan(scan_id, project_id):
     except Exception as e:
         log.exception("scan %s crashed", scan_id)
         db.update_scan(scan_id, "error", {"error": f"{type(e).__name__}: {e}"[:300]})
+
+
+# ---------- queue ----------
+# Scans are rows with status 'queued'; up to MAX_ACTIVE_SCANS worker threads claim them oldest first. The queue
+# lives in SQLite, so a restart re-queues scans that were running (requeue_interrupted) and nothing is lost.
+_active = 0
+_qlock = threading.RLock()
+
+
+def drain():
+    """Worker body: run queued scans until none is left. Claiming and retiring happen under the same lock
+    that kick() takes, so a scan queued while the last worker is exiting is never stranded."""
+    global _active
+    while True:
+        with _qlock:
+            job = db.claim_queued_scan()
+            if job is None:
+                _active -= 1
+                return
+        run_scan(*job)
+
+
+def kick(spawn):
+    """Start a worker (via spawn(fn)) if fewer than MAX_ACTIVE_SCANS are running; otherwise the scan waits."""
+    global _active
+    with _qlock:
+        if _active >= MAX_ACTIVE_SCANS:
+            return False
+        _active += 1
+    spawn(drain)
+    return True
+
+
+def active():
+    return _active

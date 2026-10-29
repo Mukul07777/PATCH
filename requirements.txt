@@ -3,3 +3,5 @@ uvicorn==0.32.1
 httpx==0.27.2
 python-dotenv==1.0.1
 cryptography==50.0.2
+packaging==26.3
+cvss==3.4

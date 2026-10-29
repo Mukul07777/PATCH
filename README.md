@@ -112,43 +112,94 @@ Models are auto-discovered from `/models` unless pinned with `MODEL_NANO` / `MOD
 
 ## Quickstart
 
-**Windows**
+PatchPilot has two modes. **Scan mode** needs no API key at all: it reads your dependency manifests, checks every
+exact version against OSV.dev and adds EPSS, CISA KEV and fixed-in versions. **Fix mode** (optional, below) adds the
+LLM agent that upgrades and repairs code. Start with scan mode.
 
-```bat
-run.bat
-```
-
-Creates `.venv`, installs dependencies, copies `.env.example` to `.env` on first run (opens it in Notepad for your keys), then serves http://localhost:8000.
-
-**Manual (any OS, Python 3.10+)**
+### 1. Run it
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+# Docker
+docker build -t patchpilot .
+docker run -p 8000:8000 -v patchpilot-data:/app/runs -e PATCHPILOT_SECRET_KEY="$(openssl rand -base64 32)" patchpilot
+
+# or pip (Python 3.10+)
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # add your keys
 uvicorn patchpilot.server:app --port 8000
 ```
 
-Then:
+On Windows, `run.bat` does the pip steps for you. No `.env` is needed for scan mode.
 
-1. **Create a project**: open http://localhost:8000/projects and paste a GitHub URL (optional branch/tag), or upload or paste a manifest: `requirements.txt`, `pyproject.toml` (PEP 621 or Poetry), `poetry.lock`, `uv.lock` or `Pipfile.lock` (200 KB max). With `ALLOW_LOCAL_PATHS=1`, `POST /api/projects {"path": "/abs/dir"}` also accepts a directory on the server.
-2. **Scan**: runs automatically when the project is added, and again with **Scan now**. No API key needed. Pinned packages are looked up on OSV.dev and enriched with EPSS, CISA KEV and the lowest fixed version; unpinned ones are listed but not checked. Scanning never installs or runs project code (GitHub manifests are fetched as raw files), so it works for remote repos even with `ALLOW_REMOTE_REPOS=0`; that flag only gates fix mode.
-3. **Fix**: on a GitHub or sample project, press **Fix with agent** (needs `NEBIUS_API_KEY`; GitHub projects also need `ALLOW_REMOTE_REPOS=1`). Uploaded manifests can be scanned but not fixed, because the agent needs the code and tests.
+### 2. Create the admin
 
-Projects, scans, findings and an audit log of every change are stored in SQLite at `PATCHPILOT_DB` (default `runs/patchpilot.db`); each agent run's events stay in `runs/<id>.jsonl`.
+Open http://localhost:8000. With no users yet, every page redirects to **/setup**: create the admin account there.
+
+### 3. Add a project and scan
+
+On **/projects**, either paste a GitHub URL (optional branch/tag/commit, optional sub-folder for monorepos) or upload / paste a manifest. The project is checked when you add it (the repository must exist and the ref must resolve; private repos need a GitHub token in Settings) and scanned straight away. **Scan now** rescans.
+
+Each scan reports its **coverage**: only exact versions can be checked, so a project with unpinned ranges shows
+**NOT VERIFIED** or **Partially verified (x of y pinned)** instead of a green all-clear, and the dashboard does not count it as clean. Upload a lock file (or pin with `pip freeze` / `pip-compile`) for a complete result.
+
+### 4. Automate it with an API key
+
+Create a key on **Settings → API keys** (shown once), then:
+
+```bash
+export PP=http://localhost:8000 KEY=pp_your_key_here
+
+# add a project (a GitHub repo, or "filename" + "content" for an upload)
+curl -s -X POST $PP/api/projects -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d '{"git_url": "https://github.com/pallets/flask", "ref": "main"}'
+#  -> {"id": 1, ...}
+
+# start a scan (202; "queued" when all scan workers are busy, it runs as soon as one is free)
+curl -s -X POST $PP/api/projects/1/scan -H "Authorization: Bearer $KEY"
+#  -> {"id": 7, "status": "running"}
+
+# poll the scan: status queued | running | done | error, then findings + summary.coverage
+curl -s $PP/api/scans/7 -H "Authorization: Bearer $KEY"
+
+# upload a lock file instead
+curl -s -X POST $PP/api/projects -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d "$(jq -n --rawfile c poetry.lock '{filename: "poetry.lock", content: $c}')"
+```
+
+A rejected request answers with `{"detail": "<reason>"}`; a `429` carries a `Retry-After` header.
+
+### Supported manifests and limits
+
+| File | What is read | Max size |
+| --- | --- | --- |
+| `requirements*.txt` (and any `.txt` in a `requirements/` folder) | `pkg==x.y.z` pins; ranges are listed as unpinned. `-r`/`-c` includes, `-e` editables and URL/VCS lines are **not followed** and are reported as warnings | 1 MB |
+| `pyproject.toml` | PEP 621 dependencies, optional-dependencies, dependency-groups, Poetry tables | 1 MB |
+| `poetry.lock`, `uv.lock` | every resolved package | 5 MB |
+| `Pipfile.lock` | `default` and `develop` | 5 MB |
+
+- **Repositories**: the tree at the resolved commit is searched up to 3 folders deep (virtualenvs, `node_modules`, `vendor`, `fixtures` and similar folders are skipped), so monorepos work; a lock file is used instead of the `pyproject.toml` next to it. Each finding names the file it came from. Larger files are skipped and listed as warnings, never silently dropped.
+- **Uploads**: binary or mostly non-printable content, and requirements files whose lines are mostly not valid PEP 508 requirements, are rejected with `422`; oversize uploads get `413`.
+- **Lookups**: OSV `querybatch` (1000 packages per request, no per-scan cap), advisory details cached by id, EPSS in batches of 100. A failed EPSS or KEV lookup is a warning on the scan; a failed OSV lookup marks the scan **not verified**. Severity comes from the advisory, else from its CVSS v3/v4 vector (`cvss_score` is returned too), else from its GHSA alias. Packages PyPI does not know are flagged as a possible private package, typo or dependency-confusion target.
+- **Rate limits and queue**: signed-in users and API keys get 60 project/scan calls a minute; sign-in attempts, fix runs and org scans stay at 5 a minute per IP. Up to 4 scans run at once; more are queued (`status: "queued"`) and survive a restart.
+
+### Optional: fix mode (LLM)
+
+Add an OpenAI-compatible LLM key (Settings → Providers, or `NEBIUS_API_KEY` in `.env`; `TAVILY_API_KEY` adds web research). Then **Fix with agent** on a GitHub or sample project upgrades the vulnerable pins, repairs the code until its own pytest suite passes, attacks the fix and prepares a PR. GitHub projects also need `ALLOW_REMOTE_REPOS=1`, because fix mode runs the repository's tests on the server. Uploaded manifests can be scanned but not fixed. The header shows **Scan mode** or **Scan + auto-fix** so it is always clear which one a server offers.
+
+Projects, scans, findings and an audit log of every change are stored in SQLite at `PATCHPILOT_DB` (default `runs/patchpilot.db`); each agent run's events stay in `runs/<id>.jsonl`. With `ALLOW_LOCAL_PATHS=1`, `POST /api/projects {"path": "/abs/dir"}` also accepts a directory on the server.
 
 ### First run, accounts and API keys
 
-Every page and API except `/`, `/how`, `/login`, `/setup`, `/api/health` and `/api/auth/*` needs a signed-in user.
+Every page and API except `/`, `/how`, `/login`, `/setup`, `/api/health` and `/api/auth/*` needs a signed-in user. Protected pages are enforced on the server: an anonymous `GET /projects` (or `/dashboard`, `/console`, `/runs`, `/org`, `/settings`) answers `302` to `/login?next=...`, or to `/setup` while no user exists.
 
 1. **First run**: with no users in the database, every page redirects to `/setup`, which creates the **admin**. `/setup` (and `POST /api/auth/setup`) refuses once any user exists.
 2. **Sign in** at `/login`. Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind HTTPS), valid for 7 days; only their SHA-256 is stored. Passwords are hashed with salted `hashlib.scrypt`.
-3. **Roles**: *members* create projects, scan, edit project policy and launch fix runs; *admins* also manage settings, users, API keys and read the audit log. The last admin cannot be removed or demoted.
-4. **API keys** (Settings → API keys, admins): `Authorization: Bearer pp_...`. The key is shown once; only a hash and its prefix are kept, with the last-used time. A key acts as its owner, capped at the role chosen for the key.
-5. **CSRF**: cookie-authenticated writes must send `X-Requested-With: patchpilot` (the web UI does this through `ppApi` in `web/site.js`); bearer-authenticated calls don't need it.
-6. **Legacy**: `PATCHPILOT_TOKEN`, if set, still works as an admin bearer token (`Authorization: Bearer <token>`) for scripts written before accounts existed.
-7. **Public demo**: `PATCHPILOT_PUBLIC_DEMO=1` lets anonymous visitors *read* sample projects, their scans, a dashboard limited to them, and the replays in `demo-runs/`. Nothing else is readable and nothing is writable without signing in.
+3. **Your account** (Settings, or Account for members): change your password (the current one is required; your other sessions are signed out) or **Sign out all sessions**. Admins can reset another user's password, which signs that user out everywhere.
+4. **Roles**: *members* create projects, scan, edit project policy and launch fix runs; *admins* also manage settings, users, API keys and read the audit log. The last admin cannot be removed or demoted.
+5. **API keys** (Settings → API keys, admins): `Authorization: Bearer pp_...`. The key is shown once; only a hash and its prefix are kept, with the last-used time. A key acts as its owner, capped at the role chosen for the key.
+6. **CSRF**: cookie-authenticated writes must send `X-Requested-With: patchpilot` (the web UI does this through `ppApi` in `web/site.js`); bearer-authenticated calls don't need it.
+7. **Legacy**: `PATCHPILOT_TOKEN`, if set, still works as an admin bearer token (`Authorization: Bearer <token>`) for scripts written before accounts existed.
+8. **Public demo**: `PATCHPILOT_PUBLIC_DEMO=1` lets anonymous visitors *read* sample projects, their scans, a dashboard limited to them, and the replays in `demo-runs/`. Nothing else is readable and nothing is writable without signing in.
 
 Every change (projects, scans, runs, policy, ignores, settings, users, keys, sign-ins) is written to the audit log with the actor (user email, `email (key pp_xxxx…)` for API keys, or `token`) and IP; admins page through it on `/settings` or `GET /api/audit?page=&per_page=`.
 
@@ -167,7 +218,7 @@ Each finished scan is compared with the project's previous findings (keyed by pa
 CLI / batch mode: `python -m patchpilot.cli case:authsvc ...`. Container: see `Dockerfile`.
 
 - Pages: `/` landing, `/dashboard` security posture, `/projects` projects and scan results, `/settings` settings, users, API keys and audit log (admins), `/login`, `/setup` (first run only), `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
-- API: `/api/health` (GET/HEAD; includes configured model ids per tier, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`, `/api/dashboard`, `/api/projects/{id}/policy` (GET, PUT), `/api/projects/{id}/ignores` (POST) and `/api/projects/{id}/ignores/{iid}` (DELETE), `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/api/auth/logout`, and for admins `/api/settings` (GET, PUT), `/api/settings/test/{llm|tavily|github}` (POST), `/api/users`, `/api/keys`, `/api/audit`. Creating projects, scans and runs also has a per-IP rate limit.
+- API: `/api/health` (GET/HEAD; includes configured model ids per tier, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`, `/api/dashboard`, `/api/projects/{id}/policy` (GET, PUT), `/api/projects/{id}/ignores` (POST) and `/api/projects/{id}/ignores/{iid}` (DELETE), `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/logout-all`, `/api/auth/password` (POST), and for admins `/api/users/{id}/password` (POST), `/api/settings` (GET, PUT), `/api/settings/test/{llm|tavily|github}` (POST), `/api/users`, `/api/keys`, `/api/audit`. Project and scan calls are limited to 60 a minute per user or API key; runs, org scans and sign-ins to 5 a minute per IP.
 - Sample projects come from `cases/` (pins from each `requirements.txt`):
   - `authsvc`: PyJWT 1.7.1 + requests 2.25.1
   - `fetcher`: urllib3 1.26.17
@@ -304,7 +355,7 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 
 - The NVIDIA content-safety guard has only had a small live check (n=2 passes over 6 samples via OpenRouter's free tier, [docs/guard-eval.md](docs/guard-eval.md)). It got 10 of 12 verdicts right: it flagged one benign curated proof and missed a base64 `exec` sample once. The static AST screen got all 12 right. Token Factory listed no Nemotron content-safety model for our account, so the recorded demo runs used the static screen only.
 - Benchmark: 6/6 on Token Factory, but the recorded sanitizer run predates Tavily (its Tavily rerun is not recorded yet), and the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only auto-adds a package with a curated import mapping or one the original repo already imported, whose first PyPI release is at least 90 days old, pinned to the newest non-yanked release that supports the sandbox Python; anything else becomes a hint for the model.
-- Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
+- Python only. Scan mode checks exact versions only (lock files or `==` pins); fix mode needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
 - Green tests are only as strong as the repo's test suite.

@@ -32,3 +32,15 @@ def _legacy_token(monkeypatch):
     monkeypatch.setenv("PATCHPILOT_TOKEN", TEST_TOKEN)
     monkeypatch.delenv("PATCHPILOT_PUBLIC_DEMO", raising=False)
     monkeypatch.delenv("PATCHPILOT_SECRET_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_pypi_probe(monkeypatch):
+    """Scans HEAD-check every package on PyPI; keep tests offline unless a test opts in."""
+    from patchpilot import sources
+    monkeypatch.setattr(sources, "pypi_missing", lambda names: set())
+
+
+def osv_from(fn):
+    """A sources.osv_batch stand-in built from a per-package lookup fn(name, version) -> advisories."""
+    return lambda pairs: {(n, v): fn(n, v) for n, v in pairs}

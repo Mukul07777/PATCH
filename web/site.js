@@ -87,7 +87,7 @@ window.ppReady = window.ppAuth.then((a) => {
       const u = a.user;
       const link = (h, t) => `<a href="${h}" class="${h === here ? "on" : ""}"${h === here ? ' aria-current="page"' : ""}>${t}</a>`;
       if (u && u.via === "session") {
-        nav.insertAdjacentHTML("beforeend", (u.role === "admin" ? link("/settings", "Settings") : "")
+        nav.insertAdjacentHTML("beforeend", link("/settings", u.role === "admin" ? "Settings" : "Account")
           + `<button type="button" class="nav-btn" id="signOut" title="Signed in as ${ppEsc(u.email)}">Sign out<span class="sr-only"> ${ppEsc(u.email)}</span></button>`);
         document.getElementById("signOut").addEventListener("click", async () => {
           try { await window.ppApi("/api/auth/logout", { method: "POST" }); } catch {}
@@ -107,7 +107,7 @@ window.ppReady = window.ppAuth.then((a) => {
 
   // One shared footer: any <footer data-site-foot> (or element with that attribute) gets the same links.
   document.querySelectorAll("[data-site-foot]").forEach((f) => {
-    f.innerHTML = `<span>PatchPilot · NVIDIA Nemotron · OSV.dev · Tavily · MIT licensed</span>
+    f.innerHTML = `<span>PatchPilot · <span data-mode-text>Scan mode</span> · OSV.dev · EPSS · CISA KEV · MIT licensed</span>
       <nav aria-label="Footer"><span>${PAGES.map(([h, t]) => `<a href="${h}">${t}</a>`).join("")}</span></nav>`;
   });
 
@@ -124,8 +124,12 @@ window.ppReady = window.ppAuth.then((a) => {
   window.ppHealth.then((h) => {
     // any [data-model-tier] element shows the model id configured for that tier (Settings, else MODEL_*)
     document.querySelectorAll("[data-model-tier]").forEach((el) => { const m = (h.models || {})[el.dataset.modelTier]; if (m) el.textContent = m; });
+    // Say plainly which mode this server is in: without an LLM key it scans only, it does not fix
+    const mode = h.fix_mode ? "Scan + auto-fix" : "Scan mode";
+    document.querySelectorAll("[data-mode-text]").forEach((m) => { m.textContent = h.fix_mode ? `${mode} (${h.provider || "LLM"})` : `${mode} (fix mode off: no LLM key)`; });
     const el = document.getElementById("pills");
-    if (el) el.innerHTML = [[h.provider || "LLM", h.nebius], ["Tavily", h.tavily], ["GitHub PRs", h.github]]
+    if (el) el.innerHTML = `<span class="pill on" title="${h.fix_mode ? "Scanning and LLM fix runs are available" : "Scanning works; fix runs need an LLM API key in Settings"}"><i aria-hidden="true"></i>${mode}</span>`
+      + [[h.provider || "LLM", h.nebius], ["Tavily", h.tavily], ["GitHub", h.github]].filter(([, on], i) => on || i === 0)
       .map(([n, on]) => `<span class="pill ${on ? "on" : ""}"><i aria-hidden="true"></i>${ppEsc(n)}<span class="sr-only">${on ? " connected" : " not configured"}</span></span>`).join("");
   });
 

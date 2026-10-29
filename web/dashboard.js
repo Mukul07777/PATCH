@@ -47,16 +47,21 @@
       return;
     }
     const c = d.by_severity;
+    const unv = d.unverified || [];
     const sevMax = Math.max(...SEV.map(([k]) => c[k]));
     const riskMax = Math.max(1, ...d.at_risk.map((p) => p.total));
     const pkgMax = Math.max(1, ...d.top_packages.map((p) => p.findings));
     box.innerHTML = `
-      <div class="summary">
+      <div class="summary db-k5">
         ${kpi("Open findings", d.open, d.open ? "c-warn" : "", d.suppressed ? `${d.suppressed} suppressed by policy` : `${d.scanned} of ${d.projects} projects scanned`)}
         ${kpi("Critical + high", c.CRITICAL + c.HIGH, c.CRITICAL + c.HIGH ? "c-bad" : "")}
         ${kpi("Known exploited (KEV)", d.kev, d.kev ? "c-bad" : "", "CISA KEV catalog")}
         ${kpi("Mean time to remediate", dur(d.mttr_seconds), "", d.fixed_total ? `${d.fixed_total} fixed · ${d.fixed_7d} this week` : "nothing fixed yet")}
+        ${kpi("Not fully verified", unv.length, unv.length ? "c-warn" : "", `${d.clean} verified clean of ${d.scanned} scanned`)}
       </div>
+      ${unv.length ? `<section class="card glass mb-14" aria-labelledby="unvTitle"><h2 id="unvTitle">Not fully verified</h2>
+        <p class="muted">These projects are not counted as clean: some or all of their dependencies have no exact version, so OSV.dev could not check them. Add a lock file or pin versions, then rescan.</p>
+        <ul class="db-unv">${unv.map((u) => `<li><a href="/projects?id=${u.id}">${esc(u.name)}</a> <span class="status ${u.state === "unverified" ? "bad" : "warn"}">${u.state === "unverified" ? "not verified" : `partial${u.total ? ` · ${u.checked} of ${u.total}` : ""}`}</span></li>`).join("")}</ul></section>` : ""}
       <p class="muted mb-14">Last 7 days: <b class="c-text">${d.new_7d}</b> new, <b class="c-text">${d.fixed_7d}</b> fixed (a finding counts as fixed when a later scan of its project no longer reports it).</p>
       <div class="db-grid">
         <section class="card glass" aria-labelledby="sevTitle"><h2 id="sevTitle">Open findings by severity</h2>

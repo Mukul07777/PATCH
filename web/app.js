@@ -124,8 +124,12 @@ async function boot() {
   }
   if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Remote repos are off on this server"; $("#remoteOff").hidden = false; }
   const runList = Array.isArray(runs) ? runs : [];
-  $("#history").innerHTML = '<option value="">▶ Replay a recorded run…</option>' +
-    runList.map((r) => `<option value="${esc(r.id)}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${r.sample ? "Sample · " : ""}${esc(r.repo)} · ${esc(r.id)}</option>`).join("");
+  // shipped demo recordings are kept apart from this server's own runs so nobody mistakes them for their results
+  const opt = (r) => `<option value="${esc(r.id)}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${esc(r.repo)} · ${esc(r.id)}</option>`;
+  const own = runList.filter((r) => !r.sample), samples = runList.filter((r) => r.sample);
+  $("#history").innerHTML = '<option value="">▶ Sample recordings: replay a run…</option>'
+    + (own.length ? `<optgroup label="Your runs">${own.map(opt).join("")}</optgroup>` : "")
+    + (samples.length ? `<optgroup label="Sample recordings (demo data)">${samples.map(opt).join("")}</optgroup>` : "");
   reset();
   const qs = new URLSearchParams(location.search), replay = qs.get("replay");
   await setTarget(qs.get("project"));
