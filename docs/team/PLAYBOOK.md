@@ -21,6 +21,11 @@ The owner (Mukul) is away. The manager (main Claude session) runs one **cycle** 
 5. When an agent finishes: check its claims (run tests, read the diff), then commit and push to origin main.
 6. Append a dated entry to `LOG.md`: what ran, what changed, score, next step.
 
+## Never idle
+- The moment any agent finishes, the manager verifies its work, pushes, and immediately starts the next job. It doesn't wait for the 30-minute cycle.
+- When a backlog item is done, it is ticked and the whole loop restarts: research → feasibility → build → score → more ideas.
+- Researchers always take a NEW angle each round (list past angles in LOG.md so they aren't repeated).
+
 ## Rules
 - Never commit `.env` or keys. No Claude co-author trailers. Push after every completed task.
 - Never force-push or rewrite pushed history.
