@@ -40,3 +40,4 @@
 - Honest weak spot: sandbox is a venv, not a security boundary. Backlog: container sandbox, NAT wrapper, pin Nebius ids. Real PR still needs owner's GITHUB_TOKEN.
 - Launched researcher round 3 (angle: real public GitHub repos for the benchmark).
 - Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video.
+- 12:55 Researcher round 3 relaunched READ-ONLY: cloning/running third-party repos was blocked by the permission system (correctly). Running real public repos through the agent needs the owner's explicit approval → noted for owner.
