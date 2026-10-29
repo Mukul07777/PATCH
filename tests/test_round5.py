@@ -344,7 +344,7 @@ def test_csp_is_self_only_and_fonts_are_local(client):
     csp = r.headers["content-security-policy"]
     assert "googleapis" not in csp and "gstatic" not in csp and "https:" not in csp
     assert "font-src 'self'" in csp and "style-src 'self'" in csp
-    for page in ("landing", "login", "projects", "settings", "dashboard", "console", "runs", "org", "how", "setup"):
+    for page in ("landing", "login", "workspace", "settings", "console", "setup"):
         html = (config.ROOT / "web" / f"{page}.html").read_text(encoding="utf-8")
         assert "fonts.g" not in html, page
     css = client.get("/static/style.css").text

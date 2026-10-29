@@ -290,10 +290,15 @@ def anon(monkeypatch):
 def test_protected_pages_redirect(anon, monkeypatch):
     assert anon.get("/projects").headers["location"] == "/setup"
     auth.create_user("a@example.com", "", PW, "admin")
-    for page in ("dashboard", "projects", "console", "runs", "org", "settings"):
+    for page in ("projects", "console", "settings"):
         r = anon.get(f"/{page}?id=3")
         assert r.status_code == 302 and r.headers["location"] == f"/login?next=%2F{page}%3Fid%3D3"
-    for page in ("", "how", "login", "setup"):
+    # the old single-feature pages are sections of the Workspace / landing page now
+    for page, to in (("dashboard", "/projects#overview"), ("runs", "/projects#runs"), ("org", "/projects#org"),
+                     ("how", "/#how")):
+        r = anon.get(f"/{page}")
+        assert r.status_code == 301 and r.headers["location"] == to
+    for page in ("", "login", "setup"):
         assert anon.get(f"/{page}").status_code == 200
     monkeypatch.setenv("PATCHPILOT_PUBLIC_DEMO", "1")
     assert anon.get("/projects").status_code == 200 and anon.get("/settings").status_code == 302

@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PatchPilot Projects</title>
-<meta name="description" content="Add your Python project, scan its dependencies against OSV.dev, and fix vulnerable pins with the PatchPilot agent.">
-<meta property="og:title" content="PatchPilot Projects">
-<meta property="og:description" content="Add your Python project, scan its dependencies against OSV.dev, and fix vulnerable pins with the PatchPilot agent.">
+<title>PatchPilot Workspace</title>
+<meta name="description" content="Your security posture, projects, recorded agent runs and GitHub org scan in one place.">
+<meta property="og:title" content="PatchPilot Workspace">
+<meta property="og:description" content="Your security posture, projects, recorded agent runs and GitHub org scan in one place.">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
 <meta name="theme-color" content="#05070a">
@@ -20,9 +20,15 @@
 <header class="topbar"></header>
 
 <main id="main">
-<div class="page-head"><span class="kicker">Projects</span><h1>Your dependencies, checked.</h1><p>Add a GitHub repository or upload a manifest. Scanning reads your dependency files and checks every pinned version against OSV.dev. It needs no API key and never runs your code. Only exact versions can be checked, so a lock file gives the most complete result.</p></div>
+<div class="page-head"><span class="kicker">Workspace</span><h1>Everything you protect, in one place.</h1><p>Posture across every project, the projects themselves, every recorded agent run, and a scan of a whole GitHub org. Scanning needs no API key and never runs your code.</p></div>
 
 <div class="wrap">
+  <div class="tabs ws-tabs" role="tablist" aria-label="Workspace sections"><button class="tab active" type="button" role="tab" id="wsbtn-overview" data-ws="overview" aria-controls="ws-overview" aria-selected="true" tabindex="0">Overview</button><button class="tab" type="button" role="tab" id="wsbtn-projects" data-ws="projects" aria-controls="ws-projects" aria-selected="false" tabindex="-1">Projects</button><button class="tab" type="button" role="tab" id="wsbtn-runs" data-ws="runs" aria-controls="ws-runs" aria-selected="false" tabindex="-1">Run history</button><button class="tab" type="button" role="tab" id="wsbtn-org" data-ws="org" aria-controls="ws-org" aria-selected="false" tabindex="-1">Org scan</button></div>
+<section class="ws-panel" id="ws-overview" role="tabpanel" aria-labelledby="wsbtn-overview">
+  <div id="dashStatus" class="pj-status" role="status" aria-live="polite"></div>
+  <div id="dash"><div class="empty">Loading…</div></div>
+</section>
+<section class="ws-panel" id="ws-projects" role="tabpanel" aria-labelledby="wsbtn-projects" hidden>
   <div id="status" class="pj-status" role="status" aria-live="polite"></div>
 
   <section id="listView" aria-labelledby="listTitle">
@@ -98,11 +104,49 @@
     <div class="filters"><h2>Scan history</h2></div>
     <div id="history" class="card glass"><div class="empty">No scans yet.</div></div>
   </section>
+</section>
+<section class="ws-panel" id="ws-runs" role="tabpanel" aria-labelledby="wsbtn-runs" hidden>
+  <div class="summary">
+    <div class="kpi"><span>Total runs</span><b id="s-total">–</b></div>
+    <div class="kpi"><span>Secured</span><b id="s-ok" class="c-ok">–</b></div>
+    <div class="kpi"><span>Needs review</span><b id="s-bad" class="c-bad">–</b></div>
+    <div class="kpi"><span>Success rate</span><b id="s-rate">–</b></div>
+  </div>
+
+  <div class="filters"><h2>Recorded runs</h2>
+    <div role="group" aria-label="Filter runs"><button type="button" class="chipbtn on" data-f="all" aria-pressed="true">All</button><button type="button" class="chipbtn" data-f="ok" aria-pressed="false">Secured</button><button type="button" class="chipbtn" data-f="bad" aria-pressed="false">Needs review</button></div>
+  </div>
+  <div class="runs-grid" id="runs" role="status" aria-live="polite"><div class="empty span-all">Loading…</div></div>
+
+  <div class="filters"><h2>Model tiers across recent runs</h2></div>
+  <div class="card glass" id="tiers"><div class="empty">Loading per-tier usage…</div></div>
+
+  <div class="filters"><h2>Benchmarks</h2></div>
+  <div class="card glass" id="bench"><div class="empty">No benchmark yet. Run <code>python -m patchpilot.cli</code> to benchmark every case.</div></div>
+</section>
+<section class="ws-panel" id="ws-org" role="tabpanel" aria-labelledby="wsbtn-org" hidden>
+  <form class="org-form" id="f" role="search">
+    <label for="owner" class="sr-only">GitHub user or organisation</label>
+    <input id="owner" name="owner" placeholder="GitHub user or org, e.g. pallets" autocomplete="off" required>
+    <button class="btn-run" type="submit"><span>Scan</span></button>
+  </form>
+  <div class="summary" id="sum" hidden role="status" aria-live="polite">
+    <div class="kpi"><span>Repos scanned</span><b id="s-repos">–</b></div>
+    <div class="kpi"><span>Vulnerable repos</span><b id="s-vuln" class="c-bad">–</b></div>
+    <div class="kpi"><span>Critical + high</span><b id="s-ch" class="c-warn">–</b></div>
+    <div class="kpi"><span>Total advisories</span><b id="s-all">–</b></div>
+  </div>
+  <div class="heat" id="heat" role="status" aria-live="polite"><div class="empty span-all">Enter a GitHub owner to scan. Only repos with a pinned <code>requirements.txt</code> are checked.</div></div>
+</section>
 </div>
 </main>
 
 <footer class="foot" data-site-foot></footer>
 <script src="/static/site.js"></script>
+<script src="/static/workspace.js"></script>
+<script src="/static/dashboard.js"></script>
 <script src="/static/projects.js"></script>
+<script src="/static/runs.js"></script>
+<script src="/static/org.js"></script>
 </body>
 </html>

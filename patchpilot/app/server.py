@@ -925,18 +925,22 @@ def favicon():
 
 app.mount("/static", CachedStatic(directory=config.ROOT / "web"), name="static")
 
-PAGES = {"": "landing", "projects": "projects", "console": "console", "app": "console", "runs": "runs", "how": "how",
-         "org": "org", "dashboard": "dashboard", "settings": "settings", "login": "login", "setup": "setup"}
+PAGES = {"": "landing", "projects": "workspace", "console": "console", "app": "console", "settings": "settings",
+         "login": "login", "setup": "setup"}
+# old single-feature pages now live as sections of the Workspace page (or the landing page)
+MERGED = {"dashboard": "/projects#overview", "runs": "/projects#runs", "org": "/projects#org", "how": "/#how"}
 
 
 # Pages that need a signed-in user; with PATCHPILOT_PUBLIC_DEMO=1 anonymous visitors may still read these
-PROTECTED = {"dashboard", "projects", "console", "app", "runs", "org", "settings"}
-PUBLIC_DEMO_PAGES = {"dashboard", "projects", "console", "app", "runs"}
+PROTECTED = {"projects", "console", "app", "settings"}
+PUBLIC_DEMO_PAGES = {"projects", "console", "app"}
 
 
 @app.api_route("/{page}", methods=["GET", "HEAD"])
 @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
 def page(request: Request, page: str = ""):
+    if page in MERGED:
+        return RedirectResponse(MERGED[page], 301)
     if page not in PAGES:
         raise HTTPException(404)
     if page in PROTECTED and principal(request) is None:

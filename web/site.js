@@ -29,7 +29,7 @@ window.ppAuth = fetch("/api/auth/state", { credentials: "same-origin" }).then((r
 window.ppReady = window.ppAuth.then((a) => {
   const path = location.pathname.replace(/\/$/, "") || "/";
   const to = a.setup_needed && path !== "/setup" ? "/setup"
-    : !a.setup_needed && !a.user && !a.public_demo && !["/", "/how", "/login", "/setup"].includes(path) ? window.ppLoginUrl() : null;
+    : !a.setup_needed && !a.user && !a.public_demo && !["/", "/login", "/setup"].includes(path) ? window.ppLoginUrl() : null;
   if (!to) return a;
   location.replace(to);
   return new Promise(() => {});
@@ -59,7 +59,7 @@ window.ppReady = window.ppAuth.then((a) => {
 })();
 
 (() => {
-  const PAGES = [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/console", "Console"], ["/runs", "Runs"], ["/org", "Org scan"], ["/how", "How it works"]];
+  const PAGES = [["/projects", "Workspace"], ["/console", "Console"], ["/#how", "How it works"]];
   const path = location.pathname.replace(/\/$/, "") || "/";
   const here = path === "/app" ? "/console" : path;
 

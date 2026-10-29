@@ -47,8 +47,8 @@
 <section class="band4" aria-label="What the agent does">
   <article><img src="/static/icons/shield.svg" alt="" width="28" height="28"><div><h3>Find the CVE</h3><p>Every pin checked on OSV.dev, ranked with EPSS and CISA KEV.</p><a href="/projects">Scan a repo →</a></div></article>
   <article><img src="/static/icons/chart.svg" alt="" width="28" height="28"><div><h3>Rewrite the code</h3><p>Nemotron fixes what the upgrade broke until your tests pass.</p><a href="/console?demo=1">Watch it work →</a></div></article>
-  <article><img src="/static/icons/replay.svg" alt="" width="28" height="28"><div><h3>Prove it closed</h3><p>A real exploit re-runs against the patched code.</p><a href="/how">See the proof →</a></div></article>
-  <article><img src="/static/icons/users.svg" alt="" width="28" height="28"><div><h3>Open the PR</h3><p>Diff, evidence and a hashed certificate for review.</p><a href="/runs">Browse runs →</a></div></article>
+  <article><img src="/static/icons/replay.svg" alt="" width="28" height="28"><div><h3>Prove it closed</h3><p>A real exploit re-runs against the patched code.</p><a href="/#how">See the proof →</a></div></article>
+  <article><img src="/static/icons/users.svg" alt="" width="28" height="28"><div><h3>Open the PR</h3><p>Diff, evidence and a hashed certificate for review.</p><a href="/projects#runs">Browse runs →</a></div></article>
 </section>
 
 <section class="story" aria-labelledby="storyH">
@@ -56,7 +56,7 @@
     <span class="over">The story</span>
     <h2 id="storyH">Bump.<br>Break.<br>Fix.</h2>
     <p>A version-bump PR goes red the moment the fix needs a major upgrade, and the known vulnerability stays in production. PatchPilot finishes the job: it migrates your code, runs your tests, and re-fires the exploit to prove the hole is closed.</p>
-    <a class="cx-btn" href="/how">Inside the agent</a>
+    <a class="cx-btn" href="/#how">Inside the agent</a>
   </div>
   <div class="story-stats">
     <section class="stats" id="stats" hidden aria-label="Measured results"></section>
@@ -65,15 +65,15 @@
 </section>
 
 <section class="perks" aria-label="Also included">
-  <a href="/dashboard"><img src="/static/icons/chart.svg" alt="" width="26" height="26"><b>Dashboards</b><span>Findings across every project</span></a>
+  <a href="/projects#overview"><img src="/static/icons/chart.svg" alt="" width="26" height="26"><b>Dashboards</b><span>Findings across every project</span></a>
   <a href="/settings"><img src="/static/icons/bell.svg" alt="" width="26" height="26"><b>Alerts</b><span>Slack, webhook, email</span></a>
   <a href="/projects"><img src="/static/icons/sarif.svg" alt="" width="26" height="26"><b>SARIF &amp; SBOM</b><span>GitHub code scanning</span></a>
-  <a href="/org"><img src="/static/icons/users.svg" alt="" width="26" height="26"><b>Org scan</b><span>Every repo of an owner</span></a>
-  <a href="/runs"><img src="/static/icons/replay.svg" alt="" width="26" height="26"><b>Full replay</b><span>Audit any run, event by event</span></a>
+  <a href="/projects#org"><img src="/static/icons/users.svg" alt="" width="26" height="26"><b>Org scan</b><span>Every repo of an owner</span></a>
+  <a href="/projects#runs"><img src="/static/icons/replay.svg" alt="" width="26" height="26"><b>Full replay</b><span>Audit any run, event by event</span></a>
 </section>
 
 <section class="tiers-sec" aria-labelledby="stackH">
-  <div class="tiers-head"><h2 id="stackH">Choose your model</h2><a href="/how">How routing works</a></div>
+  <div class="tiers-head"><h2 id="stackH">Choose your model</h2><a href="/#how">How routing works</a></div>
   <p class="tiers-sub">Three NVIDIA Nemotron tiers on Nebius Token Factory, plus Tavily. The cheap model goes first; a bigger one steps in only when a fix fails.</p>
   <div class="cx-tiers">
     <article class="ed nano"><div class="ed-art"><span>N</span></div><div class="ed-body"><h3>Nano</h3><ul><li>Advisory triage</li><li>Vulnerable-symbol inference</li><li>Reachability check</li></ul><code class="ed-model" data-tier="nano">model: loading</code></div></article>
@@ -84,11 +84,44 @@
 </section>
 </main>
 
+<section id="how" class="how-embed">
+<div class="page-head rv center"><span class="kicker">Architecture</span><h1>Inside the agent.</h1><p>Start in the <a href="/projects#projects">Workspace</a>: add a GitHub repo or upload a manifest and scan it, or paste a red Dependabot PR URL into the console to rescue it. Scanning reads your dependency files, checks OSV.dev, EPSS and CISA KEV, and needs no API key. When you press <b>Fix with agent</b>, the stages below run: nothing ships until the tests pass <b>and</b> your code still behaves exactly as before.</p></div>
+
+<div class="wrap">
+  <div class="arch">
+    <h2 class="sr-only">Pipeline stages</h2>
+    <div class="astep rv" data-css="--c:var(--muted)"><div class="num" aria-hidden="true">🔌</div><div class="body"><h3>Connect</h3><p>Resolves the Nemotron model for each tier from the provider's <code>/models</code> catalog, or uses the ones pinned in Settings (or <code>MODEL_*</code>). On this server: nano <code data-model-tier="nano">auto</code>, super <code data-model-tier="super">auto</code>, ultra <code data-model-tier="ultra">auto</code>.</p></div></div>
+    <div class="astep rv"><div class="num" aria-hidden="true">📦</div><div class="body"><h3>Check out</h3><p>Clones the project's GitHub repository (or copies a bundled sample project). Fix mode needs a pinned <code>requirements.txt</code> and a pytest suite.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--bad)"><div class="num" aria-hidden="true">🛰️</div><div class="body"><h3>Scan <span class="chip chip-bad">OSV.dev</span></h3><p>Every pinned package is queried against the open-source vulnerability database for real CVEs and GHSAs.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--nano)"><div class="num" aria-hidden="true">⚡</div><div class="body"><h3>Triage <span class="chip nano">nano</span></h3><p>Decides which advisories your code actually reaches, so the plan focuses on what matters.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--tavily)"><div class="num" aria-hidden="true">🔎</div><div class="body"><h3>Research <span class="chip chip-tavily">Tavily</span></h3><p>Searches for changelogs and migration guides for each upgrade. The sources are kept as evidence.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--super)"><div class="num" aria-hidden="true">🧭</div><div class="body"><h3>Plan <span class="chip super">super</span></h3><p>Picks the safe target version for each package and flags breaking upgrades.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--super)"><div class="num" aria-hidden="true">🔒</div><div class="body"><h3>Behaviour lock <span class="chip super">super</span></h3><p>Before anything changes, Nemotron writes calls into your own functions and a fixed harness records what they return, twice, dropping anything non-deterministic. After the repair every call must return the same thing; a difference goes back to the repair model even when pytest is green. It protects repos with few or no tests.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--info)"><div class="num" aria-hidden="true">🧪</div><div class="body"><h3>Upgrade &amp; test</h3><p>Installs the new versions in an isolated venv and runs your pytest suite.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--ultra)"><div class="num" aria-hidden="true">🛠️</div><div class="body"><h3>Repair <span class="chip super">super</span> → <span class="chip ultra">ultra</span></h3><p>Failures go back to Super with the stack trace. If it keeps failing, the job escalates to Ultra, up to the configured maximum fix attempts.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--ok)"><div class="num" aria-hidden="true">🚀</div><div class="body"><h3>Pull request</h3><p>Green tests produce the diff, the cited evidence and a PR description, and a real GitHub PR if <code>GITHUB_TOKEN</code> is set. In rescue mode the fix is pushed onto the existing Dependabot PR instead.</p></div></div>
+  </div>
+
+  <section class="sec pb-40">
+    <div class="sec-head rv"><span class="kicker">FAQ</span><h2>Good questions.</h2></div>
+    <div class="faq rv">
+      <details open><summary>Does it change my code or just versions?</summary><p>Both. When an upgrade breaks an API, the agent edits the call-sites and re-runs the tests until they pass.</p></details>
+      <details><summary>What if it can't get the tests green?</summary><p>The run ends as "needs review". You still get the partial diff, the test output and the research, but no PR is opened.</p></details>
+      <details><summary>Which LLM provider does it use?</summary><p>Any OpenAI-compatible endpoint serving Nemotron: Nebius Token Factory, NVIDIA NIM or OpenRouter. An admin sets the base URL, key and models on the Settings page (stored encrypted), or with <code>NEBIUS_BASE_URL</code> and <code>NEBIUS_API_KEY</code> in <code>.env</code>.</p></details>
+      <details><summary>Is running untrusted repos safe?</summary><p>Scanning never runs repository code: it only downloads and parses manifest files, so it works for any public GitHub repo. Fix mode runs the repo's tests in a throwaway venv, and public servers can switch it off for remote repos with <code>ALLOW_REMOTE_REPOS=0</code>, leaving only the sample projects fixable.</p></details>
+      <details><summary>Which files can a scan read?</summary><p><code>requirements.txt</code>, <code>pyproject.toml</code> (PEP 621 and Poetry), <code>poetry.lock</code>, <code>uv.lock</code> and <code>Pipfile.lock</code>. Only exact pins can be looked up; unpinned dependencies are listed but not checked, and <code>-r</code> includes are not followed.</p></details>
+      <details><summary>Can I audit what the agent did?</summary><p>Yes. Every event is written to a JSONL log. Open the <a href="/projects#runs">Runs</a> page to replay any run step by step.</p></details>
+    </div>
+  </section>
+
+  <div class="final rv"><h2>Try it on your project.</h2><p>Add a repository or a manifest and see its vulnerable dependencies in seconds.</p><a class="btn-cta" href="/projects">Open projects <span aria-hidden="true">→</span></a></div>
+</div>
+</section>
 <footer class="bigfoot">
   <div><div class="logo">PATCHPILOT<small>Autonomous security upgrades</small></div><p>An agentic DevSecOps tool for software supply chain security. Find the CVE, fix the code, ship the PR.</p></div>
-  <div><h4>Product</h4><a href="/projects">Projects</a><a href="/console">Console</a><a href="/runs">Runs</a><a href="/how">How it works</a></div>
+  <div><h4>Product</h4><a href="/projects">Projects</a><a href="/console">Console</a><a href="/projects#runs">Runs</a><a href="/#how">How it works</a></div>
   <div><h4>Stack</h4><a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a><a href="https://tavily.com" target="_blank" rel="noopener">Tavily</a><a href="https://build.nvidia.com" target="_blank" rel="noopener">NVIDIA Nemotron</a></div>
-  <div><h4>Project</h4><a href="/how">FAQ</a><a href="/runs">Benchmarks</a></div>
+  <div><h4>Project</h4><a href="/#how">FAQ</a><a href="/projects#runs">Benchmarks</a></div>
   <div><h4>Try it</h4><p>Paste a public GitHub repo to add it as a project and scan its dependencies.</p><form id="tryForm"><input id="tryRepo" name="repo" placeholder="github.com/you/repo" aria-label="Repository URL" autocomplete="off"><button type="submit" aria-label="Add as project"><span aria-hidden="true">→</span></button></form></div>
   <div class="copy" data-site-foot></div>
 </footer>

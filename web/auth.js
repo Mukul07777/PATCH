@@ -2,7 +2,7 @@
 (() => {
   const form = document.getElementById("authForm"), err = document.getElementById("authErr"), btn = document.getElementById("authBtn");
   const setup = form.dataset.mode === "setup";
-  const next = () => { const n = new URLSearchParams(location.search).get("next") || "/dashboard"; return /^\/(?!\/)/.test(n) ? n : "/dashboard"; };
+  const next = () => { const n = new URLSearchParams(location.search).get("next") || "/projects"; return /^\/(?!\/)/.test(n) ? n : "/projects"; };
   const fail = (m) => { err.textContent = m; err.hidden = !m; };
   window.ppAuth.then((a) => {
     if (setup && !a.setup_needed) location.replace("/login");
