@@ -23,7 +23,18 @@ Dependency bots bump the version and stop. When the bump breaks your code, the P
 
 **3. Transitive fixes.** Most vulnerable code arrives as a dependency of a dependency. After the baseline install PatchPilot lists every package actually installed in the sandbox, checks the unpinned ones against OSV in one batch, and pins each vulnerable one to the smallest release that clears every advisory. If a pin clashes with a parent's version range it is dropped, and the direct upgrade still goes through. A project whose direct pins are clean is only called clean once its installed tree is too. With `requests==2.19.0`, PatchPilot finds `idna 2.7` and `urllib3 1.23` (14 advisories, neither in requirements.txt), pins them, and a re-scan after the fix finds 0 vulnerable transitive packages.
 
-**4. Exploit proof.** A pytest attack runs on the old pins (it succeeds), then on the patched code (it is blocked), followed by 5-8 attack variants. A fix is not called "secure" without this evidence.
+**4. Supply-chain intelligence beyond CVEs.** Every scanned project gets a Supply chain report built from PyPI metadata and OSV, with no AI involved:
+- **Known-malicious packages:** OSV `MAL-` advisories.
+- **Typosquats:** `reqeusts`, `python-requests`, `crypt0graphy` and the like. A lookalike name alone isn't flagged: the package must also be missing from PyPI, or be new with few releases. On 358 real dependencies from Flask, FastAPI, Pydantic, Black and httpx this flagged only two packages, `httpx2` and `httpcore2`, both recently published lookalikes.
+- **Package health:** pins the maintainer yanked, packages abandoned for 2+ years or marked Inactive, and packages first published under 90 days ago.
+- **License classes:** permissive, weak copyleft, strong copyleft (GPL/AGPL/SSPL) or undeclared.
+
+**5. More ways in, and more ways out.**
+- **SBOM import.** Projects can be a GitHub repo, a manifest, a lock file, or a **CycloneDX or SPDX SBOM** (`*.cdx.json`, `*.spdx.json`, `bom.json`). Non-Python components are counted and reported, never silently dropped.
+- **One-click fixed `requirements.txt`.** Every vulnerable pin moves to its least-change safe version, and each changed line says why. No AI is needed.
+- **Signed README badge.** A public SVG (`patchpilot | 3 vulnerabilities`) with an HMAC-signed URL, so nobody can enumerate other projects.
+
+**6. Exploit proof.** A pytest attack runs on the old pins (it succeeds), then on the patched code (it is blocked), followed by 5-8 attack variants. A fix is not called "secure" without this evidence.
 
 Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory** (the default provider). External data sources: OSV.dev, PyPI, FIRST EPSS, CISA KEV, deps.dev, Tavily and the GitHub API. Any other OpenAI-compatible endpoint (NVIDIA NIM, or OpenRouter as a fallback) also works.
 
