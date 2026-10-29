@@ -776,7 +776,7 @@ function confetti() {
   if (reduced) return;
   const c = $("#confetti"), ctx = c.getContext("2d");
   c.width = innerWidth; c.height = innerHeight;
-  const colors = ["#76b900", "#b4ff3a", "#4cc2ff", "#b98cff", "#ffffff", "#3ce39b"];
+  const colors = ["#047857", "#10b981", "#0369a1", "#6d28d9", "#c2410c", "#f59e0b"];
   const ps = Array.from({ length: 180 }, () => ({ x: innerWidth / 2 + (Math.random() - .5) * 200, y: innerHeight * .35,
     vx: (Math.random() - .5) * 16, vy: -Math.random() * 16 - 4, r: Math.random() * 6 + 3, c: colors[(Math.random() * colors.length) | 0], a: Math.random() * 6, va: (Math.random() - .5) * .3 }));
   let frames = 0;

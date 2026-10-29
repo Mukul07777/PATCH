@@ -114,7 +114,7 @@ window.ppReady = window.ppAuth.then((a) => {
   try { const t = localStorage.getItem("pp-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
   const themeBtn = document.getElementById("theme");
   if (themeBtn) themeBtn.addEventListener("click", () => {
-    const cur = document.documentElement.dataset.theme || "dark";
+    const cur = document.documentElement.dataset.theme || "light";
     const next = cur === "light" ? "dark" : "light";
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem("pp-theme", next); } catch {}

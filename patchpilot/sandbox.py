@@ -1,4 +1,5 @@
 """Isolated test runner: a fresh virtualenv per run, so the agent's changes are verified for real."""
+import contextlib
 import os
 import re
 import shutil
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from . import config
@@ -83,12 +85,13 @@ def _user():
     return f"{uid}:{gid}" if uid else "1000:1000"  # never root inside the container
 
 
-def docker_argv(repo, cmd, network, image=None):
+def docker_argv(repo, cmd, network, image=None, name=None):
     """`docker run` for one sandbox step. Only the work dir is mounted (rw); the root filesystem is read-only,
     /tmp is a tmpfs, the process runs as a non-root user with no extra capabilities and bounded memory, CPU
     and process count. network=False (tests, scripts) runs with --network none; only the install step has a
     network."""
-    return ["docker", "run", "--rm", "-i",
+    named = ["--name", name, "--label", "patchpilot.sandbox=1"] if name else []
+    return ["docker", "run", "--rm", "-i", *named,
             "--network", "bridge" if network else "none",
             "--memory", "2g", "--cpus", "2", "--pids-limit", "512",
             "--read-only", "--tmpfs", "/tmp:rw,exec,size=512m",
@@ -97,6 +100,18 @@ def docker_argv(repo, cmd, network, image=None):
             "-e", "PIP_CACHE_DIR=/tmp/pip-cache",
             "-v", f"{Path(repo).resolve()}:{DOCKER_WORK}:rw", "-w", DOCKER_WORK,
             image or config.sandbox_image(), *cmd]
+
+
+def docker_run(repo, cmd, network, timeout=600):
+    """Run one sandbox step in a named container. On timeout the container itself is force-removed (killing
+    the docker CLI alone would leave it running), then TimeoutExpired propagates like a local timeout."""
+    name = f"patchpilot-{uuid.uuid4().hex[:12]}"
+    try:
+        return run(docker_argv(repo, cmd, network, name=name), cwd=repo, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=30)
+        raise
 
 
 def _to_container(arg, repo):
@@ -124,8 +139,7 @@ class Sandbox:
         """Run the sandbox interpreter with args: (exit code, output)."""
         if self.mode == "docker":
             args = [_to_container(a, self.repo) for a in args]
-            return run(docker_argv(self.repo, [f"{DOCKER_VENV}/bin/python", *args], network), cwd=self.repo,
-                       timeout=timeout)
+            return docker_run(self.repo, [f"{DOCKER_VENV}/bin/python", *args], network, timeout=timeout)
         return run([venv_python(self.venv), *args], cwd=self.repo, timeout=timeout)
 
     def ensure_venv(self):
@@ -144,7 +158,7 @@ class Sandbox:
             self.log(f"Installing requirements.txt in a Docker sandbox ({config.sandbox_image()})")
             script = (f"test -x {DOCKER_VENV}/bin/python || python -m venv {DOCKER_VENV}; "
                       f"{DOCKER_VENV}/bin/python -m pip install -q -r requirements.txt pytest")
-            code, out = run(docker_argv(self.repo, ["sh", "-c", script], network=True), cwd=self.repo)
+            code, out = docker_run(self.repo, ["sh", "-c", script], network=True)
             return code == 0, out[-4000:]
         self.ensure_venv()
         self.log("Installing requirements.txt")

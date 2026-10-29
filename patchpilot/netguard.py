@@ -82,11 +82,66 @@ class _PinnedBackend(httpcore.SyncBackend):
                                    socket_options=socket_options)
 
 
+class _ResponseStream(httpx.SyncByteStream):
+    def __init__(self, resp):
+        self._resp = resp
+
+    def __iter__(self):
+        with _map_errors():
+            yield from self._resp.stream
+
+    def close(self):
+        self._resp.close()
+
+
+class _map_errors:
+    """Re-raise httpcore errors as the matching httpx errors, like httpx's own transport does."""
+    _MAP = ((httpcore.ConnectTimeout, httpx.ConnectTimeout), (httpcore.ReadTimeout, httpx.ReadTimeout),
+            (httpcore.WriteTimeout, httpx.WriteTimeout), (httpcore.PoolTimeout, httpx.PoolTimeout),
+            (httpcore.ConnectError, httpx.ConnectError), (httpcore.ReadError, httpx.ReadError),
+            (httpcore.WriteError, httpx.WriteError), (httpcore.RemoteProtocolError, httpx.RemoteProtocolError),
+            (httpcore.LocalProtocolError, httpx.LocalProtocolError), (httpcore.UnsupportedProtocol, httpx.UnsupportedProtocol),
+            (httpcore.ProtocolError, httpx.ProtocolError), (httpcore.NetworkError, httpx.NetworkError),
+            (httpcore.TimeoutException, httpx.TimeoutException))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, typ, exc, tb):
+        if exc is None or isinstance(exc, Blocked):
+            return False
+        for src, dst in self._MAP:
+            if isinstance(exc, src):
+                raise dst(str(exc)) from exc
+        return False
+
+
+class PinnedTransport(httpx.BaseTransport):
+    """An httpx transport built only from public httpx/httpcore APIs: an httpcore pool whose network backend
+    checks and pins every connection (see _PinnedBackend). No retries, no proxies."""
+
+    def __init__(self):
+        self._pool = httpcore.ConnectionPool(ssl_context=httpx.create_ssl_context(), network_backend=_PinnedBackend(),
+                                             retries=0)
+
+    def handle_request(self, request):
+        req = httpcore.Request(
+            method=request.method,
+            url=httpcore.URL(scheme=request.url.raw_scheme, host=request.url.raw_host, port=request.url.port,
+                             target=request.url.raw_path),
+            headers=request.headers.raw, content=request.stream, extensions=request.extensions)
+        with _map_errors():
+            resp = self._pool.handle_request(req)
+        return httpx.Response(status_code=resp.status, headers=resp.headers, stream=_ResponseStream(resp),
+                              extensions=resp.extensions)
+
+    def close(self):
+        self._pool.close()
+
+
 def client(timeout=15):
     """An httpx client for guarded destinations: pinned, checked connections, no redirects, no env proxies."""
-    transport = httpx.HTTPTransport(retries=0)
-    transport._pool = httpcore.ConnectionPool(ssl_context=httpx.create_ssl_context(), network_backend=_PinnedBackend())
-    return httpx.Client(transport=transport, timeout=timeout, follow_redirects=False, trust_env=False)
+    return httpx.Client(transport=PinnedTransport(), timeout=timeout, follow_redirects=False, trust_env=False)
 
 
 def smtp_class(base):

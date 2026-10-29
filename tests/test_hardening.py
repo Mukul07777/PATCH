@@ -163,7 +163,10 @@ def test_list_runs_reason_falls_back_to_last_test_summary(tmp_path, monkeypatch)
     assert got["e"]["error"] is None
 
 
-def test_event_stream_is_not_gzipped():
+def test_event_stream_is_not_gzipped(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
+    (tmp_path / "20261029-153214-job.jsonl").write_text(_jsonl({"type": "start", "repo": "x"}, {"type": "done", "ok": True}),
+                                                       encoding="utf-8")
     with TestClient(server.app, headers=AUTH) as c:
         r = c.get("/api/runs/20261029-153214-job/events?replay=0", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and "gzip" not in r.headers.get("content-encoding", "")
