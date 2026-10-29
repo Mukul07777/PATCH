@@ -2,6 +2,9 @@
 
 Format: `- [ ] **Title**: impact 1-5 · effort S/M/L · risk · acceptance test`
 
+- [ ] **Container sandbox (network off)**: impact 4 · M · Docker may not be installed on the demo machine · when Docker is available, run install+pytest in `docker run --network none` (install step with network, test step without); fall back to venv and say so in the ledger
+- [ ] **NeMo Agent Toolkit wrapper (nat mcp serve)**: impact 3 · S-M · register_function API unconfirmed · expose scan + run_one as NAT functions; 10-second 'callable from any agent' demo beat
+- [ ] **Pin Nebius model ids**: impact 3 · S · ids from a third-party list (unverified) · .env.example Nebius block with explicit MODEL_*; auto-discovery also matches 'lightning' for nano
 - [ ] **Re-run benchmark for sanitizer, sqlfmt, webhooks**: impact 5 · S · free API rate limit (429) stopped them on 2026-10-29 · run `python -m patchpilot.cli case:sanitizer case:sqlfmt case:webhooks` when quota resets, merge into batch-summary.json
 - [ ] **Stronger generated exploit proofs**: impact 4 · M · LLM-heavy · generated proofs were 'not proven' (fetcher) and 'inconclusive' (mailer); add curated proofs for urllib3 CVE-2023-45803 and Jinja2 CVE-2024-22195, and make the generator validate fail-on-old before accepting (retry with feedback)
 - [ ] **Symbol-level reachability (OSV ecosystem_specific.imports)**: impact 5 · S · OSV field may be missing for some advisories (fallback: Nano-inferred, labelled) · each advisory labelled reachable (file:line) / imported-not-called / not reachable; feeds triage, risk, ledger; Reachability tab shows it

@@ -34,3 +34,9 @@
 - done events now carry provider, models, proven (ok = tests green; proven = exploit proven closed).
 - Launched exploit curator (urllib3 + Jinja2 curated proofs, no LLM).
 - Next backend build: symbol-level reachability (starting now).
+
+## 2026-10-29 ~12:50 — research round 2 (angle: how to win the room)
+- research-2.md: winner patterns (show the fix where devs work + one hard number), NeMo Agent Toolkit fit, Nebius setup, 12-question judge Q&A, 2-minute shot list.
+- Honest weak spot: sandbox is a venv, not a security boundary. Backlog: container sandbox, NAT wrapper, pin Nebius ids. Real PR still needs owner's GITHUB_TOKEN.
+- Launched researcher round 3 (angle: real public GitHub repos for the benchmark).
+- Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video.
