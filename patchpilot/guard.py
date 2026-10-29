@@ -43,8 +43,8 @@ def guard_request(kind, code, model, inline_policy=False):
 
     inline_policy=True puts the policy text at the top of the user turn instead of relying on
     chat_template_kwargs: OpenRouter does not forward chat_template_kwargs (verified live 2026-10-29, see
-    docs/guard-eval.md), so without this the model falls back to its default taxonomy and flags every exploit
-    proof as Malware. max_tokens is 1500 because the model reasons first; at 500 the reasoning alone used the
+    docs/guard-eval.md), so without this the model falls back to its default taxonomy and flagged 2 of 3 benign exploit
+    proofs as Malware. max_tokens is 1500 because the model reasons first; at 500 the reasoning alone used the
     whole budget (finish_reason=length, empty content).
     """
     content = QUESTION.format(kind=kind, code=code[:24000])

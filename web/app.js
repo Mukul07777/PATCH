@@ -268,7 +268,7 @@ function setProviderPill(replay, name) {
     pill.classList.toggle("on", !!(replay || h.nebius));
     pill.querySelector("i").nextSibling.textContent = label;
     const sr = pill.querySelector(".sr-only");
-    if (sr) sr.textContent = replay ? " recorded run" : (h.nebius ? " connected" : " not configured");
+    if (sr) sr.textContent = replay ? "" : (h.nebius ? " connected" : " not configured");
   });
 }
 

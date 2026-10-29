@@ -33,7 +33,7 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 - **GitHub API**: opening the pull request (needs `GITHUB_TOKEN`), org scans, and cloning remote repos (only with `ALLOW_REMOTE_REPOS=1`).
 - **Sandbox**: one venv per run (`sandbox.py`), prepared with `uv` in the background. The environment is an allow-list, so no API keys or tokens reach the scanned repo's `setup.py` or `conftest.py`.
 - **Exploits**: a curated, verified library in `patchpilot/exploits/` (6 CVEs, each with a proof and mutation variants). Nemotron writes the proof when the CVE isn't in the library.
-- **Self-tests**: 44 offline tests pass for the agent itself (after the speed build, per `docs/team/LOG.md`).
+- **Self-tests**: 178 offline tests pass for the agent itself (`pytest -q`).
 
 ## Challenges (honest)
 - **Free-tier rate limits.** Our first benchmark used OpenRouter `:free` Nemotron models and ran out of daily quota after 3 of 6 cases. We re-ran all six on **Nebius Token Factory**: 6/6 green. The shipped set (five runs with live Tavily research plus the earlier sanitizer run) took 528.6 s in total, with 45,904 input / 39,321 output tokens over 23 model calls. Run ids are in the README.
