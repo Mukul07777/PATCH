@@ -120,3 +120,7 @@
 - guard.py: AST static screen (exec/network/env reads/deletes/credential paths/miner+shell payloads, requirements.txt index/URL lines) + nvidia/nemotron-3.5-content-safety custom-policy check (format from the HF model card). Applied to generated exploits, variants and every patch write; ledger claim. 85 tests pass (verified).
 - NOT yet verified against the live guard model (quota 429). Falls back to static.
 - Next backend: security guardrails (requirements guard, write allow-list, injection scanner, poisoned demo case).
+
+## 2026-10-29 ~15:55 — UI round 2 landed; team PAUSED until 03:00 (owner request)
+- UI: supply-chain trust card, OpenVEX download + counts, Guardrails card (+ "Sandbox env: API keys withheld"), per-tier SVG charts on Runs (88% of tokens below Ultra across newest 8 runs). trust/vex/guard panels verified only with injected example events.
+- Owner asked to pause until 03:00. No new agents until then. Guardrails builder and submission writer finish their current task and get pushed.
