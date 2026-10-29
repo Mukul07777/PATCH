@@ -61,8 +61,8 @@ ALLOW_LOCAL_PATHS = os.getenv("ALLOW_LOCAL_PATHS", "0") == "1"
 
 
 def provider_name(base_url=None):
-    """Human name of the OpenAI-compatible LLM host behind NEBIUS_BASE_URL."""
-    host = (base_url or NEBIUS_BASE_URL).split("//")[-1].split("/")[0]
+    """Human name of the OpenAI-compatible LLM host (Settings base URL, else NEBIUS_BASE_URL)."""
+    host = (base_url or llm_base_url()).split("//")[-1].split("/")[0]
     return {"openrouter.ai": "OpenRouter", "integrate.api.nvidia.com": "NVIDIA NIM",
             "api.groq.com": "Groq"}.get(host, "Token Factory")
 
@@ -74,3 +74,55 @@ GUARD = os.getenv("GUARD", "1") != "0"
 MODEL_GUARD = os.getenv("MODEL_GUARD", "").strip() or (
     "nvidia/nemotron-3.5-content-safety:free" if "openrouter.ai" in NEBIUS_BASE_URL else "")
 GUARD_TIMEOUT = _num("GUARD_TIMEOUT", 30.0)
+
+
+# ---------- live getters: Settings page values (SQLite) first, then the environment ----------
+# Call sites use these instead of the module constants so a settings change applies without a restart.
+def _stored(key):
+    try:
+        from . import settings
+        return settings.get(key)
+    except Exception:  # unreadable DB or key: fall back to the environment
+        return None
+
+
+def llm_api_key():
+    return _stored("llm_api_key") or NEBIUS_API_KEY
+
+
+def llm_base_url():
+    return (_stored("llm_base_url") or NEBIUS_BASE_URL).rstrip("/")
+
+
+def tavily_api_key():
+    return _stored("tavily_api_key") or TAVILY_API_KEY
+
+
+def github_token():
+    return _stored("github_token") or GITHUB_TOKEN
+
+
+def model(tier):
+    return _stored(f"model_{tier}") or MODEL_OVERRIDES.get(tier, "")
+
+
+def model_overrides():
+    return {t: model(t) for t in MODEL_OVERRIDES}
+
+
+def model_guard():
+    return _stored("model_guard") or MODEL_GUARD or (
+        "nvidia/nemotron-3.5-content-safety:free" if "openrouter.ai" in llm_base_url() else "")
+
+
+def max_fix_attempts():
+    try:
+        n = int(_stored("max_fix_attempts") or MAX_FIX_ATTEMPTS)
+    except ValueError:
+        n = MAX_FIX_ATTEMPTS
+    return min(n, 2) if DEMO else n
+
+
+def allow_remote_repos():
+    v = _stored("allow_remote_repos")
+    return ALLOW_REMOTE_REPOS if v is None else v == "1"

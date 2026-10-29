@@ -19,6 +19,8 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 6. **Proves**: a claims ledger checks each claim on its own (tests green, no tests edited, no tests lost, exploit closed, variants blocked). On top of that come a trust score, a SHA-256 certificate, an OpenVEX v0.2.0 document and a deps.dev release trust check (provenance, OpenSSF Scorecard, new transitive deps).
 7. **Ships**: a PR or `.patch` file, with the certificate in the body.
 
+Around the agent it is a small multi-user product: projects with scan history (scan-only mode needs no LLM key and never runs your code), a dashboard (open findings by severity, KEV, riskiest projects and packages, trend, mean time to remediate from new/fixed tracking between scans), per-project policy (severity threshold, ignore list with reason and expiry), local accounts with admin/member roles and API keys, an audit log, and a Settings page where admins set provider keys (encrypted at rest) and model ids without a restart.
+
 ## How we built it
 - **Pipeline**: `patchpilot/agent.py` streams every step as SSE (`server.py`) to a multipage web UI (`web/`): landing, live console with a graph, run history with replay, org scan, architecture.
 - **Model routing**:
@@ -67,7 +69,7 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 - Container sandbox. Today the venv is **not a security boundary**.
 
 ## Testing instructions
-Hosted demo: <!-- TODO(owner): hosted demo URL. --> no login or API key is needed to watch a run. Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment keeps `PATCHPILOT_TOKEN` unset (otherwise the browser cannot start runs) and `ALLOW_REMOTE_REPOS=0`. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.server:app --port 8000`. The repo ships six recorded Token Factory runs in `demo-runs/`, so a fresh clone or deployment can replay them without an API key.
+Hosted demo: <!-- TODO(owner): hosted demo URL. --> runs with `PATCHPILOT_PUBLIC_DEMO=1`, so no login is needed to browse the sample projects and dashboard or watch a recorded run; adding projects, scanning and launching runs need the judge account. <!-- TODO(owner): judge account. --> Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment sets `PATCHPILOT_PUBLIC_DEMO=1` and `PATCHPILOT_SECRET_KEY`, and keeps `ALLOW_REMOTE_REPOS=0`. A fresh install asks for an admin account on `/setup` first. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.server:app --port 8000`. The repo ships six recorded Token Factory runs in `demo-runs/`, so a fresh clone or deployment can replay them without an API key.
 
 ## Proof
 | Run id | Case | Result |

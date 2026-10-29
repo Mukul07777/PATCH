@@ -3,6 +3,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import AUTH
+
 from patchpilot import config, server, vex
 
 FINDINGS = [
@@ -68,7 +70,7 @@ def test_vex_endpoint(tmp_path, monkeypatch):
     doc = vex.build("r1", FINDINGS, PLAN, REACH, [], True)
     (tmp_path / "withvex.jsonl").write_text(json.dumps({"type": "vex", "document": doc}) + "\n", encoding="utf-8")
     (tmp_path / "novex.jsonl").write_text(json.dumps({"type": "done"}) + "\n", encoding="utf-8")
-    c = TestClient(server.app)
+    c = TestClient(server.app, headers=AUTH)
     assert c.get("/api/runs/withvex/vex").json() == doc
     assert c.get("/api/runs/novex/vex").status_code == 404
     assert c.get("/api/runs/missing/vex").status_code == 404

@@ -5,18 +5,10 @@
   const SEV = ["CRITICAL", "HIGH", "MODERATE", "LOW", "UNKNOWN"];
   const SEV_RANK = Object.fromEntries(SEV.map((s, i) => [s, i]));
   const MAX_BYTES = 200_000;
-  let health = {}, current = null, sort = { key: "severity", dir: 1 }, findings = [], poll = null;
+  let health = {}, current = null, sort = { key: "severity", dir: 1 }, findings = [], poll = null, lastScanId = null;
 
-  const api = async (url, opts = {}) => {
-    const r = await fetch(url, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
-    if (r.status === 204) return null;
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const d = body.detail;
-      throw new Error(Array.isArray(d) ? d.map((x) => (x.msg || "").replace(/^Value error, /, "")).join("; ") : d || `HTTP ${r.status}`);
-    }
-    return body;
-  };
+  const api = window.ppApi;
+  let canEdit = false;  // anonymous public-demo visitors get a read-only view
   const say = (msg, bad) => { const el = $("#status"); el.textContent = msg || ""; el.classList.toggle("bad", !!bad); };
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "–");
   const sevKey = (s) => { s = (s || "UNKNOWN").toUpperCase(); return s === "MEDIUM" ? "MODERATE" : SEV.includes(s) ? s : "UNKNOWN"; };
@@ -41,7 +33,8 @@
     try { list = await api("/api/projects"); } catch (e) {
       box.innerHTML = `<div class="empty span-all">Could not load projects: ${esc(e.message)}</div>`; return;
     }
-    $("#samplesBtn").hidden = list.some((p) => p.source_type === "sample");
+    $("#samplesBtn").hidden = !canEdit || list.some((p) => p.source_type === "sample");
+    $("#newForm").hidden = !canEdit; $("#newTitle").hidden = !canEdit;
     if (!list.length) {
       box.innerHTML = `<div class="empty span-all">No projects yet. Add your own below, or <button type="button" class="btn ghost sm" id="emptySamples">add the sample projects</button> to try PatchPilot on bundled vulnerable code.</div>`;
       $("#emptySamples").onclick = addSamples;
@@ -112,14 +105,44 @@
       ["#scanBtn", "#deleteBtn"].forEach((s) => ($(s).disabled = true)); fixState(false, "");
       return;
     }
-    ["#scanBtn", "#deleteBtn"].forEach((s) => ($(s).disabled = false));
+    ["#scanBtn", "#deleteBtn"].forEach((s) => { $(s).disabled = false; $(s).hidden = !canEdit; });
+    $("#policyForm").hidden = !canEdit;
     document.title = `${current.name} · PatchPilot`;
     $("#pjTitle").textContent = current.name;
     const src = current.source_type === "git" ? current.source + (current.ref ? ` @ ${current.ref}` : "") : current.source;
     $("#pjSrc").textContent = `${typeLabel[current.source_type] || current.source_type} · ${src}`;
     setupFix();
+    await loadPolicy();
     await loadHistory();
   }
+
+  // ---------- policy + ignore list ----------
+  async function loadPolicy() {
+    let policy;
+    try { policy = await api(`/api/projects/${current.id}/policy`); } catch (e) { $("#ignores").innerHTML = ""; return; }
+    $("#threshold").value = policy.severity_threshold; $("#autoFix").checked = policy.auto_fix;
+    const ign = policy.ignores;
+    $("#ignores").innerHTML = ign.length ? `<h3>Ignored advisories</h3><div class="tbl-wrap"><table class="bench"><caption class="sr-only">Ignored advisories</caption>
+      <thead><tr><th scope="col">Advisory</th><th scope="col">Reason</th><th scope="col">Expires</th><th scope="col">By</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>${ign.map((i) => `<tr><td><code>${esc(i.vuln_id)}</code></td><td>${esc(i.reason)}</td>
+        <td>${i.expires_at ? esc(new Date(i.expires_at * 1000).toLocaleDateString()) + (i.active ? "" : ' <span class="status na">expired</span>') : "never"}</td>
+        <td>${esc(i.created_by || "")}</td>
+        <td>${canEdit ? `<button type="button" class="btn ghost sm" data-unignore="${i.id}">Stop ignoring<span class="sr-only"> ${esc(i.vuln_id)}</span></button>` : ""}</td></tr>`).join("")}</tbody></table></div>`
+      : '<p class="muted">No advisories ignored. Use <b>Ignore</b> on a finding to accept a risk with a reason.</p>';
+    $("#ignores").querySelectorAll("[data-unignore]").forEach((b) => b.addEventListener("click", async () => {
+      try { await api(`/api/projects/${current.id}/ignores/${b.dataset.unignore}`, { method: "DELETE" }); say("No longer ignored."); await loadPolicy(); refreshScan(); }
+      catch (e) { say(e.message, true); }
+    }));
+  }
+  $("#policyForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = $("#policyErr"); err.hidden = true;
+    try {
+      await api(`/api/projects/${current.id}/policy`, { method: "PUT", body: JSON.stringify({ severity_threshold: $("#threshold").value, auto_fix: $("#autoFix").checked }) });
+      say("Policy saved."); await loadPolicy(); refreshScan();
+    } catch (x) { err.textContent = x.message; err.hidden = false; }
+  });
+  const refreshScan = () => { if (lastScanId) loadScan(lastScanId); };
 
   function fixState(on, why) {
     const a = $("#fixBtn");
@@ -155,6 +178,7 @@
   }
 
   async function loadScan(id) {
+    lastScanId = id;
     const s = await api(`/api/scans/${id}`);
     if (s.status === "error") {
       renderCounts(null);
@@ -171,7 +195,8 @@
     if (!s) { box.innerHTML = ""; return; }
     const c = s.counts || {};
     box.innerHTML = [["Critical", c.CRITICAL, "c-bad"], ["High", c.HIGH, "c-warn"], ["Moderate", c.MODERATE, ""], ["Low / unrated", (c.LOW || 0) + (c.UNKNOWN || 0), ""]]
-      .map(([k, n, cls]) => `<div class="kpi"><span>${k}</span><b class="${cls}">${n || 0}</b></div>`).join("");
+      .map(([k, n, cls]) => `<div class="kpi"><span>${k}</span><b class="${cls}">${n || 0}</b></div>`).join("")
+      + (s.suppressed ? `<p class="muted span-all">${s.suppressed} suppressed by policy (not counted).</p>` : "");
   }
 
   function advLink(f) {
@@ -194,6 +219,7 @@
     if (sum.pinned != null) notes.push(`${sum.pinned} pinned of ${sum.dependencies} dependencies in ${(sum.files || []).map(esc).join(", ")}`);
     if (sum.unpinned?.length) notes.push(`Not checked (no exact version): ${sum.unpinned.slice(0, 12).map(esc).join(", ")}${sum.unpinned.length > 12 ? "…" : ""}`);
     if (sum.errors?.length) notes.push(`Warnings: ${sum.errors.slice(0, 5).map(esc).join("; ")}`);
+    if (sum.diff) notes.push(`Since the previous scan: ${sum.diff.new} new, ${sum.diff.fixed} fixed`);
     const head = `<p class="hint">${notes.join("<br>")}<br>Scanned ${esc(when(s.finished_at))}.</p>`;
     if (!findings.length) { $("#findings").innerHTML = head + '<div class="empty">No known vulnerabilities in the pinned dependencies.</div>'; return; }
     const rows = [...findings].sort((a, b) => SORTS[sort.key](a, b) * sort.dir);
@@ -203,15 +229,40 @@
     };
     $("#findings").innerHTML = head + `<div class="pj-table" tabindex="0" role="region" aria-labelledby="findingsTitle"><table class="bench">
       <caption class="sr-only">${findings.length} findings, sorted by ${sort.key}</caption>
-      <thead><tr>${th("severity", "Severity")}${th("package", "Package")}<th scope="col">Advisory</th>${th("epss", "EPSS")}<th scope="col">KEV</th><th scope="col">Fixed in</th><th scope="col">Summary</th></tr></thead>
-      <tbody>${rows.map((f) => { const k = sevKey(f.severity); return `<tr>
-        <td><span class="sev ${k === "UNKNOWN" ? "NA" : k}">${k === "UNKNOWN" ? "UNRATED" : k}</span></td>
+      <thead><tr>${th("severity", "Severity")}${th("package", "Package")}<th scope="col">Advisory</th>${th("epss", "EPSS")}<th scope="col">KEV</th><th scope="col">Fixed in</th><th scope="col">Summary</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>${rows.map((f) => { const k = sevKey(f.severity); return `<tr class="${f.suppressed ? "suppressed" : ""}">
+        <td><span class="sev ${k === "UNKNOWN" ? "NA" : k}">${k === "UNKNOWN" ? "UNRATED" : k}</span>${f.new ? ' <span class="status ok">new</span>' : ""}${f.suppressed ? `<br><span class="status na" title="${esc(f.suppressed)}">suppressed</span><span class="sr-only"> (${esc(f.suppressed)})</span>` : ""}</td>
         <td><code>${esc(f.package)}</code> <span class="muted">${esc(f.version || "")}</span></td>
         <td class="pj-adv">${advLink(f)}</td>
         <td class="num">${f.epss != null ? (f.epss * 100).toFixed(1) + "%" : '<span class="muted">–</span>'}</td>
         <td>${f.kev ? '<span class="status bad" title="Listed in CISA Known Exploited Vulnerabilities">KEV</span>' : '<span class="muted">–</span>'}</td>
         <td>${f.fixed_in ? `<code>${esc(f.fixed_in)}</code>` : '<span class="muted">no fix</span>'}</td>
-        <td class="pj-sum">${esc(f.summary || "")}</td></tr>`; }).join("")}</tbody></table></div>`;
+        <td class="pj-sum">${esc(f.summary || "")}</td>
+        <td>${canEdit && !f.suppressed ? `<button type="button" class="btn ghost sm" data-ignore="${esc(f.vuln_id)}">Ignore<span class="sr-only"> ${esc(f.vuln_id)}</span></button>` : ""}</td></tr>`; }).join("")}</tbody></table></div>
+      <form id="ignoreForm" class="fm pj-ign" hidden novalidate aria-labelledby="ignTitle">
+        <h3 id="ignTitle">Ignore <code id="ignId"></code></h3>
+        <div class="row2">
+          <div><label for="ignReason">Reason <span class="muted">(required, kept in the audit log)</span></label><input id="ignReason" maxlength="300" autocomplete="off" placeholder="Not reachable: we never call the affected function"></div>
+          <div><label for="ignExpires">Expires <span class="muted">(optional)</span></label><input id="ignExpires" type="date"></div>
+        </div>
+        <p class="pj-err" id="ignErr" role="alert" hidden></p>
+        <div class="pj-actions"><button class="btn ghost" type="submit">Ignore advisory</button><button class="btn ghost" type="button" id="ignCancel">Cancel</button></div>
+      </form>`;
+    const form = $("#ignoreForm");
+    document.querySelectorAll("[data-ignore]").forEach((b) => b.addEventListener("click", () => {
+      form.dataset.vuln = b.dataset.ignore; $("#ignId").textContent = b.dataset.ignore; form.hidden = false; $("#ignReason").focus();
+    }));
+    $("#ignCancel").onclick = () => { form.hidden = true; };
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const reason = $("#ignReason").value.trim(), exp = $("#ignExpires").value, err = $("#ignErr");
+      if (reason.length < 3) { err.textContent = "Give a reason (at least 3 characters)."; err.hidden = false; return; }
+      const expires_at = exp ? new Date(exp + "T23:59:59").getTime() / 1000 : null;
+      try {
+        await api(`/api/projects/${current.id}/ignores`, { method: "POST", body: JSON.stringify({ vuln_id: form.dataset.vuln, reason, expires_at }) });
+        say(`Ignoring ${form.dataset.vuln}.`); await loadPolicy(); refreshScan();
+      } catch (x) { err.textContent = x.message; err.hidden = false; }
+    });
     document.querySelectorAll(".pj-sort").forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.sort; sort = { key: k, dir: sort.key === k ? -sort.dir : 1 };
       renderFindings(s); document.querySelector(`.pj-sort[data-sort="${k}"]`)?.focus();
@@ -268,5 +319,5 @@
   }
   addEventListener("popstate", route);
   $("#backLink").addEventListener("click", (e) => { e.preventDefault(); history.pushState(null, "", "/projects"); route(); });
-  window.ppHealth.then((h) => { health = h || {}; route(); });
+  Promise.all([window.ppHealth, window.ppReady]).then(([h, a]) => { health = h || {}; canEdit = !!(a && a.user); route(); });
 })();

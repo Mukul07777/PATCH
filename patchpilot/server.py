@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -13,11 +14,11 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import config, db, manifests, scanner, sources
+from . import auth, config, db, manifests, scanner, settings, sources
 from .agent import PIN, Agent
 
 
@@ -138,21 +139,79 @@ def _rate_ok(ip, now=None):
         return True
 
 
-def _check_token(request):
-    token = os.getenv("PATCHPILOT_TOKEN", "")
-    if token and request.headers.get("authorization", "") != f"Bearer {token}":
-        raise HTTPException(401, "Missing or invalid bearer token")
+# ---------- authentication ----------
+# Who is calling: a cookie session (browser), an API key (Authorization: Bearer pp_...), or the legacy
+# PATCHPILOT_TOKEN bearer, which acts as an admin. Cookie-authenticated writes must carry the custom header
+# X-Requested-With: patchpilot, which a cross-site form or image cannot send (CSRF).
+CSRF_HEADER, CSRF_VALUE = "x-requested-with", "patchpilot"
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def _public_demo():
+    """PATCHPILOT_PUBLIC_DEMO=1: anonymous visitors may read sample projects and the shipped demo-run replays."""
+    return os.getenv("PATCHPILOT_PUBLIC_DEMO", "") == "1"
+
+
+def principal(request):
+    """The authenticated caller as {id, email, name, role, via, label}, or None."""
+    if hasattr(request.state, "pp_user"):
+        return request.state.pp_user
+    user = None
+    authz = request.headers.get("authorization", "")
+    if authz.startswith("Bearer "):
+        tok = authz[7:].strip()
+        legacy = os.getenv("PATCHPILOT_TOKEN", "")
+        if legacy and secrets.compare_digest(tok.encode(), legacy.encode()):
+            user = {"id": None, "email": None, "name": "PATCHPILOT_TOKEN", "role": "admin", "via": "token",
+                    "label": "token"}
+        else:
+            hit = auth.key_user(tok)
+            if hit:
+                user, prefix = hit
+                user.update(via="apikey", label=f"{user['email']} (key {prefix}…)")
+    if user is None:
+        user = auth.session_user(request.cookies.get(auth.SESSION_COOKIE))
+        if user:
+            user.update(via="session", label=user["email"])
+    request.state.pp_user = user
+    return user
+
+
+def _need(request, role="member"):
+    """Require a signed-in caller (and admin for role="admin"); enforce the CSRF header on cookie writes."""
+    user = principal(request)
+    if user is None:
+        raise HTTPException(401, "Sign in required")
+    if (user["via"] == "session" and request.method not in SAFE_METHODS
+            and request.headers.get(CSRF_HEADER, "").lower() != CSRF_VALUE):
+        raise HTTPException(403, "Missing X-Requested-With: patchpilot header")
+    if role == "admin" and user["role"] != "admin":
+        raise HTTPException(403, "Admins only")
+    return user
+
+
+def _reader(request):
+    """Read access: a signed-in user, or None for an anonymous visitor of a public demo (callers then filter)."""
+    user = principal(request)
+    if user is None and not _public_demo():
+        raise HTTPException(401, "Sign in required")
+    return user
+
+
+def _audit(request, action, detail=None):
+    user = principal(request)
+    db.audit(user["label"] if user else "anonymous", action, {**(detail or {}), "ip": _ip(request)})
 
 
 def _ip(request):
     return request.client.host if request.client else "?"
 
 
-def _run_path(run_id):
+def _run_path(run_id, demo_only=False):
     """Recorded run file for a validated id: live RUNS_DIR first, then the shipped demo folder."""
     if not RUN_ID.fullmatch(run_id):
         return None
-    for d in (config.RUNS_DIR, config.DEMO_RUNS_DIR):
+    for d in (config.DEMO_RUNS_DIR,) if demo_only else (config.RUNS_DIR, config.DEMO_RUNS_DIR):
         p = d / f"{run_id}.jsonl"
         if p.is_file():
             return p
@@ -210,14 +269,19 @@ def _run_agent(run_id, repo, emit):
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     # model ids are the configured MODEL_* values (None = discovered from the provider catalog at run time)
-    return {"nebius": bool(config.NEBIUS_API_KEY), "provider": config.provider_name(), "tavily": bool(config.TAVILY_API_KEY),
-            "github": bool(config.GITHUB_TOKEN), "remote_repos": config.ALLOW_REMOTE_REPOS,
-            "local_paths": config.ALLOW_LOCAL_PATHS, "fix_mode": bool(config.NEBIUS_API_KEY), "scan_mode": True,
-            "models": {t: (m or None) for t, m in config.MODEL_OVERRIDES.items()}}
+    return {"nebius": bool(config.llm_api_key()), "provider": config.provider_name(), "tavily": bool(config.tavily_api_key()),
+            "github": bool(config.github_token()), "remote_repos": config.allow_remote_repos(),
+            "local_paths": config.ALLOW_LOCAL_PATHS, "fix_mode": bool(config.llm_api_key()), "scan_mode": True,
+            "models": {t: (m or None) for t, m in config.model_overrides().items()},
+            "guard_model": config.model_guard() or None, "public_demo": _public_demo()}
 
 
 @app.get("/api/stats")
-def stats():
+def stats(request: Request):
+    user = _reader(request)
+    if user is None:  # anonymous public demo: sample projects only
+        d = db.dashboard(_sample_ids())
+        return {"projects": d["projects"], "scans": None, "open_findings": d["open"]}
     return db.stats()
 
 
@@ -257,7 +321,7 @@ def org_scan(owner: str, request: Request):
     """Scan every public repo of a GitHub user/org: pinned requirements.txt -> OSV advisories."""
     if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", owner):
         raise HTTPException(400, "Invalid GitHub owner")
-    _check_token(request)
+    _need(request)
     key = owner.lower()
     with _lock:
         hit = _org_cache.get(key)
@@ -267,7 +331,7 @@ def org_scan(owner: str, request: Request):
         raise HTTPException(429, "Too many scans; try again in a minute")
     try:
         with httpx.Client(timeout=20, headers={"Accept": "application/vnd.github+json",
-                          **({"Authorization": f"Bearer {config.GITHUB_TOKEN}"} if config.GITHUB_TOKEN else {})}) as gh:
+                          **({"Authorization": f"Bearer {config.github_token()}"} if config.github_token() else {})}) as gh:
             result = _org_scan(gh, owner)
     except httpx.HTTPError:
         log.warning("GitHub request failed for %s", owner, exc_info=True)
@@ -372,9 +436,9 @@ def _fix_target(req):
 
 @app.post("/api/runs")
 def start_run(req: RunRequest, request: Request):
-    _check_token(request)
-    if not config.NEBIUS_API_KEY:
-        raise HTTPException(400, "NEBIUS_API_KEY is not configured on the server")
+    _need(request)
+    if not config.llm_api_key():
+        raise HTTPException(400, "No LLM API key is configured on the server (Settings or NEBIUS_API_KEY)")
     repo, project_id = _fix_target(req)
     with _runs_lock:
         if sum(1 for v in RUNS.values() if not v["done"]) >= MAX_ACTIVE_RUNS:
@@ -387,16 +451,17 @@ def start_run(req: RunRequest, request: Request):
     _evict()
     emit = _record(run_id)
     db.create_scan(project_id, "fix", "running", run_id)
-    db.audit(_ip(request), "run.start", {"run_id": run_id, "project_id": project_id, "repo": repo})
+    _audit(request, "run.start", {"run_id": run_id, "project_id": project_id, "repo": repo})
     emit({"type": "start", "repo": repo, "project": project_id, "t": 0})
     threading.Thread(target=_run_agent, args=(run_id, repo, emit), daemon=True).start()
     return {"id": run_id}
 
 
 @app.api_route("/api/runs", methods=["GET", "HEAD"])
-def list_runs():
+def list_runs(request: Request):
     out, seen = [], {}
-    for d in (config.RUNS_DIR, config.DEMO_RUNS_DIR):  # live runs shadow demo runs with the same id
+    dirs = (config.RUNS_DIR, config.DEMO_RUNS_DIR) if _reader(request) else (config.DEMO_RUNS_DIR,)
+    for d in dirs:  # live runs shadow demo runs with the same id
         for p in d.glob("*.jsonl"):
             if RUN_ID.fullmatch(p.stem):
                 seen.setdefault(p.stem, p)
@@ -432,16 +497,20 @@ def list_runs():
 
 
 @app.get("/api/runs/{run_id}/events")
-async def events(run_id: str, replay: float = Query(0, ge=0, le=100, allow_inf_nan=False)):
-    run = RUNS.get(run_id)
+async def events(run_id: str, request: Request, replay: float = Query(0, ge=0, le=100, allow_inf_nan=False)):
+    anonymous = _reader(request) is None
+    run = None if anonymous else RUNS.get(run_id)
     if run is None:
-        path = _run_path(run_id)
+        path = _run_path(run_id, demo_only=anonymous)
         if path is None:
             raise HTTPException(404)
         evs = _read_events(path)
-        with _runs_lock:
-            run = RUNS.setdefault(run_id, {"events": evs, "done": True})
-        _evict()
+        if anonymous:
+            run = {"events": evs, "done": True}
+        else:
+            with _runs_lock:
+                run = RUNS.setdefault(run_id, {"events": evs, "done": True})
+            _evict()
 
     async def gen():
         i, last_t, idle_since = 0, 0.0, time.monotonic()
@@ -466,10 +535,11 @@ async def events(run_id: str, replay: float = Query(0, ge=0, le=100, allow_inf_n
 
 
 @app.get("/api/runs/{run_id}/vex")
-def run_vex(run_id: str):
-    evs = RUNS.get(run_id, {}).get("events")
+def run_vex(run_id: str, request: Request):
+    anonymous = _reader(request) is None
+    evs = None if anonymous else RUNS.get(run_id, {}).get("events")
     if evs is None:
-        path = _run_path(run_id)
+        path = _run_path(run_id, demo_only=anonymous)
         if path is None:
             raise HTTPException(404, "unknown run")
         evs = _read_events(path)
@@ -481,10 +551,24 @@ def run_vex(run_id: str):
 
 # ---------- projects + scan-only mode ----------
 def _mutate(request, bucket="api"):
-    """Guard for mutating project endpoints: bearer token (if configured) then a per-IP rate limit."""
-    _check_token(request)
+    """Guard for mutating project endpoints: a signed-in member (or admin), then a per-IP rate limit."""
+    user = _need(request)
     if not _rate_ok(f"{bucket}:" + _ip(request)):
         raise HTTPException(429, "Too many requests; try again in a minute")
+    return user
+
+
+def _sample_ids():
+    return {p["id"] for p in db.list_projects() if p["source_type"] == "sample"}
+
+
+def _visible(request, pid):
+    """A project the caller may read (anonymous public-demo visitors: sample projects only), else 404."""
+    user = _reader(request)
+    p = db.get_project(pid)
+    if p is None or (user is None and p["source_type"] != "sample"):
+        raise HTTPException(404, "Unknown project")
+    return p
 
 
 def _spawn(fn, *args):
@@ -501,6 +585,7 @@ def _project_or_404(pid):
 
 @app.post("/api/projects", status_code=201)
 def create_project(req: ProjectRequest, request: Request):
+    _need(request)
     given = [k for k, v in (("git", req.git_url), ("upload", req.filename or req.content), ("path", req.path)) if v]
     if len(given) != 1:
         raise HTTPException(422, "Give exactly one source: git_url, an uploaded manifest (filename + content), or path")
@@ -528,7 +613,7 @@ def create_project(req: ProjectRequest, request: Request):
     name = req.name.strip() or default
     pid = db.create_project(name, kind, source, ref=req.ref or None if kind == "git" else None,
                             manifest=req.content if kind == "upload" else None)
-    db.audit(_ip(request), "project.create", {"id": pid, "type": kind, "source": source})
+    _audit(request, "project.create", {"id": pid, "type": kind, "source": source})
     return db.get_project(pid)
 
 
@@ -545,31 +630,32 @@ def create_samples(request: Request):
         if db.find_project("sample", d.name) is None:
             created.append(db.create_project(f"Sample: {d.name}", "sample", d.name))
     if created:
-        db.audit(_ip(request), "project.samples", {"ids": created})
+        _audit(request, "project.samples", {"ids": created})
     return {"created": created, "projects": db.list_projects()}
 
 
 @app.get("/api/projects")
-def list_projects():
-    return db.list_projects()
+def list_projects(request: Request):
+    user = _reader(request)
+    return [p for p in db.list_projects() if user or p["source_type"] == "sample"]
 
 
 @app.get("/api/projects/{pid}")
-def get_project(pid: int):
-    return _project_or_404(pid)
+def get_project(pid: int, request: Request):
+    return _visible(request, pid)
 
 
 @app.delete("/api/projects/{pid}", status_code=204)
 def delete_project(pid: int, request: Request):
-    _project_or_404(pid)
     _mutate(request)
+    _project_or_404(pid)
     db.delete_project(pid)
-    db.audit(_ip(request), "project.delete", {"id": pid})
+    _audit(request, "project.delete", {"id": pid})
 
 
 @app.get("/api/projects/{pid}/scans")
-def project_scans(pid: int):
-    _project_or_404(pid)
+def project_scans(pid: int, request: Request):
+    _visible(request, pid)
     return db.list_scans(pid)
 
 
@@ -577,27 +663,306 @@ def project_scans(pid: int):
 def start_scan(pid: int, request: Request):
     """Scan-only mode: manifests -> OSV/EPSS/KEV/PyPI. Needs no LLM key and never runs repository code,
     which is why it is allowed for remote repos even when ALLOW_REMOTE_REPOS=0."""
+    _need(request)
     _project_or_404(pid)
     running = db.active_scan(pid)
     if running:
         return {"id": running, "status": "running"}
-    _check_token(request)
     busy = sum(1 for t in threading.enumerate() if t.name.startswith("pp-scan-"))
     if busy >= MAX_ACTIVE_SCANS:
         raise HTTPException(429, "Too many scans in progress; try again shortly")
     _mutate(request, "scan")
     sid = db.create_scan(pid, "scan", "queued")
-    db.audit(_ip(request), "scan.start", {"project_id": pid, "scan_id": sid})
+    _audit(request, "scan.start", {"project_id": pid, "scan_id": sid})
     _spawn(scanner.run_scan, sid, pid)
     return {"id": sid, "status": "queued"}
 
 
 @app.get("/api/scans/{sid}")
-def get_scan(sid: int):
+def get_scan(sid: int, request: Request):
     s = db.get_scan(sid)
-    if s is None:
+    if s is None or s["project_id"] is None:
         raise HTTPException(404, "Unknown scan")
+    _visible(request, s["project_id"])
     return s
+
+
+# ---------- per-project policy ----------
+class PolicyRequest(BaseModel):
+    severity_threshold: str = Field("low", pattern="^(low|moderate|high|critical)$")
+    auto_fix: bool = False  # stored now; acted on by a later release
+
+
+class IgnoreRequest(BaseModel):
+    vuln_id: str = Field(..., min_length=3, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+    reason: str = Field(..., min_length=3, max_length=300)
+    expires_at: float | None = Field(None, gt=0)
+
+
+@app.get("/api/projects/{pid}/policy")
+def get_policy(pid: int, request: Request):
+    _visible(request, pid)
+    return db.get_policy(pid)
+
+
+@app.put("/api/projects/{pid}/policy")
+def put_policy(pid: int, req: PolicyRequest, request: Request):
+    user = _need(request)
+    _project_or_404(pid)
+    db.set_policy(pid, req.severity_threshold, req.auto_fix, user["label"])
+    _audit(request, "policy.update", {"project_id": pid, "severity_threshold": req.severity_threshold,
+                                      "auto_fix": req.auto_fix})
+    return db.get_policy(pid)
+
+
+@app.post("/api/projects/{pid}/ignores", status_code=201)
+def add_ignore(pid: int, req: IgnoreRequest, request: Request):
+    user = _need(request)
+    _project_or_404(pid)
+    if req.expires_at is not None and req.expires_at <= time.time():
+        raise HTTPException(422, "expires_at must be in the future")
+    iid = db.add_ignore(pid, req.vuln_id, req.reason.strip(), req.expires_at, user["label"])
+    _audit(request, "finding.ignore", {"project_id": pid, "ignore_id": iid, "vuln_id": req.vuln_id,
+                                       "reason": req.reason.strip(), "expires_at": req.expires_at})
+    return db.get_policy(pid)
+
+
+@app.delete("/api/projects/{pid}/ignores/{iid}")
+def delete_ignore(pid: int, iid: int, request: Request):
+    _need(request)
+    if not db.delete_ignore(pid, iid):
+        raise HTTPException(404, "Unknown ignore entry")
+    _audit(request, "finding.unignore", {"project_id": pid, "ignore_id": iid})
+    return db.get_policy(pid)
+
+
+# ---------- dashboard ----------
+@app.get("/api/dashboard")
+def dashboard(request: Request):
+    user = _reader(request)
+    return db.dashboard(None if user else _sample_ids())
+
+
+# ---------- accounts ----------
+class SetupRequest(BaseModel):
+    email: str = Field(..., max_length=200)
+    name: str = Field("", max_length=100)
+    password: str = Field(..., max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., max_length=200)
+    password: str = Field(..., max_length=200)
+
+
+class UserRequest(SetupRequest):
+    role: str = Field("member", pattern="^(admin|member)$")
+
+
+class RoleRequest(BaseModel):
+    role: str = Field(..., pattern="^(admin|member)$")
+
+
+class KeyRequest(BaseModel):
+    name: str = Field(..., max_length=80)
+    role: str = Field("member", pattern="^(admin|member)$")
+
+
+def _csrf(request):
+    """Login and setup set a cookie, so they need the same custom header as cookie writes (no login CSRF)."""
+    if request.headers.get(CSRF_HEADER, "").lower() != CSRF_VALUE:
+        raise HTTPException(403, "Missing X-Requested-With: patchpilot header")
+
+
+def _signed_in(request, uid):
+    token = auth.create_session(uid)
+    resp = JSONResponse({"user": auth.get_user(uid)})
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+    resp.set_cookie(auth.SESSION_COOKIE, token, max_age=auth.SESSION_TTL, httponly=True, samesite="lax",
+                    secure=https, path="/")
+    return resp
+
+
+@app.get("/api/auth/state")
+def auth_state(request: Request):
+    user = principal(request)
+    return {"setup_needed": auth.user_count() == 0, "public_demo": _public_demo(),
+            "user": {k: user[k] for k in ("id", "email", "name", "role", "via")} if user else None}
+
+
+@app.post("/api/auth/setup")
+def auth_setup(req: SetupRequest, request: Request):
+    _csrf(request)
+    try:
+        uid = auth.setup_admin(req.email, req.name, req.password)
+    except auth.AuthError as e:
+        raise HTTPException(409 if "already" in str(e) else 422, str(e))
+    db.audit(req.email.strip(), "auth.setup", {"user_id": uid, "ip": _ip(request)})
+    return _signed_in(request, uid)
+
+
+@app.post("/api/auth/login")
+def auth_login(req: LoginRequest, request: Request):
+    _csrf(request)
+    if not _rate_ok("login:" + _ip(request)):
+        raise HTTPException(429, "Too many sign-in attempts; try again in a minute")
+    user = auth.authenticate(req.email, req.password)
+    if user is None:
+        db.audit(req.email.strip()[:200], "auth.login_failed", {"ip": _ip(request)})
+        raise HTTPException(401, "Wrong email or password")
+    db.audit(user["email"], "auth.login", {"ip": _ip(request)})
+    return _signed_in(request, user["id"])
+
+
+@app.post("/api/auth/logout", status_code=204)
+def auth_logout(request: Request):
+    _csrf(request)
+    auth.end_session(request.cookies.get(auth.SESSION_COOKIE))
+    resp = Response(status_code=204)
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/users")
+def list_users(request: Request):
+    _need(request, "admin")
+    return auth.list_users()
+
+
+@app.post("/api/users", status_code=201)
+def create_user(req: UserRequest, request: Request):
+    _need(request, "admin")
+    try:
+        uid = auth.create_user(req.email, req.name, req.password, req.role)
+    except auth.AuthError as e:
+        raise HTTPException(422, str(e))
+    _audit(request, "user.create", {"user_id": uid, "email": req.email.strip(), "role": req.role})
+    return auth.get_user(uid)
+
+
+def _other_user(request, uid):
+    me = _need(request, "admin")
+    target = auth.get_user(uid)
+    if target is None:
+        raise HTTPException(404, "Unknown user")
+    if me["id"] == uid:
+        raise HTTPException(400, "You cannot change or delete your own account here")
+    return target
+
+
+@app.put("/api/users/{uid}/role")
+def set_user_role(uid: int, req: RoleRequest, request: Request):
+    target = _other_user(request, uid)
+    if target["role"] == "admin" and req.role != "admin" and auth.admin_count() <= 1:
+        raise HTTPException(400, "Keep at least one admin")
+    auth.set_role(uid, req.role)
+    _audit(request, "user.role", {"user_id": uid, "email": target["email"], "role": req.role})
+    return auth.get_user(uid)
+
+
+@app.delete("/api/users/{uid}", status_code=204)
+def delete_user(uid: int, request: Request):
+    target = _other_user(request, uid)
+    if target["role"] == "admin" and auth.admin_count() <= 1:
+        raise HTTPException(400, "Keep at least one admin")
+    auth.delete_user(uid)
+    _audit(request, "user.delete", {"user_id": uid, "email": target["email"]})
+
+
+@app.get("/api/keys")
+def list_keys(request: Request):
+    _need(request, "admin")
+    return auth.list_keys()
+
+
+@app.post("/api/keys", status_code=201)
+def create_key(req: KeyRequest, request: Request):
+    me = _need(request, "admin")
+    if me["id"] is None:
+        raise HTTPException(400, "Sign in as a user to create API keys (the legacy token has no account)")
+    try:
+        kid, key = auth.create_key(me["id"], req.name, req.role)
+    except auth.AuthError as e:
+        raise HTTPException(422, str(e))
+    _audit(request, "apikey.create", {"key_id": kid, "name": req.name.strip(), "role": req.role, "prefix": key[:10]})
+    return {"id": kid, "key": key, "prefix": key[:10], "name": req.name.strip(), "role": req.role}
+
+
+@app.delete("/api/keys/{kid}", status_code=204)
+def delete_key(kid: int, request: Request):
+    _need(request, "admin")
+    if not auth.delete_key(kid):
+        raise HTTPException(404, "Unknown API key")
+    _audit(request, "apikey.delete", {"key_id": kid})
+
+
+@app.get("/api/audit")
+def audit_log(request: Request, page: int = Query(1, ge=1, le=10_000), per_page: int = Query(50, ge=1, le=200)):
+    _need(request, "admin")
+    return db.audit_page(page, per_page)
+
+
+# ---------- settings ----------
+@app.get("/api/settings")
+def get_settings(request: Request):
+    _need(request, "admin")
+    return settings.public()
+
+
+@app.put("/api/settings")
+async def put_settings(request: Request):
+    me = _need(request, "admin")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(422, "Body must be a JSON object")
+    if not isinstance(body, dict):
+        raise HTTPException(422, "Body must be a JSON object")
+    try:
+        changed = settings.update(body, me["label"])
+    except settings.SettingsError as e:
+        raise HTTPException(422, str(e))
+    _audit(request, "settings.update", {"keys": changed})  # key names only, never values
+    return settings.public()
+
+
+def _probe(fn):
+    """Run a connection test; report ok or a short error, never response bodies (they may echo secrets)."""
+    try:
+        r = fn()
+    except httpx.HTTPError as e:
+        return {"ok": False, "error": f"Could not connect ({type(e).__name__})"}
+    if 200 <= r.status_code < 300:
+        return {"ok": True, "error": None}
+    return {"ok": False, "error": {401: "Rejected: invalid key (HTTP 401)", 403: "Forbidden (HTTP 403)"}.get(
+        r.status_code, f"HTTP {r.status_code}")}
+
+
+@app.post("/api/settings/test/{service}")
+def test_connection(service: str, request: Request):
+    _need(request, "admin")
+    if not _rate_ok("probe:" + _ip(request)):
+        raise HTTPException(429, "Too many tests; try again in a minute")
+    with httpx.Client(timeout=15) as http:
+        if service == "llm":
+            if not config.llm_api_key():
+                return {"ok": False, "error": "No LLM API key set"}
+            result = _probe(lambda: http.get(config.llm_base_url() + "/models",
+                                             headers={"Authorization": f"Bearer {config.llm_api_key()}"}))
+        elif service == "tavily":
+            if not config.tavily_api_key():
+                return {"ok": False, "error": "No Tavily API key set"}
+            result = _probe(lambda: http.post("https://api.tavily.com/search", json={
+                "api_key": config.tavily_api_key(), "query": "OSV", "max_results": 1}))
+        elif service == "github":
+            if not config.github_token():
+                return {"ok": False, "error": "No GitHub token set"}
+            result = _probe(lambda: http.get("https://api.github.com/user", headers={
+                "Authorization": f"Bearer {config.github_token()}", "Accept": "application/vnd.github+json"}))
+        else:
+            raise HTTPException(404, "Unknown service")
+    _audit(request, "settings.test", {"service": service, "ok": result["ok"]})
+    return result
 
 
 @app.api_route("/robots.txt", methods=["GET", "HEAD"], include_in_schema=False)
@@ -614,7 +979,7 @@ def favicon():
 app.mount("/static", CachedStatic(directory=config.ROOT / "web"), name="static")
 
 PAGES = {"": "landing", "projects": "projects", "console": "console", "app": "console", "runs": "runs", "how": "how",
-         "org": "org"}
+         "org": "org", "dashboard": "dashboard", "settings": "settings", "login": "login", "setup": "setup"}
 
 
 @app.api_route("/{page}", methods=["GET", "HEAD"])

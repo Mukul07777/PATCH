@@ -23,7 +23,7 @@
     render();
   }));
 
-  fetch("/api/runs").then((r) => r.json()).catch(() => []).then((r) => {
+  window.ppReady.then(() => fetch("/api/runs")).then((r) => r.json()).catch(() => []).then((r) => {
     r = Array.isArray(r) ? r : [];
     runs = r;
     const ok = r.filter((x) => x.ok === true).length, bad = r.filter((x) => x.ok === false).length;
@@ -35,7 +35,10 @@
   });
 
   // per-tier calls / tokens / seconds summed over the newest recorded runs (done.usage.tiers)
-  const TIERS = ["nano", "super", "ultra"];
+  // tiers come from the recorded usage itself (ordered cheapest first when known), not a fixed list
+  const ORDER = ["nano", "super", "ultra", "guard"];
+  let TIERS = [];
+  const tierCss = (t) => (ORDER.includes(t) && t !== "guard" ? `var(--${t})` : "var(--accent)");
   async function doneOf(id) {
     const txt = await fetch(`/api/runs/${encodeURIComponent(id)}/events`).then((r) => r.text()).catch(() => "");
     const lines = txt.split(/\r?\n/).filter((l) => l.startsWith("data: "));
@@ -46,29 +49,31 @@
     const max = Math.max(1, ...vals), W = 300, rowH = 30, x0 = 50, bw = 175;
     const rows = TIERS.map((t, i) => {
       const w = Math.max(vals[i] ? 2 : 0, (vals[i] / max) * bw), y = i * rowH;
-      return `<g><text x="0" y="${y + 17}">${t}</text><rect class="track" x="${x0}" y="${y + 5}" width="${bw}" height="16" rx="4"/>
-        <rect x="${x0}" y="${y + 5}" width="${w.toFixed(1)}" height="16" rx="4" data-css="fill:var(--${t})"/>
+      return `<g><text x="0" y="${y + 17}">${esc(t)}</text><rect class="track" x="${x0}" y="${y + 5}" width="${bw}" height="16" rx="4"/>
+        <rect x="${x0}" y="${y + 5}" width="${w.toFixed(1)}" height="16" rx="4" data-css="fill:${tierCss(t)}"/>
         <text class="v" x="${W}" y="${y + 17}" text-anchor="end">${fmtv(vals[i])}</text></g>`;
     }).join("");
     const label = `${title}: ` + TIERS.map((t, i) => `${t} ${fmtv(vals[i])}${unit}`).join(", ");
-    return `<figure><figcaption>${title}</figcaption><svg viewBox="0 0 ${W} ${rowH * 3}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title>${rows}</svg></figure>`;
+    return `<figure><figcaption>${title}</figcaption><svg viewBox="0 0 ${W} ${rowH * TIERS.length}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title>${rows}</svg></figure>`;
   }
-  fetch("/api/runs").then((r) => r.json()).catch(() => []).then(async (list) => {
+  window.ppReady.then(() => fetch("/api/runs")).then((r) => r.json()).catch(() => []).then(async (list) => {
     list = Array.isArray(list) ? list : [];
     const el = document.getElementById("tiers");
     const recent = list.slice(0, 8), dones = (await Promise.all(recent.map((r) => doneOf(r.id)))).filter((d) => d?.usage?.tiers);
     if (!dones.length) { el.innerHTML = '<div class="empty">No recorded usage yet.</div>'; return; }
+    const seen = [...new Set(dones.flatMap((d) => Object.keys(d.usage.tiers)))];
+    TIERS = seen.sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99) || a.localeCompare(b));
     const tot = Object.fromEntries(TIERS.map((t) => [t, { calls: 0, in: 0, out: 0, seconds: 0 }]));
     dones.forEach((d) => TIERS.forEach((t) => { const u = d.usage.tiers[t] || {}; ["calls", "in", "out", "seconds"].forEach((k) => (tot[t][k] += +u[k] || 0)); }));
     const k = (n) => n >= 10000 ? Math.round(n / 1000) + "k" : n.toLocaleString();
-    const allTok = TIERS.reduce((n, t) => n + tot[t].in + tot[t].out, 0), ultraTok = tot.ultra.in + tot.ultra.out;
+    const allTok = TIERS.reduce((n, t) => n + tot[t].in + tot[t].out, 0), top = [...TIERS].reverse().find((t) => t !== "guard") || TIERS[0], ultraTok = tot[top].in + tot[top].out;
     el.innerHTML = `<div class="tierchart">
         ${bars("Model calls", "", TIERS.map((t) => tot[t].calls), (v) => v.toLocaleString())}
         ${bars("Tokens (in + out)", " tokens", TIERS.map((t) => tot[t].in + tot[t].out), k)}
         ${bars("Latency (seconds)", "s", TIERS.map((t) => tot[t].seconds), (v) => v.toFixed(1))}
       </div>
-      <p class="muted mt-14">Why three tiers: Nano does the cheap work, Ultra only when needed.
-        Across the newest ${dones.length} run(s), <b class="c-text">${allTok ? Math.round((1 - ultraTok / allTok) * 100) : 0}%</b> of tokens ran below Ultra.</p>`;
+      <p class="muted mt-14">Why tiers: the cheap tier does the routine work, the top tier (<b class="c-text">${esc(top)}</b>) only when needed.
+        Across the newest ${dones.length} run(s), <b class="c-text">${allTok ? Math.round((1 - ultraTok / allTok) * 100) : 0}%</b> of tokens ran below ${esc(top)}.</p>`;
     window.ppCss(el);
   });
 

@@ -151,7 +151,7 @@ class Agent:
         # 6. fix loop: Super first, escalate to Ultra if it keeps failing
         attempts = 0
         self.step("fix", "running", "Repairing breaking changes")
-        while not ok and attempts < config.MAX_FIX_ATTEMPTS:
+        while not ok and attempts < config.max_fix_attempts():
             ok, summary, output = self._dep_repair(output, sandbox, ok, summary)
             if ok:
                 break
@@ -201,7 +201,7 @@ class Agent:
         report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary, exploit, ledger)
         self._emit({"type": "report", "markdown": report})
         pr = None
-        if ok and config.GITHUB_TOKEN and str(self.repo_src).startswith("https://github.com/"):
+        if ok and config.github_token() and str(self.repo_src).startswith("https://github.com/"):
             self.step("pr", "running", "Opening pull request")
             pr = open_pull_request(self.work, self.repo_src, self.run_id, plan, report)
             self.step("pr", "done", detail=pr)
@@ -243,7 +243,7 @@ class Agent:
             tri = pool.submit(triage_chain)
             res = [pool.submit(research_one, f) for f in findings]
             research = dict(r.result() for r in res)
-            if not config.TAVILY_API_KEY:
+            if not config.tavily_api_key():
                 self.log("TAVILY_API_KEY not set - skipping web research", "research")
             self.step("research", "done")
             triage = tri.result()
@@ -255,7 +255,7 @@ class Agent:
         self.work.parent.mkdir(parents=True, exist_ok=True)
         src = str(self.repo_src)
         if src.startswith("https://"):
-            if not config.ALLOW_REMOTE_REPOS:
+            if not config.allow_remote_repos():
                 raise RuntimeError("Remote repositories are disabled on this deployment (ALLOW_REMOTE_REPOS=0)")
             subprocess.run(["git", "clone", "--depth", "1", src, str(self.work)], check=True,
                            capture_output=True, text=True)

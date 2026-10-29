@@ -34,7 +34,7 @@ def _fetch_github(url, ref):
     if not m:
         raise ScanError("Only https://github.com/owner/repo URLs can be scanned")
     owner, repo = m.groups()
-    headers = {"Authorization": f"Bearer {config.GITHUB_TOKEN}"} if config.GITHUB_TOKEN else {}
+    headers = {"Authorization": f"Bearer {config.github_token()}"} if config.github_token() else {}
     out = []
     with httpx.Client(timeout=20, headers={"User-Agent": "patchpilot/0.1", **headers}, follow_redirects=True) as gh:
         for name in manifests.MANIFEST_FILES:
@@ -150,6 +150,7 @@ def run_scan(scan_id, project_id):
             raise ScanError("Project was deleted")
         findings, summary = scan_project(project)
         db.add_findings(scan_id, project_id, findings)
+        summary["diff"] = db.track_findings(scan_id, project_id, findings)  # new / fixed since the last scan
         db.update_scan(scan_id, "done", summary)
     except ScanError as e:
         db.update_scan(scan_id, "error", {"error": str(e)})

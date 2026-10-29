@@ -20,3 +20,15 @@ def _isolate_db(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "pp.db")
     yield
     db.close()
+
+
+TEST_TOKEN = "test-token"
+AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
+
+
+@pytest.fixture(autouse=True)
+def _legacy_token(monkeypatch):
+    """API tests authenticate with the legacy PATCHPILOT_TOKEN bearer (an admin), unless a test overrides it."""
+    monkeypatch.setenv("PATCHPILOT_TOKEN", TEST_TOKEN)
+    monkeypatch.delenv("PATCHPILOT_PUBLIC_DEMO", raising=False)
+    monkeypatch.delenv("PATCHPILOT_SECRET_KEY", raising=False)

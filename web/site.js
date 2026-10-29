@@ -5,6 +5,36 @@ window.ppEsc = ppEsc;
 // `label` and `url` must already be HTML-escaped.
 window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" target="_blank" rel="noopener">${label}</a>` : `${label} (${url})`;
 
+// Every API call goes through ppApi: JSON in/out, the session cookie, and the X-Requested-With header the server
+// requires on cookie-authenticated writes (CSRF). Throws Error(detail) on failure; a 401 sends you to sign in.
+window.ppLoginUrl = () => "/login?next=" + encodeURIComponent(location.pathname + location.search);
+window.ppApi = async (url, opts = {}) => {
+  const r = await fetch(url, { ...opts, credentials: "same-origin",
+    headers: { "Content-Type": "application/json", "X-Requested-With": "patchpilot", ...(opts.headers || {}) } });
+  if (r.status === 204) return null;
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (r.status === 401 && !opts.noRedirect) location.href = window.ppLoginUrl();
+    const d = body.detail;
+    const err = new Error(Array.isArray(d) ? d.map((x) => (x.msg || "").replace(/^Value error, /, "")).join("; ") : d || `HTTP ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
+  return body;
+};
+// Signed-in state: {setup_needed, public_demo, user: {id, email, name, role, via} | null}
+window.ppAuth = fetch("/api/auth/state", { credentials: "same-origin" }).then((r) => r.json()).catch(() => ({}));
+// Pages anyone may open; everything else needs a session (or PATCHPILOT_PUBLIC_DEMO=1 for read-only browsing).
+// ppReady resolves with the auth state once this page may load its data, and never while a redirect is under way.
+window.ppReady = window.ppAuth.then((a) => {
+  const path = location.pathname.replace(/\/$/, "") || "/";
+  const to = a.setup_needed && path !== "/setup" ? "/setup"
+    : !a.setup_needed && !a.user && !a.public_demo && !["/", "/how", "/login", "/setup"].includes(path) ? window.ppLoginUrl() : null;
+  if (!to) return a;
+  location.replace(to);
+  return new Promise(() => {});
+});
+
 // The CSP has no style-src 'unsafe-inline', so markup carries per-element custom properties as
 // data-css="--k:v;..." and they are applied here through the CSSOM (allowed under CSP), including for HTML injected later.
 (() => {
@@ -29,7 +59,7 @@ window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" 
 })();
 
 (() => {
-  const PAGES = [["/projects", "Projects"], ["/console", "Console"], ["/runs", "Runs"], ["/org", "Org scan"], ["/how", "How it works"]];
+  const PAGES = [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/console", "Console"], ["/runs", "Runs"], ["/org", "Org scan"], ["/how", "How it works"]];
   const path = location.pathname.replace(/\/$/, "") || "/";
   const here = path === "/app" ? "/console" : path;
 
@@ -53,6 +83,20 @@ window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" 
       <button class="icon-btn menu-btn" id="menu" type="button" aria-label="Menu" aria-controls="nav" aria-expanded="false"><span aria-hidden="true">☰</span></button>
       <button class="icon-btn" id="theme" type="button" title="Toggle theme" aria-label="Toggle theme"><span aria-hidden="true">◐</span></button>`;
     const menu = document.getElementById("menu"), nav = document.getElementById("nav");
+    window.ppAuth.then((a) => {
+      const u = a.user;
+      const link = (h, t) => `<a href="${h}" class="${h === here ? "on" : ""}"${h === here ? ' aria-current="page"' : ""}>${t}</a>`;
+      if (u && u.via === "session") {
+        nav.insertAdjacentHTML("beforeend", (u.role === "admin" ? link("/settings", "Settings") : "")
+          + `<button type="button" class="nav-btn" id="signOut" title="Signed in as ${ppEsc(u.email)}">Sign out<span class="sr-only"> ${ppEsc(u.email)}</span></button>`);
+        document.getElementById("signOut").addEventListener("click", async () => {
+          try { await window.ppApi("/api/auth/logout", { method: "POST" }); } catch {}
+          location.href = "/login";
+        });
+      } else if (!u && !a.setup_needed && !["/login", "/setup"].includes(path)) {
+        nav.insertAdjacentHTML("beforeend", link(window.ppLoginUrl(), "Sign in"));
+      }
+    });
     const setMenu = (open) => { nav.classList.toggle("open", open); menu.setAttribute("aria-expanded", String(open)); };
     menu.addEventListener("click", () => setMenu(!nav.classList.contains("open")));
     nav.addEventListener("click", (e) => { if (e.target.closest("a")) setMenu(false); });
@@ -78,6 +122,8 @@ window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" 
 
   window.ppHealth = fetch("/api/health").then((r) => r.json()).catch(() => ({}));
   window.ppHealth.then((h) => {
+    // any [data-model-tier] element shows the model id configured for that tier (Settings, else MODEL_*)
+    document.querySelectorAll("[data-model-tier]").forEach((el) => { const m = (h.models || {})[el.dataset.modelTier]; if (m) el.textContent = m; });
     const el = document.getElementById("pills");
     if (el) el.innerHTML = [[h.provider || "LLM", h.nebius], ["Tavily", h.tavily], ["GitHub PRs", h.github]]
       .map(([n, on]) => `<span class="pill ${on ? "on" : ""}"><i aria-hidden="true"></i>${ppEsc(n)}<span class="sr-only">${on ? " connected" : " not configured"}</span></span>`).join("");

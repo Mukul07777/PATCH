@@ -115,7 +115,7 @@ function phase(t) { $("#phase").textContent = t; }
 async function boot() {
   const [h, runs] = await Promise.all([
     window.ppHealth,
-    fetch("/api/runs").then((r) => r.json()).catch(() => []),
+    window.ppReady.then(() => fetch("/api/runs")).then((r) => r.json()).catch(() => []),
   ]);
   setModelNames(h && h.models);
   buildGraph();
@@ -230,9 +230,10 @@ $("#runForm").onsubmit = async (e) => {
   const repo = $("#repo").value.trim();
   const body = repo ? { repo } : target && target.project ? { project: target.project } : null;
   if (!body) return banner('Choose a project to fix first: open <a href="/projects">Projects</a> and press <b>Fix with agent</b>.', false);
-  const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) return banner(esc((await r.json().catch(() => ({}))).detail || "Could not start run"), false);
-  listen((await r.json()).id, 0);
+  let run;
+  try { run = await window.ppApi("/api/runs", { method: "POST", body: JSON.stringify(body) }); }
+  catch (x) { return banner(esc(x.message || "Could not start run"), false); }
+  listen(run.id, 0);
 };
 $("#noKeyLink").onclick = (e) => { e.preventDefault(); $("#history").focus(); };
 $("#replayBtn").onclick = () => { const id = $("#history").value; if (id) { userStarted = true; stopDemo(); listen(id, 4); } };
@@ -245,6 +246,7 @@ async function setTarget(pid) {
     box.innerHTML = 'Pick what to fix on the <a href="/projects">Projects</a> page (or add the sample projects there), then press <b>Fix with agent</b>.';
     return;
   }
+  await window.ppReady;
   const p = await fetch(`/api/projects/${pid}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
   if (!p) { box.innerHTML = 'That project no longer exists. <a href="/projects">Back to projects</a>.'; return; }
   const name = `<b>${esc(p.name)}</b> <span class="muted">${esc(p.source_type === "sample" ? "sample project" : p.source)}</span>`;

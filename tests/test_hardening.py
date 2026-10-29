@@ -4,6 +4,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import AUTH
+
 from patchpilot import config, github_pr, server
 
 
@@ -71,14 +73,14 @@ def test_list_runs_skips_malformed(tmp_path, monkeypatch):
                                             encoding="utf-8")
     (tmp_path / "junk.jsonl").write_text("not json\n[1]\n", encoding="utf-8")
     (tmp_path / "empty.jsonl").write_text("", encoding="utf-8")
-    r = TestClient(server.app).get("/api/runs")
+    r = TestClient(server.app, headers=AUTH).get("/api/runs")
     assert r.status_code == 200
     got = {x["id"]: x["ok"] for x in r.json()}
     assert got == {"good": True, "partial": None}
 
 
 def test_events_rejects_bad_run_id():
-    assert TestClient(server.app).get("/api/runs/a%20b/events").status_code == 404
+    assert TestClient(server.app, headers=AUTH).get("/api/runs/a%20b/events").status_code == 404
 
 
 def test_run_request_validation():
@@ -107,15 +109,14 @@ def no_agent(monkeypatch):
 
 def test_token_auth(no_agent, monkeypatch):
     monkeypatch.setenv("PATCHPILOT_TOKEN", "t0k")
-    c = TestClient(server.app)
+    c = TestClient(server.app, headers=AUTH)
     assert c.post("/api/runs", json={"repo": "case:x"}).status_code == 401
     assert c.post("/api/runs", json={"repo": "case:x"}, headers={"Authorization": "Bearer nope"}).status_code == 401
     assert c.post("/api/runs", json={"repo": "case:x"}, headers={"Authorization": "Bearer t0k"}).status_code == 200
 
 
 def test_rate_limit(no_agent, monkeypatch):
-    monkeypatch.delenv("PATCHPILOT_TOKEN", raising=False)
-    c = TestClient(server.app)
+    c = TestClient(server.app, headers=AUTH)
     codes = [c.post("/api/runs", json={"repo": "case:x"}).status_code for _ in range(server.RATE_LIMIT + 1)]
     assert codes[:-1] == [200] * server.RATE_LIMIT and codes[-1] == 429
 
@@ -144,7 +145,7 @@ def test_list_runs_includes_failure_reason(tmp_path, monkeypatch):
     (tmp_path / "b.jsonl").write_text(_jsonl({"type": "start", "repo": "y"}, {"type": "error", "msg": "RateLimit: 429"},
                                          {"type": "done", "ok": False}), encoding="utf-8")
     (tmp_path / "c.jsonl").write_text(_jsonl({"type": "start", "repo": "z"}, {"type": "done", "ok": True}), encoding="utf-8")
-    got = {x["id"]: x for x in TestClient(server.app).get("/api/runs").json()}
+    got = {x["id"]: x for x in TestClient(server.app, headers=AUTH).get("/api/runs").json()}
     assert got["a"]["error"] == "boom"
     assert got["b"]["error"] == "RateLimit: 429"
     assert "error" not in got["c"]
@@ -157,12 +158,12 @@ def test_list_runs_reason_falls_back_to_last_test_summary(tmp_path, monkeypatch)
                                          {"type": "test", "ok": False, "summary": "1 failed, 4 passed"},
                                          {"type": "done", "ok": False}), encoding="utf-8")
     (tmp_path / "e.jsonl").write_text(_jsonl({"type": "start", "repo": "v"}, {"type": "done", "ok": False}), encoding="utf-8")
-    got = {x["id"]: x for x in TestClient(server.app).get("/api/runs").json()}
+    got = {x["id"]: x for x in TestClient(server.app, headers=AUTH).get("/api/runs").json()}
     assert got["d"]["error"] == "Tests still failing: 1 failed, 4 passed"
     assert got["e"]["error"] is None
 
 
 def test_event_stream_is_not_gzipped():
-    with TestClient(server.app) as c:
+    with TestClient(server.app, headers=AUTH) as c:
         r = c.get("/api/runs/20261029-153214-job/events?replay=0", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and "gzip" not in r.headers.get("content-encoding", "")

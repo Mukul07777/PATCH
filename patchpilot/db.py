@@ -59,6 +59,70 @@ MIGRATIONS = [
         detail TEXT
     );
     """,
+    # 2: accounts, encrypted settings, finding lifecycle (new/fixed) and per-project policy
+    """
+    CREATE TABLE users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+        created_at REAL NOT NULL
+    );
+    CREATE TABLE sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at REAL NOT NULL,
+        expires_at REAL NOT NULL
+    );
+    CREATE TABLE api_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        prefix TEXT NOT NULL,
+        key_hash TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'member')),
+        created_at REAL NOT NULL,
+        last_used REAL
+    );
+    CREATE TABLE settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        secret INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL,
+        updated_by TEXT
+    );
+    CREATE TABLE finding_status (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        package TEXT NOT NULL,
+        vuln_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('open', 'fixed')),
+        first_seen_at REAL NOT NULL,
+        first_seen_scan INTEGER,
+        last_seen_scan INTEGER,
+        resolved_at REAL,
+        resolved_scan INTEGER,
+        UNIQUE (project_id, package, vuln_id)
+    );
+    CREATE TABLE project_policy (
+        project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        severity_threshold TEXT NOT NULL DEFAULT 'low' CHECK (severity_threshold IN ('low', 'moderate', 'high', 'critical')),
+        auto_fix INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL,
+        updated_by TEXT
+    );
+    CREATE TABLE ignores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        vuln_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        expires_at REAL,
+        created_by TEXT,
+        created_at REAL NOT NULL
+    );
+    CREATE INDEX ignores_project ON ignores(project_id)
+    """,
 ]
 
 _lock = threading.RLock()
@@ -131,12 +195,32 @@ def create_project(name, source_type, source, ref=None, manifest=None):
               (name, source_type, source, ref, manifest, time.time()))
 
 
-def _counts(scan_id):
-    out = {"CRITICAL": 0, "HIGH": 0, "MODERATE": 0, "LOW": 0, "UNKNOWN": 0}
-    for r in _q("SELECT severity, COUNT(*) AS n FROM findings WHERE scan_id = ? GROUP BY severity", (scan_id,)):
-        key = (r["severity"] or "UNKNOWN").upper()
-        key = "MODERATE" if key == "MEDIUM" else key
-        out[key if key in out else "UNKNOWN"] += r["n"]
+SEVERITIES = ("CRITICAL", "HIGH", "MODERATE", "LOW", "UNKNOWN")
+THRESHOLDS = ("low", "moderate", "high", "critical")
+_RANK = {"LOW": 0, "MODERATE": 1, "HIGH": 2, "CRITICAL": 3}
+
+
+def sev_key(s):
+    key = (s or "UNKNOWN").upper()
+    key = "MODERATE" if key == "MEDIUM" else key
+    return key if key in SEVERITIES else "UNKNOWN"
+
+
+def _empty_counts():
+    return {k: 0 for k in SEVERITIES}
+
+
+def _scan_findings(scan_id, now=None):
+    return annotate([_finding_row(f) for f in _q("SELECT * FROM findings WHERE scan_id = ? ORDER BY id", (scan_id,))],
+                    now)
+
+
+def _counts(scan_id, findings=None):
+    """Severity counts of a scan's open findings: suppressed ones (policy threshold / ignore list) are left out."""
+    out = _empty_counts()
+    for f in _scan_findings(scan_id) if findings is None else findings:
+        if not f.get("suppressed"):
+            out[sev_key(f["severity"])] += 1
     return out
 
 
@@ -230,8 +314,15 @@ def get_scan(scan_id):
     if not rows:
         return None
     s = _scan_row(rows[0])
-    s["counts"] = _counts(scan_id)
-    s["findings"] = [_finding_row(f) for f in _q("SELECT * FROM findings WHERE scan_id = ? ORDER BY id", (scan_id,))]
+    rows = _scan_findings(scan_id)
+    if rows and s["project_id"] is not None:
+        firsts = {(r["package"], r["vuln_id"]): r["first_seen_scan"] for r in _q(
+            "SELECT package, vuln_id, first_seen_scan FROM finding_status WHERE project_id = ?", (s["project_id"],))}
+        for f in rows:
+            f["new"] = firsts.get((f["package"].lower(), f["vuln_id"])) == scan_id
+    s["counts"] = _counts(scan_id, rows)
+    s["suppressed"] = sum(1 for f in rows if f.get("suppressed"))
+    s["findings"] = rows
     return s
 
 
@@ -276,10 +367,228 @@ def audit_entries(limit=100):
     return _q("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
 
 
+def audit_page(page=1, per_page=50):
+    total = _q("SELECT COUNT(*) AS n FROM audit_log")[0]["n"]
+    rows = _q("SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?", (per_page, (page - 1) * per_page))
+    for r in rows:
+        try:
+            r["detail"] = json.loads(r["detail"]) if r["detail"] else None
+        except ValueError:
+            pass
+    return {"entries": rows, "page": page, "per_page": per_page, "total": total}
+
+
 def stats():
-    """Counts for the landing page: open findings = findings in each project's latest finished scan."""
+    """Counts for the landing page: open findings = unsuppressed findings in each project's latest finished scan."""
     projects = _q("SELECT COUNT(*) AS n FROM projects")[0]["n"]
     scans = _q("SELECT COUNT(*) AS n FROM scans WHERE kind = 'scan' AND status = 'done'")[0]["n"]
-    open_ = _q("""SELECT COUNT(*) AS n FROM findings WHERE scan_id IN (
-                    SELECT MAX(id) FROM scans WHERE kind = 'scan' AND status = 'done' GROUP BY project_id)""")[0]["n"]
+    open_ = sum(sum(_counts(sid).values()) for sid in _latest_scans().values())
     return {"projects": projects, "scans": scans, "open_findings": open_}
+
+
+# ---------- settings (secret values arrive here already encrypted) ----------
+def get_setting(key):
+    rows = _q("SELECT value, secret FROM settings WHERE key = ?", (key,))
+    return rows[0] if rows else None
+
+
+def set_setting(key, value, secret, actor):
+    _x("INSERT INTO settings (key, value, secret, updated_at, updated_by) VALUES (?, ?, ?, ?, ?) "
+       "ON CONFLICT(key) DO UPDATE SET value = excluded.value, secret = excluded.secret, "
+       "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+       (key, value, 1 if secret else 0, time.time(), actor))
+
+
+def delete_setting(key):
+    _x("DELETE FROM settings WHERE key = ?", (key,))
+
+
+# ---------- finding lifecycle ----------
+def track_findings(scan_id, project_id, rows, now=None):
+    """Compare a finished scan with the project's known findings: unseen keys open, missing open keys become fixed.
+
+    A finding is keyed by (package, vuln_id), so a version bump that is still vulnerable stays the same open
+    finding. A fixed finding that reappears is reopened with a fresh first-seen time. Returns {"new", "fixed"}.
+    """
+    now = time.time() if now is None else now
+    keys = {(f["package"].lower(), f["vuln_id"]) for f in rows}
+    new = fixed = 0
+    with _lock:
+        conn = _connect()
+        conn.execute("BEGIN")
+        try:
+            known = {(r["package"], r["vuln_id"]): r for r in conn.execute(
+                "SELECT * FROM finding_status WHERE project_id = ?", (project_id,)).fetchall()}
+            for k in keys:
+                r = known.get(k)
+                if r is None:
+                    conn.execute("INSERT INTO finding_status (project_id, package, vuln_id, status, first_seen_at, "
+                                 "first_seen_scan, last_seen_scan) VALUES (?, ?, ?, 'open', ?, ?, ?)",
+                                 (project_id, k[0], k[1], now, scan_id, scan_id))
+                    new += 1
+                elif r["status"] == "fixed":
+                    conn.execute("UPDATE finding_status SET status = 'open', first_seen_at = ?, first_seen_scan = ?, "
+                                 "last_seen_scan = ?, resolved_at = NULL, resolved_scan = NULL WHERE id = ?",
+                                 (now, scan_id, scan_id, r["id"]))
+                    new += 1
+                else:
+                    conn.execute("UPDATE finding_status SET last_seen_scan = ? WHERE id = ?", (scan_id, r["id"]))
+            for k, r in known.items():
+                if k not in keys and r["status"] == "open":
+                    conn.execute("UPDATE finding_status SET status = 'fixed', resolved_at = ?, resolved_scan = ? "
+                                 "WHERE id = ?", (now, scan_id, r["id"]))
+                    fixed += 1
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    return {"new": new, "fixed": fixed}
+
+
+# ---------- policy ----------
+def get_policy(project_id):
+    rows = _q("SELECT severity_threshold, auto_fix, updated_at, updated_by FROM project_policy WHERE project_id = ?",
+              (project_id,))
+    p = rows[0] if rows else {"severity_threshold": "low", "auto_fix": 0, "updated_at": None, "updated_by": None}
+    p["auto_fix"] = bool(p["auto_fix"])
+    p["ignores"] = list_ignores(project_id)
+    return p
+
+
+def set_policy(project_id, severity_threshold, auto_fix, actor):
+    _x("INSERT INTO project_policy (project_id, severity_threshold, auto_fix, updated_at, updated_by) "
+       "VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET severity_threshold = excluded.severity_threshold, "
+       "auto_fix = excluded.auto_fix, updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+       (project_id, severity_threshold, 1 if auto_fix else 0, time.time(), actor))
+
+
+def list_ignores(project_id):
+    now = time.time()
+    rows = _q("SELECT * FROM ignores WHERE project_id = ? ORDER BY id DESC", (project_id,))
+    for r in rows:
+        r["active"] = r["expires_at"] is None or r["expires_at"] > now
+    return rows
+
+
+def add_ignore(project_id, vuln_id, reason, expires_at, actor):
+    return _x("INSERT INTO ignores (project_id, vuln_id, reason, expires_at, created_by, created_at) "
+              "VALUES (?, ?, ?, ?, ?, ?)", (project_id, vuln_id, reason, expires_at, actor, time.time()))
+
+
+def delete_ignore(project_id, ignore_id):
+    with _lock:
+        return _connect().execute("DELETE FROM ignores WHERE id = ? AND project_id = ?",
+                                  (ignore_id, project_id)).rowcount > 0
+
+
+def annotate(findings, now=None):
+    """Set f["suppressed"] to a reason string (or None) from each finding's project policy.
+
+    Suppressed = matched by an unexpired ignore entry (on the advisory id or any alias), or rated below the
+    project's severity threshold. Unrated findings are never hidden by the threshold: their severity is unknown.
+    """
+    now = time.time() if now is None else now
+    pols = {}
+    for f in findings:
+        pid = f.get("project_id")
+        if pid not in pols:
+            pol = _q("SELECT severity_threshold FROM project_policy WHERE project_id = ?", (pid,))
+            ign = {r["vuln_id"].upper(): r["reason"] for r in _q(
+                "SELECT vuln_id, reason FROM ignores WHERE project_id = ? AND (expires_at IS NULL OR expires_at > ?) "
+                "ORDER BY id DESC", (pid, now))}
+            pols[pid] = (THRESHOLDS.index(pol[0]["severity_threshold"]) if pol else 0, ign)
+        threshold, ign = pols[pid]
+        hit = next((i for i in [f["vuln_id"], *(f.get("aliases") or [])] if i.upper() in ign), None)
+        sev = sev_key(f.get("severity"))
+        if hit:
+            f["suppressed"] = f"ignored: {ign[hit.upper()]}"
+        elif sev in _RANK and _RANK[sev] < threshold:
+            f["suppressed"] = f"below {THRESHOLDS[threshold]} threshold"
+        else:
+            f["suppressed"] = None
+    return findings
+
+
+# ---------- dashboard ----------
+def _latest_scans(project_ids=None):
+    """project_id -> id of its latest finished scan-only scan."""
+    rows = _q("SELECT project_id, MAX(id) AS sid FROM scans WHERE kind = 'scan' AND status = 'done' "
+              "AND project_id IS NOT NULL GROUP BY project_id")
+    return {r["project_id"]: r["sid"] for r in rows if project_ids is None or r["project_id"] in project_ids}
+
+
+def _day(t):
+    return time.strftime("%Y-%m-%d", time.gmtime(t))
+
+
+def dashboard(project_ids=None, days=30, now=None):
+    """Everything the dashboard shows, computed from stored scans only (no network calls).
+
+    Open findings are the unsuppressed findings of each project's latest finished scan.
+    """
+    now = time.time() if now is None else now
+    projects = {p["id"]: p for p in _q("SELECT id, name FROM projects")
+                if project_ids is None or p["id"] in project_ids}
+    latest = _latest_scans(set(projects))
+    by_sev, kev, suppressed = _empty_counts(), 0, 0
+    at_risk, packages = [], {}
+    for pid, sid in latest.items():
+        counts, pkev = _empty_counts(), 0
+        for f in _scan_findings(sid, now):
+            if f["suppressed"]:
+                suppressed += 1
+                continue
+            k = sev_key(f["severity"])
+            counts[k] += 1
+            pkev += f["kev"]
+            pk = packages.setdefault(f["package"].lower(), {"package": f["package"], "findings": 0, "projects": set(),
+                                                            "kev": 0, "worst": "UNKNOWN"})
+            pk["findings"] += 1
+            pk["kev"] += f["kev"]
+            pk["projects"].add(pid)
+            if SEVERITIES.index(k) < SEVERITIES.index(pk["worst"]):
+                pk["worst"] = k
+        for k, n in counts.items():
+            by_sev[k] += n
+        kev += pkev
+        total = sum(counts.values())
+        if total:
+            score = 10 * counts["CRITICAL"] + 5 * counts["HIGH"] + 2 * counts["MODERATE"] + counts["LOW"] + 10 * pkev
+            at_risk.append({"id": pid, "name": projects[pid]["name"], "counts": counts, "total": total, "kev": pkev,
+                            "score": score})
+    at_risk.sort(key=lambda r: (-r["score"], r["name"]))
+    top = sorted(packages.values(), key=lambda p: (-p["findings"], -p["kev"], p["package"].lower()))[:10]
+    for p in top:
+        p["projects"] = len(p["projects"])
+
+    # trend: open findings per UTC day = sum over projects of their latest scan finished by the end of that day
+    scans = [s for s in _q("SELECT id, project_id, finished_at FROM scans WHERE kind = 'scan' AND status = 'done' "
+                           "AND finished_at IS NOT NULL ORDER BY finished_at") if s["project_id"] in projects]
+    trend = []
+    if scans:
+        first = max(scans[0]["finished_at"], now - (days - 1) * 86400)
+        d = first - first % 86400  # UTC midnight
+        state, i, open_of = {}, 0, {}
+        while d <= now:
+            end = d + 86400
+            while i < len(scans) and scans[i]["finished_at"] < end:
+                sid = scans[i]["id"]
+                if sid not in open_of:
+                    open_of[sid] = sum(_counts(sid).values())
+                state[scans[i]["project_id"]] = open_of[sid]
+                i += 1
+            trend.append({"day": _day(d), "open": sum(state.values())})
+            d = end
+
+    ids = tuple(projects) or (-1,)
+    marks = ",".join("?" * len(ids))
+    fixed = _q(f"SELECT first_seen_at, resolved_at FROM finding_status WHERE status = 'fixed' "
+               f"AND project_id IN ({marks})", ids)
+    week = now - 7 * 86400
+    new7 = _q(f"SELECT COUNT(*) AS n FROM finding_status WHERE first_seen_at >= ? AND project_id IN ({marks})",
+              (week, *ids))[0]["n"]
+    mttr = sum(r["resolved_at"] - r["first_seen_at"] for r in fixed) / len(fixed) if fixed else None
+    return {"projects": len(projects), "scanned": len(latest), "open": sum(by_sev.values()), "by_severity": by_sev,
+            "kev": kev, "suppressed": suppressed, "at_risk": at_risk[:10], "top_packages": top, "trend": trend,
+            "mttr_seconds": mttr, "fixed_total": len(fixed), "new_7d": new7,
+            "fixed_7d": sum(1 for r in fixed if r["resolved_at"] >= week)}

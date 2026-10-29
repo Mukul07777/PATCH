@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PatchPilot Settings</title>
+<meta name="description" content="Server settings, LLM provider keys, users, API keys and the audit log.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-glow" aria-hidden="true"></div>
+<header class="topbar"></header>
+
+<main id="main">
+<div class="page-head"><span class="kicker">Settings</span><h1>Settings</h1><p>Provider keys are stored encrypted on the server and never sent back to the browser. Changes apply to the next run without a restart.</p></div>
+
+<div class="wrap st-grid">
+  <div id="status" class="pj-status" role="status" aria-live="polite"></div>
+  <p id="denied" class="card glass" hidden>Only admins can change settings. Ask an admin of this PatchPilot server.</p>
+
+  <section class="card glass st-sec" id="secProviders" aria-labelledby="provTitle" hidden>
+    <h2 id="provTitle">Providers</h2>
+    <form id="setForm" class="fm" novalidate>
+      <label for="llm_base_url">LLM base URL <span class="muted">(OpenAI-compatible)</span></label>
+      <input id="llm_base_url" autocomplete="off" inputmode="url" placeholder="https://api.tokenfactory.nebius.com/v1">
+      <label for="llm_api_key">LLM API key</label>
+      <input id="llm_api_key" type="password" autocomplete="off" aria-describedby="llm_api_key_st"><span class="st-secret" id="llm_api_key_st"></span>
+      <div class="row2">
+        <div><label for="model_nano">Nano model</label><input id="model_nano" autocomplete="off" placeholder="auto"></div>
+        <div><label for="model_super">Super model</label><input id="model_super" autocomplete="off" placeholder="auto"></div>
+        <div><label for="model_ultra">Ultra model</label><input id="model_ultra" autocomplete="off" placeholder="auto"></div>
+        <div><label for="model_guard">Guard model</label><input id="model_guard" autocomplete="off" placeholder="none"></div>
+      </div>
+      <label for="tavily_api_key">Tavily API key</label>
+      <input id="tavily_api_key" type="password" autocomplete="off" aria-describedby="tavily_api_key_st"><span class="st-secret" id="tavily_api_key_st"></span>
+      <label for="github_token">GitHub token <span class="muted">(opens pull requests, raises API limits)</span></label>
+      <input id="github_token" type="password" autocomplete="off" aria-describedby="github_token_st"><span class="st-secret" id="github_token_st"></span>
+      <div class="row2">
+        <div><label for="max_fix_attempts">Max fix attempts <span class="muted">(1 to 10)</span></label><input id="max_fix_attempts" type="number" min="1" max="10"></div>
+        <div><span class="lbl-sp" aria-hidden="true">&nbsp;</span><label class="check"><input id="allow_remote_repos" type="checkbox"> Allow fix runs on remote repositories</label></div>
+      </div>
+      <p class="hint">Leave a key field empty to keep the stored key. Tick “clear” to remove a stored value and fall back to the server environment.</p>
+      <label class="check"><input id="clearSecrets" type="checkbox"> Clear the stored keys I left empty</label>
+      <p class="pj-err" id="setErr" role="alert" hidden></p>
+      <div class="pj-actions"><button class="btn-cta" type="submit" id="saveBtn">Save settings</button></div>
+    </form>
+    <h3>Test connection</h3>
+    <div class="st-test">
+      <button type="button" class="btn ghost sm" data-test="llm">Test LLM</button>
+      <button type="button" class="btn ghost sm" data-test="tavily">Test Tavily</button>
+      <button type="button" class="btn ghost sm" data-test="github">Test GitHub</button>
+      <span id="testOut" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="card glass st-sec" id="secUsers" aria-labelledby="usersTitle" hidden>
+    <h2 id="usersTitle">Users</h2>
+    <div id="users" class="tbl-wrap"></div>
+    <form id="userForm" class="fm" novalidate aria-labelledby="newUserTitle">
+      <h3 id="newUserTitle">Add a user</h3>
+      <div class="row2">
+        <div><label for="u_email">Email</label><input id="u_email" type="email" autocomplete="off"></div>
+        <div><label for="u_name">Name <span class="muted">(optional)</span></label><input id="u_name" autocomplete="off" maxlength="100"></div>
+        <div><label for="u_pw">Initial password <span class="muted">(10+ characters)</span></label><input id="u_pw" type="password" autocomplete="new-password"></div>
+        <div><label for="u_role">Role</label><select id="u_role"><option value="member">Member: projects, scans, fix runs</option><option value="admin">Admin: also settings, users, keys</option></select></div>
+      </div>
+      <p class="pj-err" id="userErr" role="alert" hidden></p>
+      <div class="pj-actions"><button class="btn ghost" type="submit">Add user</button></div>
+    </form>
+  </section>
+
+  <section class="card glass st-sec" id="secKeys" aria-labelledby="keysTitle" hidden>
+    <h2 id="keysTitle">API keys</h2>
+    <p class="hint">For CI and scripts: send <code>Authorization: Bearer pp_…</code>. A key is shown once, when it is created.</p>
+    <div id="keys" class="tbl-wrap"></div>
+    <form id="keyForm" class="fm" novalidate aria-labelledby="newKeyTitle">
+      <h3 id="newKeyTitle">Create a key</h3>
+      <div class="row2">
+        <div><label for="k_name">Name</label><input id="k_name" autocomplete="off" maxlength="80" placeholder="ci-pipeline"></div>
+        <div><label for="k_role">Role</label><select id="k_role"><option value="member">Member</option><option value="admin">Admin</option></select></div>
+      </div>
+      <p class="pj-err" id="keyErr" role="alert" hidden></p>
+      <div id="newKey" hidden></div>
+      <div class="pj-actions"><button class="btn ghost" type="submit">Create key</button></div>
+    </form>
+  </section>
+
+  <section class="card glass st-sec" id="secAudit" aria-labelledby="auditTitle" hidden>
+    <h2 id="auditTitle">Audit log</h2>
+    <div id="audit" class="tbl-wrap"></div>
+    <div class="pj-actions"><button type="button" class="btn ghost sm" id="auditPrev">Newer</button><span id="auditPage" class="muted"></span><button type="button" class="btn ghost sm" id="auditNext">Older</button></div>
+  </section>
+</div>
+</main>
+
+<footer class="foot" data-site-foot></footer>
+<script src="/static/site.js"></script>
+<script src="/static/settings.js"></script>
+</body>
+</html>

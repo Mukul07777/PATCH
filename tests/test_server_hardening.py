@@ -10,6 +10,8 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from conftest import AUTH
+
 from patchpilot import config, server
 
 WEB = Path(server.config.ROOT) / "web"
@@ -24,10 +26,9 @@ def _repo(name):
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.delenv("PATCHPILOT_TOKEN", raising=False)
     monkeypatch.setattr(server, "_hits", server.collections.defaultdict(server.collections.deque))
     monkeypatch.setattr(server, "_org_cache", {})
-    return TestClient(server.app)
+    return TestClient(server.app, headers=AUTH)
 
 
 # ---------- 3 / 5: headers + health ----------
@@ -107,7 +108,6 @@ def test_org_scan_auth_and_rate_limit(client, monkeypatch):
 def fake_agent(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
     monkeypatch.setattr(server, "_hits", server.collections.defaultdict(server.collections.deque))
-    monkeypatch.delenv("PATCHPILOT_TOKEN", raising=False)
     gate = threading.Event()
 
     class A:

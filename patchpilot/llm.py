@@ -25,12 +25,12 @@ class LLMError(RuntimeError):
 class Router:
     def __init__(self, emit):
         self.emit = emit
-        self.models = dict(config.MODEL_OVERRIDES)
+        self.models = config.model_overrides()
         self.last_reasoning = ""  # reasoning text of the most recent reply (for salvaging code from it)
         self.usage = {t: {"calls": 0, "in": 0, "out": 0, "seconds": 0.0} for t in TIER_HINTS}
         self._client = httpx.Client(
-            base_url=config.NEBIUS_BASE_URL,
-            headers={"Authorization": f"Bearer {config.NEBIUS_API_KEY}"},
+            base_url=config.llm_base_url(),
+            headers={"Authorization": f"Bearer {config.llm_api_key()}"},
             timeout=300,
         )
         self._lock = threading.Lock()  # usage counters are updated from worker threads
@@ -145,7 +145,7 @@ class Router:
         the caller falls back to the static screen.
         """
         from .guard import guard_request, parse_guard
-        model = config.MODEL_GUARD
+        model = config.model_guard()
         if not model:
             raise LLMError("no guard model configured (MODEL_GUARD)")
         self.emit({"type": "model_call", "tier": "guard", "model": model, "purpose": f"Guard {kind}", "status": "start"})
@@ -189,7 +189,7 @@ class Router:
 
 def reasoning_style(base_url=None):
     """How this host takes a reasoning switch: "openrouter", "nim" (vLLM chat_template_kwargs) or None."""
-    host = (base_url or config.NEBIUS_BASE_URL).split("//")[-1].split("/")[0]
+    host = (base_url or config.llm_base_url()).split("//")[-1].split("/")[0]
     if host == "openrouter.ai":
         return "openrouter"
     # Nebius Token Factory serves Nemotron via vLLM and honours chat_template_kwargs (verified 2026-10-29)

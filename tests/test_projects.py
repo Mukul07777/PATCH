@@ -7,6 +7,8 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
+from conftest import AUTH
+
 from patchpilot import config, db, scanner, server, sources
 
 OSV = "https://api.osv.dev/v1/query"
@@ -19,11 +21,10 @@ VULN = {"id": "GHSA-462w-v97r-4m45", "aliases": ["CVE-2019-10906"], "summary": "
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.delenv("PATCHPILOT_TOKEN", raising=False)
     monkeypatch.setattr(server, "_hits", server.collections.defaultdict(server.collections.deque))
     monkeypatch.setattr(server, "_spawn", lambda fn, *a: fn(*a))  # run scans inline
     monkeypatch.setattr(sources, "_kev", None)
-    return TestClient(server.app)
+    return TestClient(server.app, headers=AUTH)
 
 
 def _mock_feeds():
@@ -133,7 +134,7 @@ def test_mutations_need_token_and_are_audited(client, monkeypatch):
     assert client.delete(f"/api/projects/{pid}").status_code == 401
     assert client.post(f"/api/projects/{pid}/scan").status_code == 401
     assert client.delete(f"/api/projects/{pid}", headers=auth).status_code == 204
-    assert client.get(f"/api/projects/{pid}").status_code == 404
+    assert client.get(f"/api/projects/{pid}", headers=auth).status_code == 404
     assert [e["action"] for e in db.audit_entries()] == ["project.delete", "project.create"]
 
 

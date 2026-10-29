@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up PatchPilot</title>
+<meta name="description" content="Create the first PatchPilot admin account.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#05070a">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-glow" aria-hidden="true"></div>
+<header class="topbar"></header>
+
+<main id="main">
+<div class="page-head"><span class="kicker">First run</span></div>
+<div class="wrap">
+  <form id="authForm" class="card glass fm au-card" data-mode="setup" novalidate aria-labelledby="authTitle">
+    <h1 id="authTitle">Create the admin account</h1>
+    <p class="muted">This server has no users yet. The first account is the admin: it manages settings, users and API keys. This page stops working once it exists.</p>
+    <label for="name">Name <span class="muted">(optional)</span></label>
+    <input id="name" name="name" autocomplete="name" maxlength="100">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username" required>
+    <label for="password">Password <span class="muted">(at least 10 characters)</span></label>
+    <input id="password" name="password" type="password" autocomplete="new-password" minlength="10" required>
+    <p class="pj-err" id="authErr" role="alert" hidden></p>
+    <div class="pj-actions"><button class="btn-cta" type="submit" id="authBtn">Create admin and sign in</button></div>
+  </form>
+</div>
+</main>
+
+<footer class="foot" data-site-foot></footer>
+<script src="/static/site.js"></script>
+<script src="/static/auth.js"></script>
+</body>
+</html>

@@ -39,7 +39,7 @@ def _auth_header(token):
 
 def open_pull_request(work, repo_url, run_id, plan, body):
     owner, name = parse_repo(repo_url)
-    token = config.GITHUB_TOKEN
+    token = config.github_token()
     branch = f"patchpilot/{run_id}"
     try:
         with httpx.Client(base_url="https://api.github.com", timeout=30, headers={

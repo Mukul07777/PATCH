@@ -92,10 +92,10 @@ def pypi_json(package):
 
 
 def tavily_search(query, max_results=4):
-    if not config.TAVILY_API_KEY:
+    if not config.tavily_api_key():
         return []
     r = _http.post("https://api.tavily.com/search", json={
-        "api_key": config.TAVILY_API_KEY, "query": query, "max_results": max_results,
+        "api_key": config.tavily_api_key(), "query": query, "max_results": max_results,
         "search_depth": "advanced", "include_answer": True,
     })
     r.raise_for_status()

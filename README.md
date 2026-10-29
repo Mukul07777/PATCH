@@ -12,8 +12,8 @@ Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory
 
 ## Testing instructions for judges
 
-**Hosted demo, no credentials needed.** <!-- TODO(owner): hosted demo URL (same as "Live demo" above). -->
-1. Open `/projects`. Add a project (paste a GitHub URL, or upload or paste a `requirements.txt` such as `jinja2==2.10` / `requests==2.19.0`) and it is scanned against OSV.dev straight away, with EPSS, CISA KEV and fixed-in versions. Scanning needs no API key. **Add sample projects** adds the bundled demo cases.
+**Hosted demo.** <!-- TODO(owner): hosted demo URL (same as "Live demo" above). --> The judged deployment runs with `PATCHPILOT_PUBLIC_DEMO=1`, so the sample projects, the dashboard over them and every shipped recording can be browsed without an account. Adding projects, scanning and launching runs need a sign-in: use the judge account given in the submission form. <!-- TODO(owner): judge member account (email + password) created on the deployment's Settings page. -->
+1. Open `/dashboard` for open findings by severity, KEV count, riskiest projects and packages, the trend and mean time to remediate. Then `/projects`. Add a project (paste a GitHub URL, or upload or paste a `requirements.txt` such as `jinja2==2.10` / `requests==2.19.0`) and it is scanned against OSV.dev straight away, with EPSS, CISA KEV and fixed-in versions. Scanning needs no API key. **Add sample projects** adds the bundled demo cases.
 1. Open `/console`. If the deployment has recorded runs, one replays automatically (the "LIVE REPLAY" badge); `/console?demo=1` is a guided walkthrough of a recorded run with captions. Recorded runs shipped with the repo are labelled **Sample**.
 2. To pick a specific recording, use **Replay a recorded run** under the launch box, or open `/runs` and click **Replay** on any card. Failed runs show their failure reason on the card.
 3. To start a live fix run, open a project (e.g. the `authsvc` sample) and press **Fix with agent**, which opens `/console?project=<id>`; then click **Launch agent**. This needs `NEBIUS_API_KEY` on the server; without it the button is disabled and the page says so and points to replay.
@@ -21,7 +21,7 @@ Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory
 
 Recorded runs: new runs are written to `runs/*.jsonl` (git-ignored). The repo also ships `demo-runs/`, six recorded end-to-end runs on Nebius Token Factory plus their `batch-summary.json`, so a fresh clone or deployment can replay them immediately; the server reads both folders (a live run with the same id takes precedence).
 
-**Judged deployment settings.** Leave `PATCHPILOT_TOKEN` **unset** on the judged deployment: when it is set, `POST /api/runs` requires `Authorization: Bearer <token>`, which the browser console does not send, so judges could not launch runs. Keep `ALLOW_REMOTE_REPOS=0` (only the sample projects can be fixed; any public GitHub repo can still be scanned, because scanning only downloads and parses manifest files and never runs repository code).
+**Judged deployment settings.** Set `PATCHPILOT_PUBLIC_DEMO=1` (read-only anonymous access to sample projects and the shipped `demo-runs/` replays, nothing else), set `PATCHPILOT_SECRET_KEY`, create the admin on `/setup` right after deploying, then create a **member** account for judges on `/settings`. Keep `ALLOW_REMOTE_REPOS=0` (only the sample projects can be fixed; any public GitHub repo can still be scanned, because scanning only downloads and parses manifest files and never runs repository code).
 
 **Local run.** `cp .env.example .env`, set `NEBIUS_API_KEY` (and `TAVILY_API_KEY` for research), then `pip install -r requirements.txt` and `uvicorn patchpilot.server:app --port 8000` (or `run.bat` on Windows); see [Quickstart](#quickstart). Tests: `pytest`.
 
@@ -138,10 +138,36 @@ Then:
 
 Projects, scans, findings and an audit log of every change are stored in SQLite at `PATCHPILOT_DB` (default `runs/patchpilot.db`); each agent run's events stay in `runs/<id>.jsonl`.
 
+### First run, accounts and API keys
+
+Every page and API except `/`, `/how`, `/login`, `/setup`, `/api/health` and `/api/auth/*` needs a signed-in user.
+
+1. **First run**: with no users in the database, every page redirects to `/setup`, which creates the **admin**. `/setup` (and `POST /api/auth/setup`) refuses once any user exists.
+2. **Sign in** at `/login`. Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` behind HTTPS), valid for 7 days; only their SHA-256 is stored. Passwords are hashed with salted `hashlib.scrypt`.
+3. **Roles**: *members* create projects, scan, edit project policy and launch fix runs; *admins* also manage settings, users, API keys and read the audit log. The last admin cannot be removed or demoted.
+4. **API keys** (Settings → API keys, admins): `Authorization: Bearer pp_...`. The key is shown once; only a hash and its prefix are kept, with the last-used time. A key acts as its owner, capped at the role chosen for the key.
+5. **CSRF**: cookie-authenticated writes must send `X-Requested-With: patchpilot` (the web UI does this through `ppApi` in `web/site.js`); bearer-authenticated calls don't need it.
+6. **Legacy**: `PATCHPILOT_TOKEN`, if set, still works as an admin bearer token (`Authorization: Bearer <token>`) for scripts written before accounts existed.
+7. **Public demo**: `PATCHPILOT_PUBLIC_DEMO=1` lets anonymous visitors *read* sample projects, their scans, a dashboard limited to them, and the replays in `demo-runs/`. Nothing else is readable and nothing is writable without signing in.
+
+Every change (projects, scans, runs, policy, ignores, settings, users, keys, sign-ins) is written to the audit log with the actor (user email, `email (key pp_xxxx…)` for API keys, or `token`) and IP; admins page through it on `/settings` or `GET /api/audit?page=&per_page=`.
+
+### Settings
+
+Admins edit provider settings on `/settings`: LLM base URL and API key, the Nano/Super/Ultra/Guard model ids, Tavily key, GitHub token, max fix attempts and whether fix runs may use remote repositories. Values saved there override the environment (`.env`) and apply to the next scan or run without a restart; clearing one falls back to the environment again. **Test LLM / Tavily / GitHub** buttons call `GET /models`, a one-result search and `GET /user` from the server and report only ok or a short error.
+
+Secrets are encrypted at rest with Fernet. The key comes from `PATCHPILOT_SECRET_KEY` (a Fernet key or any passphrase); if unset, a random key is generated once into `secret.key` next to the database (`runs/secret.key` by default, owner-only permissions) and a warning is logged. Set `PATCHPILOT_SECRET_KEY` in production and keep it out of database backups. Secret values never leave the server: `GET /api/settings` returns `{set, last4, source}` for them, and the audit log records only which keys changed.
+
+### Policy, new/fixed tracking and the dashboard
+
+Each project has a **policy** (project page → Policy): a severity threshold (`low`, `moderate`, `high`, `critical`) and an **ignore list** (advisory id or any alias such as a CVE, a required reason, optional expiry, who added it). Findings below the threshold or ignored (and not expired) stay visible but marked *suppressed*, and are left out of counts and the dashboard; unrated findings are never hidden by the threshold. An `auto_fix` flag is stored for a later release. Policy changes and ignores are audit-logged.
+
+Each finished scan is compared with the project's previous findings (keyed by package + advisory): unseen ones are marked **new**, ones no longer reported become **fixed**, and a fixed one that comes back is reopened. `/dashboard` (`GET /api/dashboard`) is computed from stored scans only: open findings by severity (latest scan per project), known-exploited (KEV) count, projects at risk, top vulnerable packages across projects, open findings per day for the last 30 days (UTC), new and fixed in the last 7 days, and mean time to remediate (first seen to the first scan where it is gone).
+
 CLI / batch mode: `python -m patchpilot.cli case:authsvc ...`. Container: see `Dockerfile`.
 
-- Pages: `/` landing, `/projects` projects and scan results, `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
-- API: `/api/health` (GET/HEAD; includes configured model ids per tier, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`. Mutating project endpoints use the same `PATCHPILOT_TOKEN` bearer check and per-IP rate limit as runs.
+- Pages: `/` landing, `/dashboard` security posture, `/projects` projects and scan results, `/settings` settings, users, API keys and audit log (admins), `/login`, `/setup` (first run only), `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
+- API: `/api/health` (GET/HEAD; includes configured model ids per tier, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`, `/api/dashboard`, `/api/projects/{id}/policy` (GET, PUT), `/api/projects/{id}/ignores` (POST) and `/api/projects/{id}/ignores/{iid}` (DELETE), `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/api/auth/logout`, and for admins `/api/settings` (GET, PUT), `/api/settings/test/{llm|tavily|github}` (POST), `/api/users`, `/api/keys`, `/api/audit`. Creating projects, scans and runs also has a per-IP rate limit.
 - Sample projects come from `cases/` (pins from each `requirements.txt`):
   - `authsvc`: PyJWT 1.7.1 + requests 2.25.1
   - `fetcher`: urllib3 1.26.17
@@ -153,7 +179,8 @@ CLI / batch mode: `python -m patchpilot.cli case:authsvc ...`. Container: see `D
 ## Tests
 
 Fast, offline unit tests for the agent itself (drift radar, OSV version math, JSON parsing, exploit library,
-risk score and trust ledger). No network, no LLM calls:
+risk score and trust ledger) and for the product layer (accounts, sessions, API keys, CSRF, encrypted settings,
+policy suppression, new/fixed tracking, dashboard aggregation). No network, no LLM calls:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -211,7 +238,7 @@ MODEL_ULTRA=nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 On OpenRouter `MODEL_GUARD` defaults to `nvidia/nemotron-3.5-content-safety:free`.
 
-Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, `PATCHPILOT_TOKEN` (requires `Authorization: Bearer <token>` on `POST /api/runs` and on project changes), `ALLOW_REMOTE_REPOS=1` to let fix mode run remote GitHub repos (off by default: fixing runs the repo's test code; scanning is always allowed), `ALLOW_LOCAL_PATHS=1` for projects that point at a server directory, and `PATCHPILOT_DB` for the SQLite file.
+Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, `PATCHPILOT_SECRET_KEY` (encrypts secrets saved on the Settings page), `PATCHPILOT_PUBLIC_DEMO=1` (anonymous read-only access to samples and shipped replays), `PATCHPILOT_TOKEN` (legacy admin bearer token), `ALLOW_REMOTE_REPOS=1` to let fix mode run remote GitHub repos (off by default: fixing runs the repo's test code; scanning is always allowed), `ALLOW_LOCAL_PATHS=1` for projects that point at a server directory, and `PATCHPILOT_DB` for the SQLite file.
 
 ## Built on Nebius
 
@@ -248,7 +275,7 @@ A first round on Token Factory (`20261029-150603-job` to `20261029-151314-job`, 
 
 The `Dockerfile` supports both Nebius serverless modes. These steps describe how to deploy; they have not been carried out for this submission. <!-- TODO(owner): update if/when deployed. -->
 
-- **Serverless Endpoint (web app + API).** Build the image and push it to a registry Nebius can pull from, then create an endpoint from it exposing port `8000`. Pass `NEBIUS_API_KEY` (and optionally `TAVILY_API_KEY`, `GITHUB_TOKEN`, `PATCHPILOT_TOKEN`, `MODEL_*`, `MODEL_GUARD`) as environment variables or secrets, and keep `ALLOW_REMOTE_REPOS=0` on a public endpoint. The image's `HEALTHCHECK` polls `/api/health`, which also answers `HEAD`.
+- **Serverless Endpoint (web app + API).** Build the image and push it to a registry Nebius can pull from, then create an endpoint from it exposing port `8000`. Pass `PATCHPILOT_SECRET_KEY` and `NEBIUS_API_KEY` (and optionally `TAVILY_API_KEY`, `GITHUB_TOKEN`, `PATCHPILOT_PUBLIC_DEMO`, `MODEL_*`, `MODEL_GUARD`) as environment variables or secrets (provider keys can also be set later on `/settings`), and keep `ALLOW_REMOTE_REPOS=0` on a public endpoint. The image's `HEALTHCHECK` polls `/api/health`, which also answers `HEAD`.
 - **Serverless Job (benchmark / batch).** Run the same image with the command overridden to the CLI: `python -m patchpilot.cli <repo-or-case> https://github.com/org/repo`. Runs are recorded under `runs/`; mount or copy that directory out to keep them.
 
 ## Screenshots
