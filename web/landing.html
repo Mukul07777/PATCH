@@ -9,73 +9,77 @@
 <meta property="og:description" content="Dependency bots bump the version and the build breaks. PatchPilot rewrites your code, proves the exploit is dead, and opens the PR.">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
-<meta name="theme-color" content="#f6f5f1">
+<meta name="theme-color" content="#efede8">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/site.css">
 <link rel="stylesheet" href="/static/landing.css">
 </head>
-<body>
+<body class="lp">
+<div class="ribbon"><span>Find the CVE. Fix the code. Ship the PR.</span><span>Nemotron on Nebius Token Factory · Tavily</span></div>
 <header class="topbar"></header>
 
 <main id="main">
-<section class="lp-hero">
-  <div class="hero-in">
-    <span class="eyebrow-pill">Coding and agentic engineering · Nebius x NVIDIA</span>
-    <h1>Dependency bots bump the version and <span class="u-red">the build breaks.</span><br>PatchPilot <span class="u-green">rewrites your code</span>, proves the exploit is dead, and opens the PR.</h1>
-    <p class="lede">It finds the CVE, upgrades the pin, fixes what the upgrade broke until your own tests pass, then re-runs a real exploit against the patched code.</p>
-    <div class="cta-row">
-      <a class="btn-primary" href="/console?demo=1"><span aria-hidden="true">▶</span> Watch a recorded run</a>
-      <a class="btn-quiet" href="/projects">Add your project <span aria-hidden="true">→</span></a>
+<section class="cx-hero" aria-labelledby="heroH">
+  <p class="cx-hero-tag">The bump is easy.<br>The fix is hard.<br>We do the fix.</p>
+  <h1 id="heroH" class="wordmark" aria-label="PatchPilot: dependency bots bump the version and the build breaks. PatchPilot rewrites your code, proves the exploit is dead, and opens the PR.">
+    <span aria-hidden="true">PATCH</span><span aria-hidden="true">PILOT</span>
+  </h1>
+  <img class="emblem" src="/static/hero-shield.svg" alt="" width="400" height="520">
+  <div class="cx-hero-foot">
+    <div>
+      <p class="cx-hero-line">Dependency bots bump the version and the build breaks. PatchPilot <b>rewrites your code</b>, proves the exploit is dead, and opens the PR.</p>
+      <div class="cta-row">
+        <a class="cx-btn" href="/console?demo=1">Watch a recorded run</a>
+        <a class="cx-link" href="/projects">Add your project <span aria-hidden="true">▸</span></a>
+      </div>
     </div>
-    <p class="fine">No sign-up to watch. Scanning needs no API key.</p>
-  </div>
-  <img class="hero-vis" src="/static/hero-pipeline.svg" alt="Find the CVE, fix the code until tests pass, prove the exploit is closed" width="960" height="230">
-</section>
-
-<section class="stats" id="stats" hidden aria-label="Measured results"></section>
-
-<section class="band" aria-labelledby="stackH">
-  <div class="lp-wrap">
-    <span class="over">The stack</span>
-    <h2 id="stackH">Each model has one job.</h2>
-    <p class="sub">Three NVIDIA Nemotron tiers on Nebius Token Factory, plus Tavily for live migration research. The cheap model goes first, and a bigger one steps in only when a fix fails.</p>
-    <div class="tiers">
-      <article class="lp-tier"><span class="chip nano">Nano</span><h3>Triage</h3><p>Reads the advisories, infers which symbols are vulnerable and checks whether your code reaches them.</p><code class="ed-model" data-tier="nano">model: loading</code></article>
-      <article class="lp-tier"><span class="chip super">Super</span><h3>Plan and fix</h3><p>Picks the least-change safe version, then rewrites the call-sites the upgrade broke.</p><code class="ed-model" data-tier="super">model: loading</code></article>
-      <article class="lp-tier"><span class="chip ultra">Ultra</span><h3>Escalate</h3><p>Takes over when the first patch fails the tests. Deep stack-trace reasoning for the hard cases.</p><code class="ed-model" data-tier="ultra">model: loading</code></article>
-      <article class="lp-tier"><span class="chip tavily">Tavily</span><h3>Research</h3><p>Finds the migration guide for the exact version jump, so the fix rests on sources, not guesses.</p><code>web search API</code></article>
-    </div>
+    <p class="cx-hero-side">Nebius × NVIDIA<br>Coding &amp; agentic<br>engineering</p>
   </div>
 </section>
 
-<section class="lp-wrap how3" aria-labelledby="howH">
-  <span class="over">How it works</span>
-  <h2 id="howH">From advisory to verified PR.</h2>
-  <ol class="steps3">
-    <li><b>Add a project</b><p>Paste a GitHub URL or upload a requirements.txt, pyproject.toml or lock file.</p></li>
-    <li><b>Scan and rank</b><p>Every pin is checked on OSV.dev and ranked with EPSS and the CISA KEV list. No code is run.</p></li>
-    <li><b>Fix and prove</b><p>The agent upgrades, repairs the code until pytest is green, then re-runs the exploit. You review the PR.</p></li>
-  </ol>
-  <div class="cta-row"><a class="btn-primary" href="/console?demo=1"><span aria-hidden="true">▶</span> Watch a recorded run</a><a class="btn-quiet" href="/how">Inside the agent <span aria-hidden="true">→</span></a></div>
+<section class="band4" aria-label="What the agent does">
+  <article><img src="/static/icons/shield.svg" alt="" width="28" height="28"><div><h3>Find the CVE</h3><p>Every pin checked on OSV.dev, ranked with EPSS and CISA KEV.</p><a href="/projects">Scan a repo →</a></div></article>
+  <article><img src="/static/icons/chart.svg" alt="" width="28" height="28"><div><h3>Rewrite the code</h3><p>Nemotron fixes what the upgrade broke until your tests pass.</p><a href="/console?demo=1">Watch it work →</a></div></article>
+  <article><img src="/static/icons/replay.svg" alt="" width="28" height="28"><div><h3>Prove it closed</h3><p>A real exploit re-runs against the patched code.</p><a href="/how">See the proof →</a></div></article>
+  <article><img src="/static/icons/users.svg" alt="" width="28" height="28"><div><h3>Open the PR</h3><p>Diff, evidence and a hashed certificate for review.</p><a href="/runs">Browse runs →</a></div></article>
 </section>
 
-<section class="lp-wrap more" aria-labelledby="moreH">
-  <span class="over">Also included</span>
-  <h2 id="moreH">Built for teams, not just demos.</h2>
-  <div class="grid6">
-    <a href="/dashboard"><img src="/static/icons/chart.svg" alt="" width="24" height="24"><b>Dashboards</b><span>Open findings across every project.</span></a>
-    <a href="/settings"><img src="/static/icons/bell.svg" alt="" width="24" height="24"><b>Alerts</b><span>Notify Slack or a webhook on new CVEs.</span></a>
-    <a href="/projects"><img src="/static/icons/sarif.svg" alt="" width="24" height="24"><b>SARIF export</b><span>Findings in GitHub code scanning.</span></a>
-    <a href="/org"><img src="/static/icons/users.svg" alt="" width="24" height="24"><b>Org scan</b><span>Scan every public repo of an owner.</span></a>
-    <a href="/runs"><img src="/static/icons/replay.svg" alt="" width="24" height="24"><b>Full replay</b><span>Audit any run, event by event.</span></a>
-    <a href="/how"><img src="/static/icons/shield.svg" alt="" width="24" height="24"><b>Proof certificate</b><span>Every PR claim verified and hashed.</span></a>
+<section class="story" aria-labelledby="storyH">
+  <div class="story-in">
+    <span class="over">The story</span>
+    <h2 id="storyH">Bump.<br>Break.<br>Fix.</h2>
+    <p>A version-bump PR goes red the moment the fix needs a major upgrade, and the known vulnerability stays in production. PatchPilot finishes the job: it migrates your code, runs your tests, and re-fires the exploit to prove the hole is closed.</p>
+    <a class="cx-btn" href="/how">Inside the agent</a>
+  </div>
+  <div class="story-stats">
+    <section class="stats" id="stats" hidden aria-label="Measured results"></section>
+    <p class="stats-empty">Results appear here once recorded runs exist on this server.</p>
+  </div>
+</section>
+
+<section class="perks" aria-label="Also included">
+  <a href="/dashboard"><img src="/static/icons/chart.svg" alt="" width="26" height="26"><b>Dashboards</b><span>Findings across every project</span></a>
+  <a href="/settings"><img src="/static/icons/bell.svg" alt="" width="26" height="26"><b>Alerts</b><span>Slack, webhook, email</span></a>
+  <a href="/projects"><img src="/static/icons/sarif.svg" alt="" width="26" height="26"><b>SARIF &amp; SBOM</b><span>GitHub code scanning</span></a>
+  <a href="/org"><img src="/static/icons/users.svg" alt="" width="26" height="26"><b>Org scan</b><span>Every repo of an owner</span></a>
+  <a href="/runs"><img src="/static/icons/replay.svg" alt="" width="26" height="26"><b>Full replay</b><span>Audit any run, event by event</span></a>
+</section>
+
+<section class="tiers-sec" aria-labelledby="stackH">
+  <div class="tiers-head"><h2 id="stackH">Choose your model</h2><a href="/how">How routing works</a></div>
+  <p class="tiers-sub">Three NVIDIA Nemotron tiers on Nebius Token Factory, plus Tavily. The cheap model goes first; a bigger one steps in only when a fix fails.</p>
+  <div class="cx-tiers">
+    <article class="ed nano"><div class="ed-art"><span>N</span></div><div class="ed-body"><h3>Nano</h3><ul><li>Advisory triage</li><li>Vulnerable-symbol inference</li><li>Reachability check</li></ul><code class="ed-model" data-tier="nano">model: loading</code></div></article>
+    <article class="ed super"><div class="ed-art"><em>Does most of the work</em><span>S</span></div><div class="ed-body"><h3>Super</h3><ul><li>Least-change safe version</li><li>Rewrites broken call-sites</li><li>Writes the PR report</li></ul><code class="ed-model" data-tier="super">model: loading</code></div></article>
+    <article class="ed ultra"><div class="ed-art"><span>U</span></div><div class="ed-body"><h3>Ultra</h3><ul><li>Escalates failed patches</li><li>Deep stack-trace reasoning</li><li>The hardest migrations</li></ul><code class="ed-model" data-tier="ultra">model: loading</code></div></article>
+    <article class="ed tavily"><div class="ed-art"><span>T</span></div><div class="ed-body"><h3>Tavily</h3><ul><li>Migration guides</li><li>Changelogs for the exact jump</li><li>Cited evidence in the PR</li></ul><code>web search API</code></div></article>
   </div>
 </section>
 </main>
 
 <footer class="bigfoot">
-  <div><div class="logo">PatchPilot<small>Autonomous security upgrades</small></div><p>An agentic DevSecOps tool for software supply chain security. Find the CVE, fix the code, ship the PR.</p></div>
+  <div><div class="logo">PATCHPILOT<small>Autonomous security upgrades</small></div><p>An agentic DevSecOps tool for software supply chain security. Find the CVE, fix the code, ship the PR.</p></div>
   <div><h4>Product</h4><a href="/projects">Projects</a><a href="/console">Console</a><a href="/runs">Runs</a><a href="/how">How it works</a></div>
   <div><h4>Stack</h4><a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a><a href="https://tavily.com" target="_blank" rel="noopener">Tavily</a><a href="https://build.nvidia.com" target="_blank" rel="noopener">NVIDIA Nemotron</a></div>
   <div><h4>Project</h4><a href="/how">FAQ</a><a href="/runs">Benchmarks</a></div>
