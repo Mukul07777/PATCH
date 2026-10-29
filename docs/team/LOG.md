@@ -82,3 +82,8 @@
 - UI/UX researcher skipped this cycle (UI builder still implementing round-1 research).
 - Current score: 70/100 (round 1); round 2 pending.
 - Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video, [3] real repos, [4] speed, [5] NVIDIA depth.
+
+## 2026-10-29 ~14:25 — scorer round 2: 73/100 (+3)
+- Innovation 17 (+1), tech 17 (+2), impact 12, sponsor 9, demo/UX 9, evidence 5, docs 4. Scored HEAD f323bd7 (33 tests pass); working-tree llm.py mid-edit by speed builder.
+- Team-closable: re-run 6-case benchmark with curated proofs (+4), finish speed + replay video (+4), commit UI redesign (+2).
+- Owner-needed: Nebius run (+4-5), real repo + PR (+3).

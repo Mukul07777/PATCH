@@ -1,5 +1,32 @@
 # PatchPilot scorecard
 
+## Round 2: 73 / 100 (+3)
+
+Date: 2026-10-29 · Scorer: strict judge panel · Basis: HEAD `f323bd7`, tested from a clean `git archive` (the working tree `patchpilot/llm.py` is mid-edit by the speed builder and currently fails to import: SyntaxError at line 143, so `pytest` in the working tree errors 5/5 at collection). HEAD: **33 passed**.
+
+| Criterion | R2 | Δ | Evidence |
+|---|---|---|---|
+| Innovation (20) | **17** | +1 | New since R1: symbol-level reachability (`reach.py`, honestly labelled `llm-inferred`), deps.dev release trust check (provenance, Scorecard, new transitive deps; finding that least-change targets lack attestations), OpenVEX export (`vex.py`), curated verified proofs for all 6 CVEs (`patchpilot/exploits/`, 12 files). Held back: no *generated* exploit has yet flipped red to green (fetcher run: "not proven", variants 0/8). |
+| Technical depth & execution (20) | **17** | +2 | 33 offline unit tests pass at HEAD (R1 had none). `done` events carry provider, models, `proven`. Held back: Python/pip only; the venv sandbox is not a security boundary; the uncommitted working tree is currently broken. |
+| Real-world impact (15) | **12** | 0 | Still no real public repo run and no opened PR (`pr: null` everywhere). Shortlist exists (research-3) but is blocked on the owner. |
+| Sponsor: Nemotron + Nebius (15) | **9** | 0 | Every recorded run, including the 3 newest (`120256/120418/120442-job`), uses OpenRouter `:free` models. The Nebius ids are pinned in `.env.example` but marked "verify". Zero Nebius runs. |
+| Demo & UX (15) | **9** | 0 | Replay exists (README l.57). Still no video. Runs take 390 to 723 s. The UI redesign is uncommitted, so it is not scored. |
+| Evidence & reliability (10) | **5** | 0 | `batch-summary.json` now exists but shows 3/6: sanitizer, sqlfmt and webhooks are `ok:false` (429 at the plan step; the 3 retry runs ended `ok:false`, two with 0 LLM calls). The new curated proofs are verified standalone but not yet exercised in an agent run. Fetcher and mailer remain "not proven" and "inconclusive" in the recorded runs. n=1. |
+| Presentation / docs (5) | **4** | 0 | README has a Limitations section and an honest reachability caveat. Still no measured results table. |
+
+### Top 5 gaps (points per effort)
+**Team can close alone:**
+1. **Re-run the 6-case benchmark once quota resets, now with curated proofs.** Expect 6/6 "proven closed", then put a results table in the README. About +4 (Evidence +3, Docs +1). Low effort.
+2. **Land the speed work and commit a working tree that passes the tests**, targeting runs under 90 s, then record a 2-minute video from replay. About +4 (Demo). Medium effort.
+3. **Commit the UI redesign** with a guided `?demo=1` that shows the certificate, the VEX and the trust panel. About +2 (Demo). Medium effort.
+
+**Needs the owner:**
+4. **Nebius key: one full recorded run with `provider: nebius`** and a per-tier latency table. About +4 to +5 (Sponsor). Low effort once the key exists.
+5. **Approve a run on greyli/bluelog and provide a GITHUB_TOKEN to open one real PR on a fork.** About +3 (Impact +2, Innovation +1). Medium effort.
+
+---
+
+## Round 1
 Date: 2026-10-29 · Scorer: strict judge panel · Basis: repo at `65bd4ce` plus untracked runs `runs/20261029-113639/114842/115625-job.jsonl` and `runs/bench.log`.
 
 ## Total: 70 / 100
