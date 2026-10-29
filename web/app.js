@@ -9,7 +9,7 @@ const shortModel = (id) => String(id || "").split("/").pop().replace(/:free$/, "
 const STEPS = [
   ["models", () => "Connect · LLM provider"], ["checkout", () => "Check out repo"], ["scan", () => "Scan · OSV.dev"],
   ["triage", () => `Triage · ${modelNames.nano}`], ["research", () => "Research via Tavily"], ["plan", () => `Plan · ${modelNames.super}`],
-  ["exploit", () => "Exploit proof"], ["redteam", () => "Red-team variants"], ["test", () => "Upgrade & test"],
+  ["exploit", () => "Exploit proof"], ["redteam", () => "Red-team variants"], ["lock", () => "Behaviour lock"], ["test", () => "Upgrade & test"],
   ["fix", () => `Repair · ${modelNames.super} → ${modelNames.ultra}`], ["pr", () => "Pull request"],
 ];
 const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
@@ -203,7 +203,7 @@ if ($("#demoBtn")) $("#demoBtn").onclick = (e) => {
 };
 
 function reset() {
-  state = { runId: null, trust: null, vex: null, guard: [], threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
+  state = { runId: null, trust: null, vex: null, guard: [], threat: null, drift: null, exploit: null, risk: null, redteam: null, behaviour: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
   renderTierbar(); $("#runSummary").hidden = true; $("#runSummary").innerHTML = "";
   $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${esc(t())}<small></small></div></li>`).join("");
@@ -357,6 +357,7 @@ function handle(ev) {
     case "vex": state.vex = ev.document; { const n = vexCounts(ev.document); term("dim", `openvex › ${n.fixed} fixed · ${n.affected} affected · ${n.not_affected} not_affected`, ev.t); }
       if (state.ledger) renderLedger(); break;
     case "redteam": onRedteam(ev); break;
+    case "behaviour": onBehaviour(ev); break;
     case "threat": onThreat(ev); break;
     case "drift": onDrift(ev); break;
     case "deps": term("dim", `deps › added ${(ev.added || []).map(d => `${d.package}==${d.version}`).join(", ")}`, ev.t); break;
@@ -438,10 +439,11 @@ function renderSummary(ev) {
   const files = new Set((state.diff.match(/^\+\+\+ b\/.+$/gm) || []).map((l) => l.slice(6)));
   const calls = TIERS.map((t) => `<span class="chip ${t}">${t} ${state.usage[t].calls}</span>`).join(" ") + ` <span class="chip tavily">tavily ${state.research.length}</span>`;
   const cell = (k, v) => `<div><small>${k}</small><b>${v}</b></div>`;
-  el.innerHTML = `<h2>${ev.ok ? "Run summary: fixed and verified" : "Run summary: needs review"}</h2><div class="sum-grid">`
+  el.innerHTML = `<h2>${ev.ok ? (ev.rescue ? "Rescued: the dependency PR is green" : "Run summary: fixed and verified") : "Run summary: needs review"}</h2><div class="sum-grid">`
     + cell("CVEs fixed", ev.ok ? `${state.total} of ${state.total}` : `0 of ${state.total}`)
     + cell("Tests before → after", first && last ? `${esc(tests(first))} → ${esc(tests(last))}` : "–")
     + cell("Exploit before → after", x.title ? `${x.vulnerable ? "Exploited" : "Not reproduced"} → ${x.after ? (x.closed ? "Blocked" : "Still open") : "not run"}` : "No exploit proof")
+    + cell("Behaviour lock", state.behaviour && state.behaviour.rows ? `${state.behaviour.preserved}/${state.behaviour.rows.length} identical` : "not recorded")
     + cell("Files changed", files.size ? `${files.size}` : "–")
     + `</div><p class="sum-calls">Model calls by tier ${calls}</p>`;
   el.hidden = false;
@@ -596,6 +598,30 @@ function onRedteam(ev) {
     term(ev.open ? "bad" : "ok", `redteam › after fix: ${ev.rows.length - ev.open}/${ev.rows.length} blocked${ev.open ? `, ${ev.open} STILL OPEN` : ""}`, ev.t);
   }
   renderProof();
+}
+
+function onBehaviour(ev) {
+  if (ev.stage === "before") {
+    state.behaviour = { ...ev };
+    term("sys", `lock › recorded ${Object.keys(ev.cases).length} behaviours of your code on the vulnerable pins${ev.unstable.length ? ` (${ev.unstable.length} unstable dropped)` : ""}`, ev.t);
+  } else {
+    Object.assign(state.behaviour || (state.behaviour = {}), ev);
+    term(ev.changed ? "bad" : "ok", `lock › after fix: ${ev.preserved}/${ev.rows.length} behaviours identical${ev.changed ? `, ${ev.changed} CHANGED` : ""}`, ev.t);
+  }
+  renderBehaviour();
+}
+
+function renderBehaviour() {
+  const b = state.behaviour;
+  if (!b) return;
+  const show = (v) => esc(JSON.stringify(v && "raises" in v ? { raises: v.raises } : v && v.value !== undefined ? v.value : v).slice(0, 160));
+  const rows = b.rows || Object.entries(b.cases).map(([c, v]) => ({ case: c, status: "locked", before: v }));
+  const cls = (s) => (s === "preserved" ? "ok" : s === "locked" ? "na" : "bad");
+  $("#tab-behaviour").innerHTML = `<div class="card glass pf"><div class="pf-head"><span class="chip super">behaviour lock</span>
+    <b>${b.rows ? `${b.preserved}/${rows.length} identical after the fix` : `${rows.length} behaviours recorded on the vulnerable pins`}</b></div>
+    <p class="hint">Tests only check what someone thought to assert. Before the upgrade PatchPilot calls your own functions with realistic inputs and records what they return (twice, keeping only stable results). After the repair every call must return exactly the same thing; any change is sent back to the repair model, even when pytest is green.</p>
+    <div class="rt">${rows.map((x) => `<div class="rt-row ${cls(x.status)}"><code>${esc(x.case)}</code><span>${x.status === "changed" ? `${show(x.before)} → ${show(x.after)}` : `${show(x.before)} · ${esc(x.status)}`}</span></div>`).join("")}</div>
+    ${b.unstable && b.unstable.length ? `<p class="hint">Dropped as non-deterministic: ${b.unstable.map(esc).join(", ")}</p>` : ""}</div>`;
 }
 
 function renderRedteam() {

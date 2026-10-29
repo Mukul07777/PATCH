@@ -62,6 +62,7 @@ _org_cache = {}  # owner.lower() -> (monotonic time, result)
 RUN_ID = re.compile(r"[\w.-]+")
 REPO = re.compile(r"https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}?(?:\.git)?/?")
 CASE = re.compile(r"case:[\w.-]{1,64}")
+PULL = re.compile(r"https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}/pull/\d{1,7}/?")
 REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")
 MAX_UPLOAD = manifests.MAX_LOCK  # bytes of manifest text per uploaded project (lock files; others 1 MB)
 MAX_BODY = MAX_UPLOAD + 1_000_000  # request bodies above this are refused with 413 before they are parsed
@@ -83,8 +84,8 @@ class RunRequest(BaseModel):
     @classmethod
     def _repo(cls, v):
         v = v.strip()
-        if v and (len(v) > 200 or not (REPO.fullmatch(v) or CASE.fullmatch(v))):
-            raise ValueError("repo must be https://github.com/owner/repo or case:<sample>")
+        if v and (len(v) > 200 or not (REPO.fullmatch(v) or CASE.fullmatch(v) or PULL.fullmatch(v))):
+            raise ValueError("repo must be https://github.com/owner/repo, a pull request URL to rescue, or case:<sample>")
         return v
 
 

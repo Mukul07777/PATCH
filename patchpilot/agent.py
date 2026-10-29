@@ -7,7 +7,7 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import config, deps, drift, reach, sources, vex
+from . import config, deps, drift, reach, rescue, sources, vex
 from .llm import LLMError, Router, parse_json
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -17,11 +17,12 @@ log = logging.getLogger(__name__)
 from .agent_common import PIN, TEXT_EXT, extract_test_code
 
 __all__ = ["Agent", "PIN", "TEXT_EXT", "extract_test_code"]
+from .agent_behaviour import BehaviourMixin, describe as describe_behaviour
 from .agent_proof import ProofMixin
 from .agent_report import ReportMixin
 
 
-class Agent(ProofMixin, ReportMixin):
+class Agent(BehaviourMixin, ProofMixin, ReportMixin):
     def __init__(self, run_id, repo, emit):
         self.run_id = run_id
         self.repo_src = repo
@@ -38,6 +39,10 @@ class Agent(ProofMixin, ReportMixin):
         self.original_imports = set()  # top-level imports of the checked-out repo, captured before LLM edits
         self.deps_added = []  # requirements added deterministically by the dependency pre-repair step
         self.guard_rejects = []  # patch writes blocked by the gate, fed into the next repair attempt
+        self.pr_info = None  # rescue mode: the Dependabot/Renovate PR being repaired in place
+        self.bumps = []  # rescue mode: the pin changes that PR makes
+        self.lock = None  # behaviour lock recorded on the vulnerable pins
+        self.behaviour_regressions = ""  # behaviour lock changes, fed into the next repair attempt
 
     # ---------- event helpers ----------
     def _emit(self, ev):
@@ -70,6 +75,14 @@ class Agent(ProofMixin, ReportMixin):
         self.step("checkout", "running", "Checking out repository")
         self._checkout()
         original = self._snapshot()
+        if self.pr_info:  # baseline on the pins the repo ran before the bot's bump; the diff stays against the PR head
+            head_req = (self.work / "requirements.txt").read_text(encoding="utf-8")
+            self.bumps = rescue.bumps(self.pr_info["base_requirements"], head_req)
+            if not self.bumps:
+                raise RuntimeError("This pull request does not change any pinned version in requirements.txt")
+            (self.work / "requirements.txt").write_text(self.pr_info["base_requirements"], encoding="utf-8")
+            self.log(f"Rescuing PR #{self.pr_info['number']} by {self.pr_info['author'] or 'unknown'}: "
+                     + ", ".join(f"{b['package']} {b['from']} -> {b['to']}" for b in self.bumps), "checkout")
         # imports present before any LLM edit: the only unmapped modules dep-repair may auto-add
         self.original_imports = deps.top_level_imports(original)
         pins = self._pins()
@@ -93,16 +106,16 @@ class Agent(ProofMixin, ReportMixin):
         self._threat(findings)
         self.step("scan", "done", detail={"vulnerable": len(findings),
                                            "advisories": sum(len(f["vulns"]) for f in findings)})
-        if not findings:
+        if not findings and not self.pr_info:
             self._emit({"type": "done", "ok": True, "clean": True, "proven": False, **self._meta(), "usage": self.router.cost_report()})
             return
 
         # 2+3. concurrently: reachability (symbol inference) -> Nano triage, and Tavily research; join before plan
-        triage, research = self._analyse(findings, original)
+        triage, research = self._analyse(findings, original) if findings else ({}, self._research_bumps())
 
         # 4. Super plans target versions
         self.step("plan", "running", "Planning upgrades with Nemotron Super")
-        plan = self._plan(findings, triage)
+        plan = self._rescue_plan(findings) if self.pr_info else self._plan(findings, triage)
         self._emit({"type": "plan", "plan": plan})
         self.step("plan", "done")
         self._emit({"type": "trust", "packages": self._trust(plan)})
@@ -116,6 +129,7 @@ class Agent(ProofMixin, ReportMixin):
         mutations = self._mutations_before(exploit, sandbox) if exploit else None
         usage = drift.usages(original)
         drift_old = self._probe(sandbox, usage, plan) if ok_install else None
+        lock = self._behaviour_lock(findings, original, plan, sandbox) if ok_install else None
 
         self._apply_pins({u["package"]: u["to"] for u in plan["upgrades"]})
         self.log("Bumped: " + ", ".join(f"{u['package']} -> {u['to']}" for u in plan["upgrades"]), "test")
@@ -131,10 +145,24 @@ class Agent(ProofMixin, ReportMixin):
         # 6. fix loop: Super first, escalate to Ultra if it keeps failing
         attempts = 0
         self.step("fix", "running", "Repairing breaking changes")
-        while not ok and attempts < config.max_fix_attempts():
-            ok, summary, output = self._dep_repair(output, sandbox, ok, summary)
-            if ok:
-                break
+
+        def regressed():
+            # green tests are not enough: every locked behaviour must come back identical
+            if not (ok and lock):
+                return False
+            bad = self._behaviour_check(lock, sandbox)
+            self.behaviour_regressions = describe_behaviour(bad)
+            if bad:
+                self.log(f"Tests pass but {len(bad)} locked behaviour(s) changed; repairing", "fix")
+            return bool(bad)
+
+        while (not ok or regressed()) and attempts < config.max_fix_attempts():
+            if not ok:
+                ok, summary, output = self._dep_repair(output, sandbox, ok, summary)
+                if ok and not regressed():
+                    break
+            if ok:  # only behaviour drifted: show the model what changed
+                output = self.behaviour_regressions
             attempts += 1
             tier = "super" if attempts == 1 else "ultra"
             self.log(f"Attempt {attempts} with Nemotron {tier.title()}", "fix")
@@ -160,6 +188,9 @@ class Agent(ProofMixin, ReportMixin):
             self._emit({"type": "test", "label": f"attempt {attempts}", "ok": ok, "summary": summary,
                         "output": output[-3000:]})
         self.step("fix", "done" if ok else "failed", detail={"attempts": attempts})
+        if lock:
+            self._behaviour_check(lock, sandbox, final=True)
+        self.lock = lock
         if exploit:
             self._exploit_after(exploit, sandbox)
         if mutations:
@@ -181,7 +212,11 @@ class Agent(ProofMixin, ReportMixin):
         report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary, exploit, ledger)
         self._emit({"type": "report", "markdown": report})
         pr = None
-        if ok and config.github_token() and str(self.repo_src).startswith("https://github.com/"):
+        if ok and self.pr_info and config.github_token() and self.pr_info["same_repo"]:
+            self.step("pr", "running", f"Pushing the repair onto PR #{self.pr_info['number']}")
+            pr = rescue.push_fix(self.work, self.pr_info, report, plan["upgrades"])
+            self.step("pr", "done", detail=pr)
+        elif ok and config.github_token() and str(self.repo_src).startswith("https://github.com/") and not self.pr_info:
             self.step("pr", "running", "Opening pull request")
             pr = open_pull_request(self.work, self.repo_src, self.run_id, plan, report)
             self.step("pr", "done", detail=pr)
@@ -190,6 +225,8 @@ class Agent(ProofMixin, ReportMixin):
             self.log("Patch file ready (set GITHUB_TOKEN and use a GitHub URL to open a real PR)", "pr")
         (config.WORK_DIR / self.run_id / "patchpilot.patch").write_text(diff, encoding="utf-8")
         self._emit({"type": "done", "ok": ok, "attempts": attempts, "pr": pr, **self._meta(),
+                    "rescue": bool(self.pr_info),
+                    "behaviour": {"locked": len(lock["locked"]), "preserved": lock.get("preserved", 0)} if lock else None,
                     "proven": bool(exploit) and exploit.get("verdict") == "proven closed",
                     "seconds": round(time.time() - self.started, 1), "usage": self.router.cost_report()})
 
@@ -234,7 +271,13 @@ class Agent(ProofMixin, ReportMixin):
             shutil.rmtree(self.work)
         self.work.parent.mkdir(parents=True, exist_ok=True)
         src = str(self.repo_src)
-        if src.startswith("https://"):
+        if rescue.PR_URL.fullmatch(src):
+            if not config.remote_fix_allowed():
+                raise RuntimeError("Fix runs on remote repositories are disabled on this deployment: use the Docker "
+                                   "sandbox (SANDBOX=docker) or let an admin allow remote repos in Settings")
+            self.pr_info = rescue.fetch(src)
+            rescue.clone(self.pr_info, self.work)
+        elif src.startswith("https://"):
             if not config.remote_fix_allowed():
                 raise RuntimeError("Fix runs on remote repositories are disabled on this deployment: use the Docker "
                                    "sandbox (SANDBOX=docker) or let an admin allow remote repos in Settings")
@@ -379,6 +422,35 @@ class Agent(ProofMixin, ReportMixin):
         data["upgrades"] = ups
         return data
 
+    def _rescue_plan(self, findings):
+        """Rescue mode keeps the bot's chosen versions; the job is making the code work with them."""
+        vulnerable = {f["package"].lower(): f for f in findings}
+        ups = []
+        for b in self.bumps:
+            f = vulnerable.get(b["package"].lower())
+            clears = f is None or all(sources.version_gte(b["to"], v["fixed"][-1]) for v in f["vulns"] if v["fixed"])
+            if not clears:
+                self.log(f"{b['package']} {b['to']} from the PR does not clear every advisory", "plan")
+            ups.append({**b, "breaking": str(b["from"]).split(".")[0] != str(b["to"]).split(".")[0],
+                        "reason": f"From PR #{self.pr_info['number']}" + ("" if clears else "; does not clear all advisories")})
+        return {"upgrades": ups, "risk": "rescue of an existing dependency PR"}
+
+    def _research_bumps(self):
+        self.step("research", "running", "Researching upgrade paths with Tavily")
+        out = {}
+        for b in self.bumps:
+            q = f"{b['package']} upgrade {b['from']} to {b['to']} breaking changes migration guide"
+            try:
+                out[b["package"]] = self._rerank(q, sources.tavily_search(q, max_results=8))
+            except Exception as e:
+                self.log(f"Research for {b['package']} failed: {e}", "research")
+                out[b["package"]] = []
+            self._emit({"type": "research", "package": b["package"], "query": q,
+                        "results": [{"title": h["title"], "url": h["url"], "score": h.get("score")}
+                                    for h in out[b["package"]]]})
+        self.step("research", "done")
+        return out
+
     def _fix(self, tier, plan, research, test_output, attempt):
         files = {k: v for k, v in self._snapshot().items() if k.endswith(".py") and not k.startswith("tests/")}
         notes = {pkg: [{"url": h["url"], "text": h["content"]} for h in hits][:5] for pkg, hits in research.items()}
@@ -386,7 +458,7 @@ class Agent(ProofMixin, ReportMixin):
             "You are an expert Python engineer fixing code broken by a security dependency upgrade. "
             "The dependency versions are FIXED and must not be downgraded. Do not edit tests; make the source "
             "code compatible (predicted_api_breaks lists APIs that were verified removed or changed, with call sites; "
-            "fix every one of them; rejected_writes lists earlier file writes a safety gate blocked and why: do "
+            "fix every one of them; behaviour_regressions lists project functions whose output changed versus the old version even though tests may pass: restore the old observable behaviour; rejected_writes lists earlier file writes a safety gate blocked and why: do "
             "not repeat them) "
             "code compatible with the new library versions while preserving behaviour and security. "
             "You MAY edit requirements.txt: if tests fail because a module is missing (see dependency_hints), add a "
@@ -402,6 +474,7 @@ class Agent(ProofMixin, ReportMixin):
             "predicted_api_breaks": self.drift,
             "rejected_writes": self.guard_rejects[-6:],
             "dependency_hints": self.dep_hints,
+            "behaviour_regressions": self.behaviour_regressions,
             "failing_test_output": test_output[-6000:], "source_files": files,
         })
         kw = {"reasoning": "low"} if attempt == 1 and tier == "super" else {}

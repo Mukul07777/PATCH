@@ -47,7 +47,7 @@
     <p class="target" id="target" aria-live="polite">Loading…</p>
     <form id="runForm" class="launch-row">
       <label for="repo" class="sr-only">Public GitHub repository URL</label>
-      <input id="repo" name="repo" placeholder="…or paste a public GitHub repo URL to fix directly (pinned requirements.txt + pytest)" autocomplete="off">
+      <input id="repo" name="repo" placeholder="…or paste a GitHub repo URL, or a red Dependabot PR URL to rescue it in place" autocomplete="off">
       <button class="btn-run" id="runBtn" type="submit"><span>Launch agent</span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </form>
     <p class="hint" id="remoteOff" hidden>This server does not run remote repositories (ALLOW_REMOTE_REPOS=0), so fix mode is limited to sample projects. Scanning any GitHub repo still works on the <a href="/projects">Projects</a> page.</p>
@@ -92,6 +92,7 @@
         <button class="tab active" data-tab="advisories" type="button" role="tab" id="tabbtn-advisories" aria-controls="tab-advisories" aria-selected="true" tabindex="0">Advisories</button>
         <button class="tab" data-tab="terminal" type="button" role="tab" id="tabbtn-terminal" aria-controls="tab-terminal" aria-selected="false" tabindex="-1">Live terminal</button>
         <button class="tab" data-tab="ledger" type="button" role="tab" id="tabbtn-ledger" aria-controls="tab-ledger" aria-selected="false" tabindex="-1">Certificate</button>
+        <button class="tab" data-tab="behaviour" type="button" role="tab" id="tabbtn-behaviour" aria-controls="tab-behaviour" aria-selected="false" tabindex="-1">Behaviour lock</button>
         <button class="tab" data-tab="proof" type="button" role="tab" id="tabbtn-proof" aria-controls="tab-proof" aria-selected="false" tabindex="-1">Proof &amp; risk</button>
         <button class="tab" data-tab="drift" type="button" role="tab" id="tabbtn-drift" aria-controls="tab-drift" aria-selected="false" tabindex="-1">Drift radar</button>
         <button class="tab" data-tab="diff" type="button" role="tab" id="tabbtn-diff" aria-controls="tab-diff" aria-selected="false" tabindex="-1">Diff</button>
@@ -105,6 +106,7 @@
       <div class="panel" id="tab-terminal" role="tabpanel" aria-labelledby="tabbtn-terminal" tabindex="0" hidden><pre class="term" id="term" aria-live="off"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>
       <div class="panel" id="tab-evidence" role="tabpanel" aria-labelledby="tabbtn-evidence" tabindex="0" hidden><div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div></div>
       <div class="panel" id="tab-ledger" role="tabpanel" aria-labelledby="tabbtn-ledger" tabindex="0" hidden><div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div></div>
+      <div class="panel" id="tab-behaviour" role="tabpanel" aria-labelledby="tabbtn-behaviour" tabindex="0" hidden><div class="empty">Before the upgrade, PatchPilot records what your own functions return. After the fix, every one must return the same thing, even if your repo has no tests.</div></div>
       <div class="panel" id="tab-proof" role="tabpanel" aria-labelledby="tabbtn-proof" tabindex="0" hidden><div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div></div>
       <div class="panel" id="tab-drift" role="tabpanel" aria-labelledby="tabbtn-drift" tabindex="0" hidden><div class="empty">Before any test runs, PatchPilot inspects the old and new library APIs and predicts exactly which of your lines will break.</div></div>
       <div class="panel" id="tab-reach" role="tabpanel" aria-labelledby="tabbtn-reach" tabindex="0" hidden><div class="empty">Where your code calls each vulnerable package.</div></div>

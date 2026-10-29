@@ -43,6 +43,15 @@ class ReportMixin:
         passed = lambda t: int((re.search(r"(\d+) passed", t or "") or [0, 0])[1])
         add("No tests lost", "verified" if passed(final) >= passed(base) else "partial",
             f"baseline {passed(base)} passed → final {passed(final)} passed")
+        lock = getattr(self, "lock", None)
+        if lock and lock.get("rows"):
+            n, keep = len(lock["rows"]), lock.get("preserved", 0)
+            changed = [r["case"] for r in lock["rows"] if r["status"] != "preserved"]
+            add("Behaviour preserved (behaviour lock)", "verified" if keep == n else "partial",
+                f"{keep}/{n} project calls recorded on the vulnerable pins return identical results after the fix"
+                + (f"; changed: {', '.join(changed[:6])}" if changed else ""))
+        else:
+            add("Behaviour preserved (behaviour lock)", "unverified", "no behaviour lock could be recorded")
         touched = re.findall(r"^\+\+\+ b/(\S+)", diff, re.M)
         add("Tests were not edited to pass", "unverified" if any(t.startswith("tests/") for t in touched) else "verified",
             f"diff touches {len(touched)} file(s), none under tests/" if touched else "no files changed")

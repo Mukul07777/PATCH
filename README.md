@@ -1,6 +1,26 @@
 # PatchPilot
 
-**An agentic DevSecOps tool for software supply chain security: it finds CVEs, upgrades dependencies, rewrites code until the tests pass, and proves the exploit is closed.**
+**Dependabot opens the PR. PatchPilot makes it mergeable, and proves it.**
+
+Dependency bots bump the version and stop. When the bump breaks your code, the PR goes red and the CVE stays in production. PatchPilot takes over at that point: it rewrites the broken code, shows the exploit working before and blocked after, and checks that your functions still return exactly what they did before.
+
+### What no other dependency tool does
+
+| | Dependabot / Renovate | Snyk / commercial SCA | **PatchPilot** |
+|---|:-:|:-:|:-:|
+| Bumps the vulnerable version | ✓ | ✓ | ✓ |
+| Rewrites your code when the bump breaks it | ✗ | partial | **✓ (Nemotron Super → Ultra)** |
+| **Rescues an existing red Dependabot PR in place** | ✗ | ✗ | **✓ (paste the PR URL)** |
+| **Behaviour lock: proves your functions return the same results after the fix, even with no tests** | ✗ | ✗ | **✓** |
+| **Runs the exploit before and after to prove it is closed** | ✗ | ✗ | **✓ (+ red-team variants)** |
+| Predicts which of your lines break *before* running tests | ✗ | ✗ | **✓ (API drift radar)** |
+| Signed certificate of every claim the PR makes | ✗ | ✗ | **✓** |
+
+**1. PR rescue.** Paste the URL of a red Dependabot or Renovate PR into the console (`https://github.com/you/repo/pull/42`). PatchPilot sets the baseline on the pins from the base branch, applies the bot's versions, repairs the code, and pushes the fix **onto the PR's own branch** with a comment. The PR turns green in place, with no new PR and no change to your workflow.
+
+**2. Behaviour lock.** Tests only check what someone thought to assert, and many repos have almost none. Before upgrading, Nemotron writes calls into *your* public functions. A fixed harness (not the model) records the results twice on the vulnerable pins and drops anything non-deterministic. After the repair, every call must return exactly the same thing. Any difference goes back into the repair loop **even when pytest is green**. On the `authsvc` sample, PyJWT 1.7.1 → 2.10.1 changed 4 of 5 locked behaviours and the lock caught all 4. The time-dependent raw token was correctly dropped as unstable.
+
+**3. Exploit proof.** A pytest attack runs on the old pins (it succeeds), then on the patched code (it is blocked), followed by 5-8 attack variants. A fix is not called "secure" without this evidence.
 
 Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory** (the default provider). External data sources: OSV.dev, PyPI, FIRST EPSS, CISA KEV, deps.dev, Tavily and the GitHub API. Any other OpenAI-compatible endpoint (NVIDIA NIM, or OpenRouter as a fallback) also works.
 
