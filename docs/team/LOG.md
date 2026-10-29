@@ -87,3 +87,8 @@
 - Innovation 17 (+1), tech 17 (+2), impact 12, sponsor 9, demo/UX 9, evidence 5, docs 4. Scored HEAD f323bd7 (33 tests pass); working-tree llm.py mid-edit by speed builder.
 - Team-closable: re-run 6-case benchmark with curated proofs (+4), finish speed + replay video (+4), commit UI redesign (+2).
 - Owner-needed: Nebius run (+4-5), real repo + PR (+3).
+
+## 2026-10-29 ~14:35 — research round 5 (NVIDIA depth)
+- research-5.md: free nvidia/nemotron-3.5-content-safety guard on OpenRouter; embed models on NVIDIA catalog (need nvapi key); rerank endpoint 410 Gone; reward model poor fit.
+- Backlog: content-safety gate (backend, queued behind speed builder), per-tier chart (UI, queued behind UI builder), Embed rerank (needs owner key).
+- Launched researcher round 6 (angle: agent self-security, prompt injection via repo/advisory/web content).

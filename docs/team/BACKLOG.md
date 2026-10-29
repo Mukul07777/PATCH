@@ -2,6 +2,9 @@
 
 Format: `- [ ] **Title**: impact 1-5 · effort S/M/L · risk · acceptance test`
 
+- [ ] **NVIDIA content-safety gate on AI-written code**: impact 4 · S-M · free on OpenRouter (nvidia/nemotron-3.5-content-safety:free); needs quota · screen generated exploits/patches before sandbox execution; verdict in ledger + UI; skip gracefully on 429 (backend, after speed builder)
+- [ ] **Per-tier cost/latency chart**: impact 3 · S · none · Runs page chart of tokens/seconds per tier from done.usage across recorded runs (UI, after UI builder)
+- [ ] **Nemotron Embed rerank**: impact 3 · S · needs owner's nvapi key · cosine rerank of Tavily results with nemotron-3.5-embed-1b
 - [ ] **SPEED: demo under 90 s (research-4.md plan)**: impact 5 · M · reasoning-control params unverified for our model ids (test with one call when quota allows) · Nano reasoning low/off + max_tokens 1500; triage ∥ research ∥ reach-inference; skip rerank (use Tavily score) / skip triage when reach conclusive; JSON mode + 45 s cutoff in fix loop; sandbox prep in background thread with uv; PATCHPILOT_DEMO=1 fast path
 - [ ] **Container sandbox (network off)**: impact 4 · M · Docker may not be installed on the demo machine · when Docker is available, run install+pytest in `docker run --network none` (install step with network, test step without); fall back to venv and say so in the ledger
 - [ ] **NeMo Agent Toolkit wrapper (nat mcp serve)**: impact 3 · S-M · register_function API unconfirmed · expose scan + run_one as NAT functions; 10-second 'callable from any agent' demo beat
