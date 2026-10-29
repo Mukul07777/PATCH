@@ -89,31 +89,30 @@
 
     <section class="card glass main">
       <div class="tabs" role="tablist" aria-label="Run details">
-        <button class="tab active" data-tab="advisories" type="button" role="tab" id="tabbtn-advisories" aria-controls="tab-advisories" aria-selected="true" tabindex="0">Advisories</button>
-        <button class="tab" data-tab="terminal" type="button" role="tab" id="tabbtn-terminal" aria-controls="tab-terminal" aria-selected="false" tabindex="-1">Live terminal</button>
-        <button class="tab" data-tab="ledger" type="button" role="tab" id="tabbtn-ledger" aria-controls="tab-ledger" aria-selected="false" tabindex="-1">Certificate</button>
-        <button class="tab" data-tab="behaviour" type="button" role="tab" id="tabbtn-behaviour" aria-controls="tab-behaviour" aria-selected="false" tabindex="-1">Behaviour lock</button>
-        <button class="tab" data-tab="proof" type="button" role="tab" id="tabbtn-proof" aria-controls="tab-proof" aria-selected="false" tabindex="-1">Proof &amp; risk</button>
-        <button class="tab" data-tab="drift" type="button" role="tab" id="tabbtn-drift" aria-controls="tab-drift" aria-selected="false" tabindex="-1">Drift radar</button>
-        <button class="tab" data-tab="diff" type="button" role="tab" id="tabbtn-diff" aria-controls="tab-diff" aria-selected="false" tabindex="-1">Diff</button>
-        <button class="tab" data-tab="evidence" type="button" role="tab" id="tabbtn-evidence" aria-controls="tab-evidence" aria-selected="false" tabindex="-1">Evidence (Tavily)</button>
-        <button class="tab" data-tab="reach" type="button" role="tab" id="tabbtn-reach" aria-controls="tab-reach" aria-selected="false" tabindex="-1">Reachability</button>
-        <button class="tab" data-tab="debate" type="button" role="tab" id="tabbtn-debate" aria-controls="tab-debate" aria-selected="false" tabindex="-1">Debate</button>
-        <button class="tab" data-tab="report" type="button" role="tab" id="tabbtn-report" aria-controls="tab-report" aria-selected="false" tabindex="-1">PR report</button>
-        <button class="tab" data-tab="bench" type="button" role="tab" id="tabbtn-bench" aria-controls="tab-bench" aria-selected="false" tabindex="-1">Benchmarks</button>
+        <button class="tab active" data-tab="findings" type="button" role="tab" id="tabbtn-findings" aria-controls="grp-findings" aria-selected="true" tabindex="0">Findings</button>
+        <button class="tab" data-tab="live" type="button" role="tab" id="tabbtn-live" aria-controls="grp-live" aria-selected="false" tabindex="-1">Live</button>
+        <button class="tab" data-tab="proof" type="button" role="tab" id="tabbtn-proof" aria-controls="grp-proof" aria-selected="false" tabindex="-1">Proof</button>
+        <button class="tab" data-tab="changes" type="button" role="tab" id="tabbtn-changes" aria-controls="grp-changes" aria-selected="false" tabindex="-1">Changes</button>
       </div>
-      <div class="panel active" id="tab-advisories" role="tabpanel" aria-labelledby="tabbtn-advisories" tabindex="0"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div>
-      <div class="panel" id="tab-terminal" role="tabpanel" aria-labelledby="tabbtn-terminal" tabindex="0" hidden><pre class="term" id="term" aria-live="off"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>
-      <div class="panel" id="tab-evidence" role="tabpanel" aria-labelledby="tabbtn-evidence" tabindex="0" hidden><div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div></div>
-      <div class="panel" id="tab-ledger" role="tabpanel" aria-labelledby="tabbtn-ledger" tabindex="0" hidden><div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div></div>
-      <div class="panel" id="tab-behaviour" role="tabpanel" aria-labelledby="tabbtn-behaviour" tabindex="0" hidden><div class="empty">Before the upgrade, PatchPilot records what your own functions return. After the fix, every one must return the same thing, even if your repo has no tests.</div></div>
-      <div class="panel" id="tab-proof" role="tabpanel" aria-labelledby="tabbtn-proof" tabindex="0" hidden><div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div></div>
-      <div class="panel" id="tab-drift" role="tabpanel" aria-labelledby="tabbtn-drift" tabindex="0" hidden><div class="empty">Before any test runs, PatchPilot inspects the old and new library APIs and predicts exactly which of your lines will break.</div></div>
-      <div class="panel" id="tab-reach" role="tabpanel" aria-labelledby="tabbtn-reach" tabindex="0" hidden><div class="empty">Where your code calls each vulnerable package.</div></div>
-      <div class="panel" id="tab-debate" role="tabpanel" aria-labelledby="tabbtn-debate" tabindex="0" hidden><div class="empty">When a fix fails, each model's diagnosis appears here side by side.</div></div>
-      <div class="panel" id="tab-diff" role="tabpanel" aria-labelledby="tabbtn-diff" tabindex="0" hidden><div class="empty">The verified patch appears here.</div></div>
-      <div class="panel" id="tab-report" role="tabpanel" aria-labelledby="tabbtn-report" tabindex="0" hidden><div class="empty">The pull-request description appears here.</div></div>
-      <div class="panel" id="tab-bench" role="tabpanel" aria-labelledby="tabbtn-bench" tabindex="0" hidden><div class="empty">Run <code>python -m patchpilot.cli</code> to benchmark every case.</div></div>
+      <div class="panel active" id="grp-findings" role="tabpanel" aria-labelledby="tabbtn-findings" tabindex="0">
+        <div class="sub" data-sub="advisories"><h3 class="sub-h">Advisories</h3><div id="tab-advisories"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div></div>
+        <div class="sub" data-sub="reach"><h3 class="sub-h">Reachability</h3><div id="tab-reach"><div class="empty">Where your code calls each vulnerable package.</div></div></div>
+      </div>
+      <div class="panel" id="grp-live" role="tabpanel" aria-labelledby="tabbtn-live" tabindex="0" hidden>
+        <div class="sub" data-sub="terminal"><h3 class="sub-h">Live terminal</h3><div id="tab-terminal"><pre class="term" id="term" aria-live="off"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div></div>
+        <div class="sub" data-sub="debate"><h3 class="sub-h">Model debate</h3><div id="tab-debate"><div class="empty">When a fix fails, each model's diagnosis appears here side by side.</div></div></div>
+      </div>
+      <div class="panel" id="grp-proof" role="tabpanel" aria-labelledby="tabbtn-proof" tabindex="0" hidden>
+        <div class="sub" data-sub="ledger"><h3 class="sub-h">Proof certificate</h3><div id="tab-ledger"><div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div></div></div>
+        <div class="sub" data-sub="behaviour"><h3 class="sub-h">Behaviour lock</h3><div id="tab-behaviour"><div class="empty">Before the upgrade, PatchPilot records what your own functions return. After the fix, every one must return the same thing, even if your repo has no tests.</div></div></div>
+        <div class="sub" data-sub="proof"><h3 class="sub-h">Exploit proof & risk</h3><div id="tab-proof"><div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div></div></div>
+      </div>
+      <div class="panel" id="grp-changes" role="tabpanel" aria-labelledby="tabbtn-changes" tabindex="0" hidden>
+        <div class="sub" data-sub="diff"><h3 class="sub-h">Diff</h3><div id="tab-diff"><div class="empty">The verified patch appears here.</div></div></div>
+        <div class="sub" data-sub="report"><h3 class="sub-h">PR report</h3><div id="tab-report"><div class="empty">The pull-request description appears here.</div></div></div>
+        <div class="sub" data-sub="drift"><h3 class="sub-h">Drift radar</h3><div id="tab-drift"><div class="empty">Before any test runs, PatchPilot inspects the old and new library APIs and predicts exactly which of your lines will break.</div></div></div>
+        <div class="sub" data-sub="evidence"><h3 class="sub-h">Evidence (Tavily)</h3><div id="tab-evidence"><div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div></div></div>
+      </div>
     </section>
 
     <aside class="side" aria-label="Run summary">

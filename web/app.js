@@ -37,16 +37,22 @@ $(".tabs[role=tablist]").addEventListener("keydown", (e) => {
   showTab(TAB_BTNS[to].dataset.tab);
   TAB_BTNS[to].focus();
 });
-function showTab(name) {
+// each tab groups several sections; callers may name a section (e.g. "ledger") and get its tab
+const TAB_OF = { advisories: "findings", reach: "findings", terminal: "live", debate: "live", ledger: "proof",
+  behaviour: "proof", proof: "proof", diff: "changes", report: "changes", drift: "changes", evidence: "changes" };
+function showTab(section) {
+  const name = TAB_OF[section] || section;
   TAB_BTNS.forEach((b) => {
     const on = b.dataset.tab === name;
     b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1;
   });
-  document.querySelectorAll(".panel").forEach((p) => { const on = p.id === "tab-" + name; p.classList.toggle("active", on); p.hidden = !on; });
+  document.querySelectorAll(".panel").forEach((p) => { const on = p.id === "grp-" + name; p.classList.toggle("active", on); p.hidden = !on; });
   // keep the active tab visible in the sideways-scrolling tablist without scrolling the page
   const btn = TAB_BTNS.find((b) => b.dataset.tab === name), list = btn?.parentElement;
   if (list && list.scrollWidth > list.clientWidth) list.scrollLeft = Math.max(0, btn.offsetLeft - list.offsetLeft - 24);
-  if (name === "bench") loadBench();
+  // a named section further down its tab is scrolled into view
+  const sub = document.querySelector(`.sub[data-sub="${section}"]`);
+  if (sub && sub.previousElementSibling) sub.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
 }
 
 // ---------- agent graph ----------
@@ -217,6 +223,7 @@ function reset() {
   $("#tab-ledger").innerHTML = '<div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div>';
   $("#tab-proof").innerHTML = '<div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div>';
   $("#tab-reach").innerHTML = '<div class="empty">Where your code calls each vulnerable package.</div>';
+  $("#tab-behaviour").innerHTML = '<div class="empty">Before the upgrade, PatchPilot records what your own functions return. After the fix, every one must return the same thing, even if your repo has no tests.</div>';
   $("#tab-debate").innerHTML = '<div class="empty">When a fix fails, each model’s diagnosis appears here side by side.</div>';
   $("#speak").hidden = true; speechSynthesis?.cancel();
   $("#tab-report").innerHTML = '<div class="empty">The pull-request description appears here.</div>';
@@ -812,20 +819,6 @@ function renderReport() {
   $("#copyMd").onclick = () => navigator.clipboard?.writeText(state.report).then(() => banner("Copied PR description", true));
 }
 
-async function loadBench() {
-  const rows = await fetch("/api/bench").then((r) => r.json()).catch(() => []);
-  if (!rows.length) return;
-  const sum = (r, k) => Object.values(r.usage?.tiers || {}).reduce((n, t) => n + (t[k] || 0), 0);
-  const ok = rows.filter((r) => r.ok).length;
-  $("#tab-bench").innerHTML = `<p><b>${ok}/${rows.length}</b> cases fixed with all tests passing.</p>
-    <table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Attempts</th><th>Time</th><th>Tokens</th><th>Cost</th><th></th></tr></thead><tbody>
-    ${rows.map((r) => `<tr><td><code>${esc(r.repo)}</code></td><td>${r.ok ? '<span class="c-ok"><span aria-hidden="true">✓</span> green</span>' : '<span class="c-bad"><span aria-hidden="true">✗</span> review</span>'}</td>
-      <td class="num">${r.attempts ?? "–"}</td><td class="num">${r.seconds ? fmtTime(r.seconds) : "–"}</td>
-      <td class="num">${(sum(r, "in") + sum(r, "out")).toLocaleString()}</td>
-      <td class="num">${r.usage?.priced ? "$" + r.usage.total.toFixed(4) : "–"}</td>
-      <td><button class="btn ghost" data-run="${esc(r.run)}">Replay</button></td></tr>`).join("")}</tbody></table>`;
-  document.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => { userStarted = true; stopDemo(); listen(b.dataset.run, 4); }));
-}
 
 // ---------- effects ----------
 function bumpKpi(sel, val) { const el = $(sel); el.textContent = val; el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
