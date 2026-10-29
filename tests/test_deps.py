@@ -170,3 +170,35 @@ def test_dep_repair_hallucinated_module_hint_only(tmp_path, monkeypatch):
     ok, _, _ = a._dep_repair("E   ModuleNotFoundError: No module named 'fancy_sanitize'", sb, False, "1 error")
     assert not ok and sb.installs == 0 and not a.deps_added
     assert a.dep_hints[0]["missing_module"] == "fancy_sanitize"
+
+
+def test_dep_repair_without_requirements_file_reverts_by_removing(tmp_path, monkeypatch):
+    a = _agent(tmp_path, monkeypatch)
+    (tmp_path / "requirements.txt").unlink()
+    ok, _, _ = a._dep_repair(ERR, FakeSandbox(install_ok=False), False, "1 error")
+    assert not ok and not (tmp_path / "requirements.txt").exists() and not a.deps_added
+
+
+def test_local_modules_include_src_layout_and_packages(tmp_path):
+    a = Agent.__new__(Agent)
+    a.work = Path(tmp_path)
+    for d in ("src/mylib/core", "pkgs/helpers", ".venv/lib/site-packages/requests", "venv/lib/bleach", ".hidden/x"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "__init__.py").write_text("")
+    (tmp_path / "src" / "single.py").write_text("")
+    local = a._local_modules()
+    assert {"src", "mylib", "core", "helpers", "single"} <= local
+    assert not {"requests", "bleach", "x"} & local
+    out = "E   ModuleNotFoundError: No module named 'mylib'\nE   ModuleNotFoundError: No module named 'helpers'"
+    assert deps.detect_missing(out, local) == []
+
+
+def test_pick_release_first_release_younger_than_90_days():
+    data = _pypi({"1.0": ("2026-07-10T00:00:00Z", False, None), "1.1": ("2026-09-20T00:00:00Z", False, None)})
+    assert deps.pick_release(data, now=NOW) == (None, "first release is younger than 90 days")
+    assert deps.pick_release(data, now=datetime(2026, 10, 9, tzinfo=timezone.utc))[0] == "1.1"  # day 91
+
+
+def test_pick_release_yanked_latest_falls_back_to_previous():
+    data = _pypi({"4.0.1": ("2026-09-30T00:00:00Z", True, None), "4.0.0": (OLD, False, None)})
+    assert deps.pick_release(data, now=NOW) == ("4.0.0", None)

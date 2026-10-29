@@ -439,11 +439,25 @@ class Agent:
             except LLMError:
                 raise first
 
+    def _local_modules(self):
+        """Top-level names importable from the repo itself: root entries, src/ children and package dirs."""
+        skip = {"venv", ".venv", "env", "site-packages", "node_modules", "__pycache__"}
+        local = {p.stem if p.is_file() else p.name for p in self.work.iterdir()}
+        src = self.work / "src"
+        if src.is_dir():
+            local |= {p.stem if p.is_file() else p.name for p in src.iterdir()}
+        for init in self.work.rglob("__init__.py"):
+            parts = init.relative_to(self.work).parts[:-1]
+            if not parts or any(x in skip or x.startswith(".") for x in parts):
+                continue
+            local.add(init.parent.name)
+        return local
+
     def _dep_repair(self, output, sandbox, ok, summary):
         """Deterministic pre-repair: a missing module that the original repo imported (or that has a curated mapping)
         and that has an established, non-yanked PyPI release for this Python is added pinned, reinstalled and
         retested before another LLM call. Anything else only becomes a prompt hint."""
-        local = {p.stem if p.is_file() else p.name for p in self.work.iterdir()}
+        local = self._local_modules()
         missing = deps.detect_missing(output, local)
         req = self.work / "requirements.txt"
         have = deps.requirement_names(req.read_text(encoding="utf-8")) if req.exists() else set()
@@ -463,14 +477,17 @@ class Agent:
                 self.log(f"Missing module '{mod}' not auto-added ({reason}); left to the model as a hint", "fix")
         if not pins:
             return ok, summary, output
-        before = req.read_text(encoding="utf-8")
+        before = req.read_text(encoding="utf-8") if req.exists() else None
         added = deps.add_requirements(req, pins)
         if not added:
             return ok, summary, output
         self.log("Missing dependency detected; adding " + ", ".join(f"{d}=={v}" for d, v in added), "fix")
         ok_install, out = sandbox.install()
         if not ok_install:
-            req.write_text(before, encoding="utf-8")
+            if before is None:
+                req.unlink(missing_ok=True)
+            else:
+                req.write_text(before, encoding="utf-8")
             self.log("pip install failed for added dependency; reverted: " + out[-600:], "fix")
             ok_revert, rout = sandbox.install()
             if not ok_revert:

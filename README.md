@@ -158,7 +158,7 @@ are run by PatchPilot's sandbox instead.
 
 Early recorded runs on free OpenRouter Nemotron endpoints showed that model calls took 97 to 98 % of wall time
 (authsvc: 709 of 723 s, mostly hidden reasoning tokens). The current pipeline makes these changes (on Nebius Token Factory
-the same authsvc case now finishes in 75 s, see [Built on Nebius](#built-on-nebius)):
+the same authsvc case finished in 110.7 s with live Tavily research (64.7–136.4 s per case), see [Built on Nebius](#built-on-nebius)):
 
 - Reasoning control per call (`reasoning="off"|"low"`). It uses OpenRouter's `reasoning` object or NIM/vLLM's
   `enable_thinking`. If the provider rejects the field, PatchPilot retries without it and stops sending it.
@@ -171,7 +171,7 @@ the same authsvc case now finishes in 75 s, see [Built on Nebius](#built-on-nebi
   `venv` + pip.
 - `PATCHPILOT_DEMO=1`: at most 2 fix attempts, and curated exploit proofs and variants only.
 
-An end-to-end timing of the new pipeline has not been measured yet, because the free tier's daily quota was used up.
+End-to-end timings on Token Factory are in the recorded benchmark below (528.6 s for all six cases).
 
 ## Provider setup
 
@@ -266,7 +266,7 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 
 ## Limitations
 
-- The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run (Token Factory listed no Nemotron content-safety model for our account).
+- The NVIDIA content-safety guard has only had a small live check (n=2 passes over 6 samples via OpenRouter's free tier, [docs/guard-eval.md](docs/guard-eval.md)). It got 10 of 12 verdicts right: it flagged one benign curated proof and missed a base64 `exec` sample once. The static AST screen got all 12 right. Token Factory listed no Nemotron content-safety model for our account, so the recorded demo runs used the static screen only.
 - Benchmark: 6/6 on Token Factory, but the recorded sanitizer run predates Tavily (its Tavily rerun is not recorded yet), and the bleach case needed the deterministic missing-dependency step; the model alone would not add `tinycss2` (see [Built on Nebius](#built-on-nebius)). The step only auto-adds a package with a curated import mapping or one the original repo already imported, whose first PyPI release is at least 90 days old, pinned to the newest non-yanked release that supports the sandbox Python; anything else becomes a hint for the model.
 - Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.

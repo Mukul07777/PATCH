@@ -9,5 +9,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: python -m pyflakes patchpilot tests
+      - run: python -m pyflakes patchpilot tests cases
       - run: python -m pytest -q

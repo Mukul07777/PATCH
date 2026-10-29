@@ -70,3 +70,8 @@ def test_parse_json_fence_inside_string():
     assert parse_json(body)["evidence"][0]["quote"].startswith("install")
     assert parse_json("```json\n" + body + "\n```")["files"] == []
     assert parse_json("Here:\n```json\n" + body + "\n```\nthanks")["files"] == []
+
+
+def test_parse_json_any_fence_language_tag():
+    assert parse_json('```JSON\n[{"a": 1}, {"b": 2}]\n```') == [{"a": 1}, {"b": 2}]
+    assert parse_json('Result:\n```jsonc\n{"a": 7}\n```') == {"a": 7}

@@ -1,4 +1,5 @@
 import importlib
+import json
 from pathlib import Path
 
 import pytest
@@ -177,3 +178,38 @@ def test_exploit_blocked_is_skipped(tmp_path, monkeypatch):
     assert a._exploit_before(findings, {}, {}, sandbox=None) is None
     assert not (tmp_path / ".patchpilot").exists()
     assert a.events[0]["type"] == "guard" and a.events[0]["verdict"] == "block"
+
+
+def _guard_router(monkeypatch, base, reply, bodies):
+    import httpx
+    from patchpilot import llm
+
+    def handler(req):
+        bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": reply, "finish_reason": "stop"}]})
+    monkeypatch.setattr(config, "NEBIUS_BASE_URL", base)
+    monkeypatch.setattr(config, "MODEL_GUARD", "g")
+    r = llm.Router(lambda e: None)
+    r._client = httpx.Client(base_url=base, transport=httpx.MockTransport(handler))
+    return r
+
+
+def test_guard_inlines_policy_on_openrouter(monkeypatch):
+    # OpenRouter drops chat_template_kwargs (seen live, docs/guard-eval.md): the policy must be in the user turn
+    bodies = []
+    r = _guard_router(monkeypatch, "https://openrouter.ai/api/v1", {"content": "User Safety: safe"}, bodies)
+    assert r.guard("proof", "x = 1") == {"safe": True, "categories": []}
+    assert bodies[0]["messages"][0]["content"].startswith("Evaluate the user prompt")
+    assert bodies[0]["max_tokens"] >= 1500
+    bodies.clear()
+    r = _guard_router(monkeypatch, "http://localhost:8000/v1", {"content": "User Safety: safe"}, bodies)
+    r.guard("proof", "x = 1")
+    assert not bodies[0]["messages"][0]["content"].startswith("Evaluate")  # vLLM: policy via kwargs only
+
+
+def test_guard_ignores_reasoning_trace(monkeypatch):
+    # live reply when the budget ran out: content null, reasoning quoting the output template
+    reply = {"content": None, "reasoning": 'Output format: "User Safety: safe or unsafe rating of the user"'}
+    r = _guard_router(monkeypatch, "https://openrouter.ai/api/v1", reply, [])
+    with pytest.raises(LLMError):
+        r.guard("proof", "x = 1")

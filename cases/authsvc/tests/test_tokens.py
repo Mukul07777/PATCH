@@ -35,7 +35,7 @@ def test_expired_token_rejected():
 
 
 def test_tampered_token_rejected():
-    t = tokens.issue_token("u5", ["admin"])
+    _ = tokens.issue_token("u5", ["admin"])  # a genuine token exists; only the forged one is presented
     forged = jwt.encode({"sub": "u5", "roles": ["admin"]}, "wrong-key", algorithm="HS256")
     if isinstance(forged, bytes):
         forged = forged.decode()

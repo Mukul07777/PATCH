@@ -251,9 +251,32 @@ function syncCase(repo) {
   selectedCase = repo;
 }
 
+// provider pill: live runs show the configured host; replays show the host the recorded run used
+function providerFromModels(models) {
+  const ids = Object.values(models || {}).filter(Boolean);
+  if (ids.some((m) => m.endsWith(":free"))) return "OpenRouter";
+  if (ids.some((m) => /^nvidia\/Nemotron-/.test(m))) return "Token Factory";  // capitalised ids are Token Factory's
+  return "";
+}
+let runProvider = "";
+function setProviderPill(replay, name) {
+  if (name) runProvider = name;
+  window.ppHealth.then((h) => {
+    const pill = document.querySelector("#pills .pill");
+    if (!pill) return;
+    const label = replay ? `${runProvider || h.provider || "LLM"} · recorded` : (h.provider || "LLM");
+    pill.classList.toggle("on", !!(replay || h.nebius));
+    pill.querySelector("i").nextSibling.textContent = label;
+    const sr = pill.querySelector(".sr-only");
+    if (sr) sr.textContent = replay ? " recorded run" : (h.nebius ? " connected" : " not configured");
+  });
+}
+
 function listen(id, replay, opts = {}) {
   if (source) source.close();
   reset();
+  runProvider = "";
+  setProviderPill(replay);
   state.runId = id;
   if ([...$("#history").options].some((o) => o.value === id)) $("#history").value = id;
   setReplayBadge(!!opts.auto);
@@ -276,6 +299,8 @@ function listen(id, replay, opts = {}) {
     let ev; try { ev = JSON.parse(m.data); } catch { return; }
     if (ev.type === "done") finished = true;
     if (ev.type === "start" && replay) syncCase(ev.repo);
+    if (replay && (ev.provider || (ev.type === "step" && ev.key === "models" && ev.detail)))
+      setProviderPill(replay, ev.provider || (runProvider ? "" : providerFromModels(ev.detail)));
     queue.push(ev); pump();
   });
   src.addEventListener("error", () => {

@@ -151,13 +151,16 @@ class Router:
         self.emit({"type": "model_call", "tier": "guard", "model": model, "purpose": f"Guard {kind}", "status": "start"})
         t0 = time.time()
         try:
-            r = self._client.post("/chat/completions", json=guard_request(kind, code, model),
+            r = self._client.post("/chat/completions", json=guard_request(kind, code, model,
+                                                                 inline_policy=reasoning_style() == "openrouter"),
                                   timeout=config.GUARD_TIMEOUT)
             r.raise_for_status()
             msg = r.json()["choices"][0]["message"]
         except Exception as e:
             raise LLMError(f"{model}: {e}") from e
-        verdict = parse_guard((msg.get("content") or "") + "\n" + (msg.get("reasoning") or ""))
+        # content only: the reasoning trace quotes the output template ("User Safety: safe or unsafe ...") and
+        # would parse as a verdict; empty content (token budget hit) is unparseable -> static-screen fallback
+        verdict = parse_guard(msg.get("content") or "")
         self.emit({"type": "model_call", "tier": "guard", "model": model, "purpose": f"Guard {kind}",
                    "status": "done", "seconds": round(time.time() - t0, 2)})
         if verdict is None:
@@ -214,10 +217,10 @@ def parse_json(text):
     # whole reply, then a reply wrapped in one outer fence (greedy, so a ``` inside a JSON string such as a quoted
     # shell snippet from research does not cut it short), then each fenced block on its own
     candidates = [text]
-    outer = re.fullmatch(r"```(?:json)?\s*(.*)```", text, flags=re.S)
+    outer = re.fullmatch(r"```[A-Za-z0-9_-]*\s*(.*)```", text, flags=re.S)
     if outer:
         candidates.append(outer.group(1).strip())
-    candidates += [m.group(1).strip() for m in re.finditer(r"```(?:json)?\s*(.*?)```", text, flags=re.S)]
+    candidates += [m.group(1).strip() for m in re.finditer(r"```[A-Za-z0-9_-]*\s*(.*?)```", text, flags=re.S)]
     for c in candidates:
         try:
             return json.loads(c)
