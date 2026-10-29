@@ -115,3 +115,8 @@
 ## 2026-10-29 ~15:30 — UI/UX research round 2
 - ui-2.md: 11 issues + 8 changes (landing reveal blanks, demo should end on Certificate, caption bar, surface the "still open" variant, graph node status, neutral replay badge, phone layout). Backlog "UI round 3" added (after current UI builder).
 - Launched submission writer (Devpost text, pitch, video script final) — research angle 8.
+
+## 2026-10-29 ~15:40 — backend build: NVIDIA content-safety gate
+- guard.py: AST static screen (exec/network/env reads/deletes/credential paths/miner+shell payloads, requirements.txt index/URL lines) + nvidia/nemotron-3.5-content-safety custom-policy check (format from the HF model card). Applied to generated exploits, variants and every patch write; ledger claim. 85 tests pass (verified).
+- NOT yet verified against the live guard model (quota 429). Falls back to static.
+- Next backend: security guardrails (requirements guard, write allow-list, injection scanner, poisoned demo case).

@@ -47,3 +47,12 @@ def provider_name(base_url=None):
     host = (base_url or NEBIUS_BASE_URL).split("//")[-1].split("/")[0]
     return {"openrouter.ai": "OpenRouter", "integrate.api.nvidia.com": "NVIDIA NIM",
             "api.groq.com": "Groq"}.get(host, "Token Factory")
+
+
+# Content-safety gate: AI-written exploit proofs, red-team variants and patch files are screened before they run.
+# GUARD=0 disables it. MODEL_GUARD defaults to NVIDIA's Nemotron content-safety model on OpenRouter only
+# (other hosts use different ids; set MODEL_GUARD explicitly there). Without a model the static AST screen still runs.
+GUARD = os.getenv("GUARD", "1") != "0"
+MODEL_GUARD = os.getenv("MODEL_GUARD", "").strip() or (
+    "nvidia/nemotron-3.5-content-safety:free" if "openrouter.ai" in NEBIUS_BASE_URL else "")
+GUARD_TIMEOUT = float(os.getenv("GUARD_TIMEOUT", "30"))

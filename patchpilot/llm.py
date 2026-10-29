@@ -138,6 +138,32 @@ class Router:
         })
         return strip_thinking(text)
 
+    def guard(self, kind, code):
+        """One call to the NVIDIA content-safety model -> {"safe": bool, "categories": [...]}.
+
+        Single attempt with a short timeout: any error (429, timeout, unparseable reply) raises LLMError and
+        the caller falls back to the static screen.
+        """
+        from .guard import guard_request, parse_guard
+        model = config.MODEL_GUARD
+        if not model:
+            raise LLMError("no guard model configured (MODEL_GUARD)")
+        self.emit({"type": "model_call", "tier": "guard", "model": model, "purpose": f"Guard {kind}", "status": "start"})
+        t0 = time.time()
+        try:
+            r = self._client.post("/chat/completions", json=guard_request(kind, code, model),
+                                  timeout=config.GUARD_TIMEOUT)
+            r.raise_for_status()
+            msg = r.json()["choices"][0]["message"]
+        except Exception as e:
+            raise LLMError(f"{model}: {e}") from e
+        verdict = parse_guard((msg.get("content") or "") + "\n" + (msg.get("reasoning") or ""))
+        self.emit({"type": "model_call", "tier": "guard", "model": model, "purpose": f"Guard {kind}",
+                   "status": "done", "seconds": round(time.time() - t0, 2)})
+        if verdict is None:
+            raise LLMError(f"{model}: unparseable guard reply {str(msg.get('content'))[:120]!r}")
+        return verdict
+
     def chat_json(self, tier, system, user, purpose, **kw):
         kw.setdefault("json_mode", True)
         text = self.chat(tier, system + "\nRespond with a single JSON object only. No prose.", user, purpose, **kw)

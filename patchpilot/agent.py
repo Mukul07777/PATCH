@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, drift, exploits, reach, sources, vex
+from . import config, drift, exploits, guard, reach, sources, vex
 from .llm import LLMError, Router, parse_json
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -51,6 +51,8 @@ class Agent:
         self.drift = []
         self.trust = {}
         self.reach = {}
+        self.guarded = []  # one entry per screened piece of AI-written code
+        self.guard_rejects = []  # patch writes blocked by the gate, fed into the next repair attempt
 
     # ---------- event helpers ----------
     def _emit(self, ev):
@@ -392,7 +394,8 @@ class Agent:
             "You are an expert Python engineer fixing code broken by a security dependency upgrade. "
             "The dependency versions are FIXED and must not be downgraded. Do not edit tests; make the source "
             "code compatible (predicted_api_breaks lists APIs that were verified removed or changed, with call sites; "
-            "fix every one of them) "
+            "fix every one of them; rejected_writes lists earlier file writes a safety gate blocked and why: do "
+            "not repeat them) "
             "code compatible with the new library versions while preserving behaviour and security. "
             "Return the COMPLETE new content of every file you change. In evidence, quote the exact line(s) from "
             "migration_research (with its url) that justify each change; use an empty list if research did not help. "
@@ -402,6 +405,7 @@ class Agent:
         user = json.dumps({
             "attempt": attempt, "upgrades": plan["upgrades"], "migration_research": notes,
             "predicted_api_breaks": self.drift,
+            "rejected_writes": self.guard_rejects[-6:],
             "failing_test_output": test_output[-6000:], "source_files": files,
         })
         kw = {"reasoning": "low"} if attempt == 1 and tier == "super" else {}
@@ -442,6 +446,11 @@ class Agent:
                 code, source = self._generate_exploit(f, v, files, research), "generated"
         except Exception as e:  # the proof is a bonus; never block the fix on it
             self.log(f"Exploit proof skipped: {e}", "exploit")
+            self.step("exploit", "failed")
+            return None
+        g = self._guard("exploit", code, curated=source == "curated")
+        if g["verdict"] == "block":
+            self.log("Exploit proof skipped: blocked by guard: " + "; ".join(g["reasons"])[:400], "exploit")
             self.step("exploit", "failed")
             return None
         try:
@@ -576,6 +585,9 @@ class Agent:
             except Exception as e:
                 self.log(f"Variant generation failed: {e}", "redteam")
                 code = None
+        if code and self._guard("redteam", code, curated=source == "curated")["verdict"] == "block":
+            self.log("Attack variants skipped: blocked by guard", "redteam")
+            code = None
         if not code:
             self.step("redteam", "failed")
             return None
@@ -683,6 +695,15 @@ class Agent:
                     + (f", scorecard {v['scorecard']}" if v.get("scorecard") is not None else "")
                     for k, v in known.items())
                 + (f"; unknown: {', '.join(k for k in tr if k not in known)}" if len(known) < len(tr) else ""))
+        ai = [g for g in getattr(self, "guarded", []) if not g["curated"] and g["verdict"] == "allow"]
+        if ai:
+            unscreened = [g for g in ai if g["source"] != "nvidia-guard+static"]
+            blocked = sum(g["verdict"] == "block" for g in self.guarded)
+            add("AI-written code screened before execution", "partial" if unscreened else "verified",
+                f"{len(ai)} AI-written file(s) executed; "
+                + (f"{len(unscreened)} screened by the static scan only (guard model unavailable)" if unscreened
+                   else "all passed the NVIDIA Nemotron guard and the static scan")
+                + (f"; {blocked} blocked before execution" if blocked else ""))
         cited = len(self.evidence)
         add("Code changes cite migration sources", "verified" if cited else "partial",
             f"{cited} quoted line(s) from researched sources" if cited else "no quotes returned by the model")
@@ -789,12 +810,37 @@ class Agent:
                 else "low",
                 "reachability": c}
 
+    def _guard(self, kind, code, path="", curated=False):
+        """Screen code before it runs: static AST scan always, NVIDIA guard model for AI-written code."""
+        if not config.GUARD:
+            return {"verdict": "allow", "reasons": [], "source": "disabled"}
+        reasons = guard.static_screen(code, path)
+        source = "static"
+        if not curated:
+            try:
+                v = self.router.guard(kind, code)
+                source = "nvidia-guard+static"
+                if not v["safe"]:
+                    reasons.append("NVIDIA guard: unsafe" + (f" ({', '.join(v['categories'])})" if v["categories"] else ""))
+            except Exception as e:  # 429, timeout, no model: the static screen alone decides; never crash the run
+                self.log(f"Guard model unavailable, static screen only: {e}"[:200], "guard")
+        verdict = "block" if reasons else "allow"
+        self.guarded.append({"kind": kind, "path": path, "verdict": verdict, "source": source, "curated": curated})
+        self._emit({"type": "guard", "kind": kind, "path": path, "verdict": verdict, "reasons": reasons,
+                    "source": source, "curated": curated})
+        return {"verdict": verdict, "reasons": reasons, "source": source}
+
     def _write_files(self, changes):
         for c in changes:
             rel = str(c.get("path", "")).replace("\\", "/").lstrip("/")
             target = (self.work / rel).resolve()
             if not rel or self.work.resolve() not in target.parents or rel.startswith("tests/"):
                 self.log(f"Rejected write outside allowed paths: {rel}", "fix")
+                continue
+            g = self._guard("patch", str(c.get("content", "")), path=rel)
+            if g["verdict"] == "block":
+                self.guard_rejects.append({"path": rel, "reasons": g["reasons"][:5]})
+                self.log(f"Rejected write to {rel}: blocked by guard: " + "; ".join(g["reasons"])[:300], "fix")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(c["content"], encoding="utf-8")
