@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, drift, exploits, sources
+from . import config, drift, exploits, reach, sources
 from .llm import Router
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
@@ -48,6 +48,7 @@ class Agent:
         self.started = time.time()
         self.evidence = []
         self.drift = []
+        self.reach = {}
 
     # ---------- event helpers ----------
     def _emit(self, ev):
@@ -103,6 +104,7 @@ class Agent:
 
         # 2. Nano triage: is each advisory actually reachable from our code?
         self.step("triage", "running", "Triage with Nemotron Nano")
+        self.reach = self._reachability(findings, original)
         triage = self._triage(findings, original)
         self._emit({"type": "triage", "triage": triage})
         self._emit({"type": "reach", "packages": {f["package"]: self._usage_snippets(f["package"], original)
@@ -265,18 +267,46 @@ class Agent:
                     hits.append(f"{path}:{i}: {line.strip()}")
         return hits[:40]
 
+    def _reachability(self, findings, files):
+        """Symbol-level reachability per advisory: OSV `imports` data first, Nano-inferred symbols as a fallback."""
+        advs = {v["id"]: {"package": f["package"], "symbols": v.get("symbols") or [], "source": "osv"}
+                for f in findings for v in f["vulns"]}
+        missing = {k: a for k, a in advs.items() if not a["symbols"]}
+        if missing:
+            try:
+                byid = {v["id"]: v for f in findings for v in f["vulns"]}
+                data = self.router.chat_json(
+                    "nano",
+                    "For each Python security advisory, name the vulnerable public functions/classes as fully dotted "
+                    "import paths (e.g. jinja2.filters.do_xmlattr, jwt.decode). Only list symbols the advisory text "
+                    'supports; use [] if unsure. Output: {"advisories":[{"id":str,"symbols":[str]}]}',
+                    json.dumps([{"id": k, "package": a["package"], "summary": byid[k]["summary"],
+                                 "details": byid[k]["details"][:400]} for k, a in missing.items()]),
+                    "Infer vulnerable symbols", max_tokens=4000)
+                for row in data.get("advisories") or []:
+                    syms = [s for s in row.get("symbols") or [] if isinstance(s, str) and re.match(r"^[\w.]+$", s)]
+                    if row.get("id") in missing and syms:
+                        advs[row["id"]].update(symbols=syms, source="llm-inferred")
+            except Exception as e:  # rate limits etc.: those advisories stay "unknown"
+                self.log(f"Symbol inference skipped: {e}", "triage")
+        result = reach.analyse(drift.usages(files), advs, files)
+        self._emit({"type": "reachability", "advisories": result, "counts": reach.counts(result)})
+        return result
+
     def _triage(self, findings, files):
         items = []
         for f in findings:
             for v in f["vulns"]:
                 items.append({"package": f["package"], "id": v["id"], "cve": v["cve"], "summary": v["summary"],
-                              "details": v["details"][:600], "fixed": v["fixed"]})
+                              "details": v["details"][:600], "fixed": v["fixed"],
+                              "reachability": (self.reach.get(v["id"]) or {}).get("status", "unknown")})
         usage = {f["package"]: self._usage_snippets(f["package"], files) for f in findings}
         try:
             data = self.router.chat_json(
                 "nano",
                 "You are a security triage engineer. For each advisory decide whether the project's code "
-                "actually exercises the vulnerable functionality. Be concise: one short sentence of rationale. "
+                "actually exercises the vulnerable functionality. Each advisory carries a static `reachability` "
+                "label (symbol-level AST match); trust 'reachable' and 'not reachable' unless the code says otherwise. Be concise: one short sentence of rationale. "
                 'Output: {"advisories":[{"id":str,"cve":str,"affected":bool,"rationale":str}]}',
                 json.dumps({"advisories": items, "code_usage": usage}),
                 "Triage advisories against code usage",
@@ -552,6 +582,12 @@ class Agent:
             f"OSV re-scan of new pins still lists: {', '.join(remaining)}" if remaining
             else f"OSV re-scan of {len(plan['upgrades'])} upgraded package(s): 0 of {len(original)} advisories remain")
 
+        if getattr(self, "reach", None):
+            c = reach.counts(self.reach)
+            srcs = {r["source"] for r in self.reach.values() if r["status"] != "unknown"} - {None}
+            add("Reachability analysed", "verified" if srcs == {"osv"} else "partial",
+                ", ".join(f"{n} {k}" for k, n in c.items() if n)
+                + (f"; symbols from {', '.join(sorted(srcs))}" if srcs else "; no symbol data"))
         add("Project test suite passes", "verified" if ok else "unverified", f"pytest: {final}")
         passed = lambda t: int((re.search(r"(\d+) passed", t or "") or [0, 0])[1])
         add("No tests lost", "verified" if passed(final) >= passed(base) else "partial",
@@ -629,9 +665,14 @@ class Agent:
             ("Test result", 0 if ok else 40, "all green" if ok else "failing"),
             ("Exploit proof", -10 if proven else 0, exploit.get("verdict", "not run") if exploit else "skipped"),
         ]
+        c = reach.counts(self.reach) if getattr(self, "reach", None) else {}
         score = max(0, min(100, sum(p for _, p, _ in factors)))
         return {"score": score, "level": "low" if score < 30 else "medium" if score < 60 else "high",
-                "factors": [{"name": n, "points": p, "detail": d} for n, p, d in factors]}
+                "factors": [{"name": n, "points": p, "detail": d} for n, p, d in factors],
+                # urgency of the advisories (not of the upgrade): unreachable ones can wait, reachable ones can't
+                "urgency": "unknown" if not c else "high" if c["reachable"] else "medium" if c["imported"] + c["unknown"]
+                else "low",
+                "reachability": c}
 
     def _write_files(self, changes):
         for c in changes:

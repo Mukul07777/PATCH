@@ -3,6 +3,7 @@ import re
 import httpx
 
 from . import config
+from .reach import parse_imports
 
 _http = httpx.Client(timeout=30, headers={"User-Agent": "patchpilot/0.1"})
 
@@ -15,10 +16,11 @@ def osv_vulns(package, version):
     # GHSA records come first so the richer summary wins when PYSEC duplicates the same CVE
     vulns = sorted(r.json().get("vulns", []), key=lambda v: not v["id"].startswith("GHSA"))
     for v in vulns:
-        fixed = []
+        fixed, symbols = [], []
         for aff in v.get("affected", []):
             if aff.get("package", {}).get("name", "").lower() != package.lower():
                 continue
+            symbols += parse_imports((aff.get("ecosystem_specific") or {}).get("imports"))
             for rng in aff.get("ranges", []):
                 fixed += [e["fixed"] for e in rng.get("events", [])
                           if "fixed" in e and re.match(r"^\d+(\.\d+)*$", e["fixed"])]
@@ -35,6 +37,7 @@ def osv_vulns(package, version):
             "id": v["id"], "cve": cve, "summary": v.get("summary") or (v.get("details") or "")[:200],
             "details": (v.get("details") or "")[:1200], "severity": sev, "fixed": sorted(set(fixed), key=_vkey),
             "url": f"https://osv.dev/vulnerability/{v['id']}", "published": v.get("published"),
+            "symbols": sorted(set(symbols)),
         })
     return out
 

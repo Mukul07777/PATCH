@@ -49,6 +49,7 @@ flowchart LR
 - **Reranked research**: Tavily returns 8 results; Nemotron Nano scores each for relevance and only the top 4 reach the repair model.
 - **PR risk score**: 0 to 100 from code churn, files touched, major-version jumps, repair attempts, test result and exploit proof.
 - **Reachability map**: where each vulnerable package is used in your code.
+- **Symbol-level reachability**: each advisory is labelled reachable (with file:line), imported-but-unused, not reachable, or unknown by matching its vulnerable symbols against an AST scan of your code (including re-exports and Jinja `|filter` uses in templates). Symbols come from OSV's PyPA `ecosystem_specific.imports` field when present, but in practice the OSV API returned that field for 0 of the advisories in our six benchmark cases, so most symbols are Nemotron Nano-inferred from the advisory text and labelled `llm-inferred`; if the LLM is unavailable those advisories stay `unknown`. The result feeds triage, an advisory-urgency rating next to the risk score, and a ledger claim (verified only when every symbol came from OSV).
 - **Model debate**: each repair attempt's diagnosis (Super, then Ultra) side by side.
 - **Org-wide heat map**: scans a GitHub user or org's public Python repos for vulnerable pins.
 - **Replay**: recorded runs in `runs/` replay without spending API credits.

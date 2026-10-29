@@ -45,3 +45,8 @@
 ## 2026-10-29 ~13:05 — exploit curator
 - Curated, verified proofs: urllib3 CVE-2024-37891 (old 1 failed → new 1 passed; variants old 4 failed/3 passed → new 7 passed), Jinja2 CVE-2024-22195 (old 1 failed → new 1 passed; 8/8 variants FAIL→PASS).
 - Fixes the weak generated proofs on fetcher and mailer. Re-run of those cases queued for when quota resets.
+
+## 2026-10-29 ~13:15 — backend build: symbol-level reachability
+- reach.py: advisories labelled reachable / imported / not reachable / unknown, re-export matching, Jinja template filter check. 21 tests pass (verified).
+- Reality check: live OSV returns NO ecosystem_specific symbol data for any advisory in our 6 cases (0/88 raw records). Research-1's premise doesn't hold for these packages today; symbols are Nano-inferred and labelled "llm-inferred", ledger marks them partial. Honest, not oversold.
+- web/app.js + style.css reachability UI held back until the UI builder finishes (same files).
