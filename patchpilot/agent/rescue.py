@@ -54,6 +54,9 @@ def fetch(url):
         r.raise_for_status()
         pr = r.json()
         c = api.get(f"/repos/{owner}/{name}/contents/requirements.txt", params={"ref": pr["base"]["sha"]})
+        if c.status_code == 404:
+            raise RuntimeError("PR rescue needs a pinned requirements.txt at the repository root, and this "
+                               "pull request's base branch has none")
         c.raise_for_status()
         base_req = base64.b64decode(c.json()["content"]).decode("utf-8", "replace")
     head = pr["head"]["repo"] or {}
