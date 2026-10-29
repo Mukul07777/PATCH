@@ -148,7 +148,7 @@ const CHAPTERS = [
   ["Predict", "drift", "Before running anything, the drift radar compares old and new library APIs and predicts which of your lines will break."],
   ["Fix", "terminal", "Upgrading the dependency and running your own tests. When they fail, Nemotron rewrites the code and tries again."],
   ["Attack", "proof", "The red team fires attack variants at the app to check the hole is really closed, not just hidden."],
-  ["Prove", "ledger", "The exploit that worked before the fix now fails. Every claim the PR makes is checked and signed in a certificate."],
+  ["Prove", "ledger", "The exploit that worked before the fix now fails. Every claim is checked and signed in a certificate, with an OpenVEX statement and the new release's provenance and OpenSSF Scorecard."],
   ["Ship", "diff", "Tests green, exploit closed: here is the verified patch, ready to open as a pull request."],
 ];
 const CHAPTER_OF = { findings: 0, triage: 1, threat: 1, drift: 2, plan: 2, patch: 3, test: 3, redteam: 4, ledger: 5, diff: 6, report: 6, done: 6 };
@@ -179,7 +179,7 @@ if ($("#demoBtn")) $("#demoBtn").onclick = (e) => {
 };
 
 function reset() {
-  state = { threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
+  state = { runId: null, trust: null, vex: null, guard: [], threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
   $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${t}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
@@ -218,6 +218,7 @@ $("#replayBtn").onclick = () => { const id = $("#history").value; if (id) { user
 function listen(id, replay, opts = {}) {
   if (source) source.close();
   reset();
+  state.runId = id;
   setReplayBadge(!!opts.auto);
   $("#runBtn").disabled = true;
   showTab("terminal");
@@ -267,6 +268,11 @@ function handle(ev) {
     case "reachability": state.reachability = ev.advisories; renderReach(); break;
     case "exploit": onExploit(ev); break;
     case "risk": state.risk = ev; renderProof(); break;
+    case "trust": state.trust = ev.packages || {}; onTrust(); break;
+    case "guard": state.guard.push(ev);
+      term(ev.verdict === "block" ? "bad" : "dim", `guard › ${ev.kind}: ${ev.verdict}${ev.source ? ` (${ev.source})` : ""}`, ev.t); renderProof(); break;
+    case "vex": state.vex = ev.document; { const n = vexCounts(ev.document); term("dim", `openvex › ${n.fixed} fixed · ${n.affected} affected · ${n.not_affected} not_affected`, ev.t); }
+      if (state.ledger) renderLedger(); break;
     case "redteam": onRedteam(ev); break;
     case "threat": onThreat(ev); break;
     case "drift": onDrift(ev); break;
@@ -371,7 +377,7 @@ function onExploit(ev) {
 
 function renderProof() {
   const x = state.exploit, r = state.risk;
-  if (!x && !r) return;
+  if (!x && !r && !state.trust && !state.guard.length) return;
   const stage = (label, cls, val) => `<div class="pf-stage ${cls}"><small>${label}</small><b>${esc(val)}</b></div>`;
   const ex = x ? `<div class="pf card glass">
       <div class="pf-head"><span class="chip super">exploit proof</span><b>${esc(x.title)}</b><span class="muted">${esc(x.advisory || "")}</span></div>
@@ -386,7 +392,60 @@ function renderProof() {
   const rk = r ? `<div class="card glass risk ${r.level}">
       <div class="gauge" style="--v:${r.score}"><b>${r.score}</b><small>${r.level} risk</small></div>
       <div class="factors">${r.factors.map((f) => `<div><span>${esc(f.name)}</span><span class="muted">${esc(f.detail)}</span><b>${f.points > 0 ? "+" : ""}${f.points}</b></div>`).join("")}</div></div>` : "";
-  $("#tab-proof").innerHTML = ex + renderRedteam() + rk;
+  $("#tab-proof").innerHTML = renderGuard() + ex + renderRedteam() + renderTrust() + rk;
+}
+
+// ---------- guardrails + supply-chain trust ----------
+function renderGuard() {
+  const g = state.guard;
+  const env = '<p class="hint guard-env"><span class="r-chip rs-no">on</span> Sandbox env: API keys withheld. The scanned repo\'s install and tests run with an allow-listed environment, never your tokens.</p>';
+  if (!g.length) return `<div class="guard-static">${env}</div>`;
+  const blocked = g.filter((e) => e.verdict === "block").length;
+  return `<div class="card glass pf guard"><div class="pf-head"><span class="chip nano">guardrails</span><b>${g.length} item(s) screened</b>
+    <span class="muted">${blocked ? `${blocked} blocked` : "all allowed"}</span></div>
+    <div class="rt">${g.map((e) => `<div class="g-row"><span class="r-chip ${e.verdict === "block" ? "rs-hit" : "rs-no"}">${esc(e.verdict || "?")}</span>
+      <b>${esc(e.kind || "item")}</b><small class="r-src">${esc(e.source || "")}</small>
+      ${(e.reasons || []).length ? `<small class="muted">${(e.reasons || []).map(esc).join(" · ")}</small>` : ""}</div>`).join("")}</div>
+    ${env}</div>`;
+}
+
+function onTrust() {
+  const pk = Object.entries(state.trust || {});
+  const prov = pk.filter(([, v]) => v.provenance === true).length;
+  term("dim", `trust › ${prov}/${pk.length} target release(s) with verified provenance (deps.dev)`);
+  renderProof();
+}
+
+function provBadge(v) {
+  return v === true ? '<span class="r-chip rs-no">verified</span>' : v === false ? '<span class="r-chip rs-hit">none</span>' : '<span class="r-chip rs-unk">unknown</span>';
+}
+
+function renderTrust() {
+  const pk = Object.entries(state.trust || {});
+  if (!pk.length) return "";
+  return `<div class="card glass pf trust"><div class="pf-head"><span class="chip super">supply chain</span><b>Supply-chain trust</b>
+    <span class="muted">old vs new release on deps.dev: provenance, OpenSSF Scorecard, new transitive deps</span></div>
+    ${pk.map(([name, v]) => {
+      const from = v.from?.version ?? v.from ?? "?", to = v.to?.version ?? v.to ?? "?";
+      const sc = v.scorecard, scCls = sc == null ? "na" : sc >= 7 ? "ok" : sc >= 5 ? "na" : "bad";
+      const checks = Object.entries(v.checks || {});
+      const nd = v.new_deps;
+      return `<div class="tr-pkg"><div class="tr-head"><b>${esc(name)}</b><span class="ver">${esc(from)}</span><span class="muted">→</span><span class="to">${esc(to)}</span>
+        ${v.source_repo ? `<small class="muted tr-repo">${esc(v.source_repo)}</small>` : ""}</div>
+        ${v.error ? `<p class="muted">deps.dev unavailable: ${esc(v.error)}</p>` : `<div class="tr-grid">
+          <div><small>Provenance</small><span>${provBadge(v.had_provenance)} <span class="muted">→</span> ${provBadge(v.provenance)}</span></div>
+          <div><small>OpenSSF Scorecard</small><b class="tr-sc ${scCls}">${sc == null ? "–" : (+sc).toFixed(1)}<i>/10</i></b></div>
+          <div><small>New transitive deps</small><span>${nd == null ? '<span class="muted">unknown</span>' : nd.length ? nd.map((d) => `<code>${esc(d)}</code>`).join(" ") : '<span class="muted">none</span>'}</span></div>
+        </div>
+        ${checks.length ? `<div class="tr-checks">${checks.map(([c, s]) => `<span class="${s == null ? "" : s >= 7 ? "ok" : s < 4 ? "bad" : ""}">${esc(c)} <b>${s ?? "–"}</b></span>`).join("")}</div>` : ""}`}
+      </div>`;
+    }).join("")}</div>`;
+}
+
+function vexCounts(doc) {
+  const n = { fixed: 0, affected: 0, not_affected: 0, under_investigation: 0 };
+  (doc?.statements || []).forEach((s) => { n[s.status] = (n[s.status] || 0) + 1; });
+  return n;
 }
 
 function onThreat(ev) {
@@ -438,8 +497,18 @@ function renderLedger() {
     <div class="claims">${L.claims.map((c) => `<div class="claim ${c.status}"><span class="ci">${icon[c.status]}</span>
       <div><b>${esc(c.claim)}</b><small>${esc(c.evidence)}</small></div><span class="cs">${c.status}</span></div>`).join("")}</div>
     <div class="cert-foot"><code title="sha256 of claims + diff">sha256 ${esc(L.sha256.slice(0, 32))}…</code>
-      <button class="btn ghost" id="dlCert">⇩ Download certificate</button></div></div>`;
+      <span class="cert-btns"><button class="btn ghost" id="dlVex" title="OpenVEX v0.2.0: machine-readable exploitability statements">⇩ OpenVEX</button>
+      <button class="btn ghost" id="dlCert">⇩ Download certificate</button></span></div>
+    ${state.vex ? (() => { const n = vexCounts(state.vex); return `<div class="vex-sum"><span class="chip nano">OpenVEX</span>
+      <span class="vx ok"><b>${n.fixed}</b> fixed</span><span class="vx bad"><b>${n.affected}</b> affected</span><span class="vx na"><b>${n.not_affected}</b> not affected</span>
+      <small class="muted">${(state.vex.statements || []).length} statement(s), static evidence only</small></div>`; })() : ""}</div>`;
   $("#dlCert").onclick = () => download(`${L.certificate}.json`, JSON.stringify(L, null, 2));
+  $("#dlVex").onclick = async () => {
+    let doc = state.vex;
+    if (!doc && state.runId) doc = await fetch(`/api/runs/${encodeURIComponent(state.runId)}/vex`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    if (!doc) return banner("No OpenVEX document was recorded for this run.", false);
+    state.vex = doc; download(`${state.runId || "patchpilot"}.openvex.json`, JSON.stringify(doc, null, 2)); renderLedger();
+  };
 }
 
 function renderReach() {

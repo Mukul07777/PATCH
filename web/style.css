@@ -390,3 +390,39 @@ body.demo .hero { display: none; }
 body.demo .launch { display: none; }
 .sb-steps li i { font-style: normal; }
 @media (max-width: 640px) { .sb-steps li span { display: none; } .sb-steps li.on span { display: inline; } .sb-steps li.on { overflow: visible; } }
+
+/* ---------- guardrails, supply-chain trust, OpenVEX ---------- */
+.pf + .pf, .guard-static + .pf, .pf + .risk, .card.trust { margin-top: 14px; }
+.guard-static .hint, .guard-env { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; }
+.guard .guard-env { margin: 12px 0 0; }
+.g-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 12px; border-radius: 8px; background: var(--surface-2); font-size: 12.5px; }
+.g-row .muted { flex-basis: 100%; }
+.tr-pkg { padding: 12px 0; border-top: 1px solid var(--line); }
+.tr-pkg:first-of-type { border-top: 0; padding-top: 0; }
+.tr-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 10px; min-width: 0; }
+.tr-head .ver { font-family: var(--mono); color: var(--bad); text-decoration: line-through; opacity: .8; }
+.tr-head .to { font-family: var(--mono); color: var(--ok); font-weight: 700; }
+.tr-repo { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+.tr-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.tr-grid > div { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tr-grid small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.tr-grid code { font-size: 11px; overflow-wrap: anywhere; }
+.tr-sc { font-size: 22px; } .tr-sc i { font-size: 12px; color: var(--muted); font-style: normal; font-weight: 500; }
+.tr-sc.ok { color: var(--ok); } .tr-sc.bad { color: var(--bad); } .tr-sc.na { color: var(--text); }
+.tr-checks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tr-checks span { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); }
+.tr-checks span.ok b { color: var(--ok); } .tr-checks span.bad b { color: var(--bad); }
+.cert-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.vex-sum { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.vx b { font-size: 16px; margin-right: 3px; } .vx.ok b { color: var(--ok); } .vx.bad b { color: var(--bad); } .vx.na b { color: var(--muted); }
+@media (max-width: 640px) { .tr-grid { grid-template-columns: 1fr; } }
+
+/* ---------- per-tier chart (runs page) ---------- */
+.tierchart { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.tierchart figure { margin: 0; min-width: 0; }
+.tierchart figcaption { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+.tierchart svg { width: 100%; height: auto; display: block; overflow: visible; }
+.tierchart text { fill: var(--text); font: 600 12px var(--sans, Inter, sans-serif); }
+.tierchart text.v { fill: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+.tierchart .track { fill: var(--surface-2); }
+@media (max-width: 760px) { .tierchart { grid-template-columns: 1fr; } }
