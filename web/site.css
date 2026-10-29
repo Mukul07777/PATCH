@@ -303,3 +303,11 @@ tr.suppressed td { opacity: .6; }
 .pj-chans input, .st-events input { width: auto; flex: none; accent-color: var(--accent); }
 .pj-export { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
 .pj-listhead .pj-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* phones: grid/flex children may shrink below their content, long tokens wrap, wide tables scroll inside themselves */
+.fm, .fm > *, .fm .row2 > div, .wrap > *, .card { min-width: 0; }
+.fm input, .fm select, .fm textarea { max-width: 100%; min-width: 0; }
+.st-secret, .hint, .muted, .card code { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  table.bench, .card table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}

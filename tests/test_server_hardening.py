@@ -10,7 +10,7 @@ import pytest
 import respx
 from fastapi.testclient import TestClient
 
-from conftest import AUTH
+from conftest import AUTH, osv_from
 
 from patchpilot.core import config
 from patchpilot.app import server
@@ -18,6 +18,12 @@ from patchpilot.app import server
 WEB = Path(server.config.ROOT) / "web"
 GH = "https://api.github.com/users/acme/repos"
 RAW = "https://raw.githubusercontent.com/acme/{}/main/requirements.txt"
+
+
+def _no_other_manifests():
+    """Repos in these tests only have requirements.txt: every other root manifest answers 404."""
+    respx.get(url__regex=r"https://raw\.githubusercontent\.com/.*/(uv\.lock|poetry\.lock|Pipfile\.lock|pyproject\.toml)$").mock(
+        return_value=httpx.Response(404))
 
 
 def _repo(name):
@@ -50,8 +56,9 @@ def test_health_hides_base_url(client):
 # ---------- 2 / 6 / 7: org scan ----------
 @respx.mock
 def test_org_scan_happy_path_and_cache(client, monkeypatch):
+    _no_other_manifests()
     calls = []
-    monkeypatch.setattr(server.sources, "osv_vulns", lambda p, v: calls.append(p) or [{"severity": "HIGH"}])
+    monkeypatch.setattr(server.sources, "osv_batch", osv_from(lambda p, v: calls.append(p) or [{"severity": "HIGH"}]))
     gh = respx.get(GH).mock(return_value=httpx.Response(200, json=[_repo("a"), _repo("b")]))
     respx.get(RAW.format("a")).mock(return_value=httpx.Response(200, text="flask==1.0\nrequests==2.0\n"))
     respx.get(RAW.format("b")).mock(side_effect=httpx.ConnectError("boom"))
@@ -66,9 +73,10 @@ def test_org_scan_happy_path_and_cache(client, monkeypatch):
 
 @respx.mock
 def test_org_scan_caps_osv_calls(client, monkeypatch):
+    _no_other_manifests()
     monkeypatch.setattr(server, "ORG_MAX_OSV", 3)
     calls = []
-    monkeypatch.setattr(server.sources, "osv_vulns", lambda p, v: calls.append(p) or [])
+    monkeypatch.setattr(server.sources, "osv_batch", osv_from(lambda p, v: calls.append(p) or []))
     respx.get(GH).mock(return_value=httpx.Response(200, json=[_repo("a")]))
     respx.get(RAW.format("a")).mock(return_value=httpx.Response(200, text="".join(f"p{i}==1.0\n" for i in range(10))))
     body = client.get("/api/org/acme").json()
@@ -299,10 +307,11 @@ def test_org_reason_no_python_repos(client):
 
 @respx.mock
 def test_org_reason_no_requirements_and_clean(client, monkeypatch):
-    monkeypatch.setattr(server.sources, "osv_vulns", lambda p, v: [])
+    _no_other_manifests()
+    monkeypatch.setattr(server.sources, "osv_batch", osv_from(lambda p, v: []))
     respx.get(GH).mock(return_value=httpx.Response(200, json=[_repo("a")]))
     respx.get(RAW.format("a")).mock(return_value=httpx.Response(404))
-    assert client.get("/api/org/acme").json()["reason"] == "no requirements.txt found"
+    assert client.get("/api/org/acme").json()["reason"] == "no python manifest found"
     server._org_cache.clear()
     respx.get(RAW.format("a")).mock(return_value=httpx.Response(200, text="flask==1.0\n"))
     assert client.get("/api/org/acme").json()["reason"] is None

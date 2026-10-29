@@ -14,6 +14,16 @@ def _isolate_demo_runs(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_runs(monkeypatch, tmp_path):
+    """Run logs and work dirs go to a temp folder: fake runs written by tests must never reach runs/, where the
+    console would pick them up as real recordings."""
+    from patchpilot.core import config
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path / "pp-runs")
+    monkeypatch.setattr(config, "WORK_DIR", tmp_path / "pp-runs" / "work")
+    (tmp_path / "pp-runs").mkdir()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_db(monkeypatch, tmp_path):
     """Every test gets its own empty SQLite file instead of runs/patchpilot.db."""
     from patchpilot.core import config

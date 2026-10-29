@@ -188,6 +188,8 @@ def test_samples_created_once_from_cases(client, monkeypatch, tmp_path):
     assert len(first["created"]) == 2
     assert {p["source"] for p in first["projects"]} == {"alpha", "beta"}
     assert all(p["source_type"] == "sample" for p in first["projects"])
+    # every new sample gets a scan queued immediately, so the cards and dashboard are never empty
+    assert all(db.list_scans(pid) for pid in first["created"])
     assert client.post("/api/projects/samples").json()["created"] == []
 
 

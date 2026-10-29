@@ -35,7 +35,7 @@
     $("#s-ch").textContent = rows.reduce((n, x) => n + (x.critical || 0) + (x.high || 0), 0);
     $("#s-all").textContent = rows.reduce((n, x) => n + total(x), 0);
     const why = data.reason ? ` <span class="muted">(${esc(data.reason)})</span>` : "";
-    if (!rows.length) return msg("No repos with a requirements.txt found." + why);
+    if (!rows.length) return msg("No repos with a Python manifest found (uv.lock, poetry.lock, Pipfile.lock, requirements.txt or pyproject.toml at the root)." + why);
     $("#heat").innerHTML = rows.map((x, i) => {
       const t = total(x), c = x.critical ? "var(--bad)" : x.high ? "var(--warn)" : t ? "var(--info)" : "var(--ok)";
       const pk = (x.packages || []).slice(0, 3).map((p) => `${esc(p.package)}==${esc(p.version)}`).join(" · ") || "clean";

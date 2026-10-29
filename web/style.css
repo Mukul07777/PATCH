@@ -525,3 +525,4 @@ h2::before { content: ""; display: inline-block; width: 14px; height: 2px; backg
 /* console: grouped tab sections */
 .panel > .sub + .sub { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .sub-h { margin: 0 0 10px; font: 800 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.launch, .launch > * { min-width: 0; }

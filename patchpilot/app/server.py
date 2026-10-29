@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, field_validator
 from patchpilot.app import auth, db, notify, scheduler
 from patchpilot.core import config, sandbox
 from patchpilot.intel import export, manifests, scanner, sources
-from patchpilot.agent.pipeline import PIN, Agent
+from patchpilot.agent.pipeline import Agent
 
 
 class _GZipExceptSSE(GZipMiddleware):
@@ -55,6 +55,7 @@ MAX_RUNS = 50
 MAX_ACTIVE_RUNS = 3
 IDLE_TIMEOUT = 600.0  # seconds an SSE stream may go without new events before it is closed
 ORG_TTL, ORG_MAX_OSV = 600.0, 300
+ORG_MANIFESTS = ("uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt", "pyproject.toml")
 RATE_LIMIT, RATE_WINDOW = 5, 60.0  # strict bucket: anonymous callers, sign-in attempts, LLM fix runs, org scans
 USER_RATE_LIMIT = 60  # signed-in users and API keys: project and scan calls per minute
 _hits = collections.defaultdict(collections.deque)
@@ -451,29 +452,38 @@ def _org_scan(gh, owner):
     def scan(repo):
         row = {"name": repo["name"], "url": repo["html_url"], "stars": repo.get("stargazers_count", 0),
                "pins": 0, "packages": [], "critical": 0, "high": 0, "other": 0, "has_reqs": False}
-        try:
-            raw = gh.get(f"https://raw.githubusercontent.com/{repo['full_name']}/{repo['default_branch']}/requirements.txt")
-        except httpx.HTTPError as e:
-            row["error"] = f"requirements.txt fetch failed ({type(e).__name__})"
-            return row
-        row["has_reqs"] = raw.status_code == 200
-        if raw.status_code != 200:
-            return row
-        for line in raw.text.splitlines()[:60]:
-            m = PIN.match(line.split("#")[0])
-            if not m:
-                continue
-            row["pins"] += 1
-            if not take():
-                row["truncated"] = True
-                continue
+        # the same manifests a project scan reads: lock files first (exact transitive pins), then requirements.txt,
+        # then pyproject.toml; the first one present with exact pins is used
+        deps = []
+        for fname in ORG_MANIFESTS:
             try:
-                vulns = sources.osv_vulns(m.group(1), m.group(2))
-            except Exception:
-                log.warning("OSV lookup failed for %s", m.group(1), exc_info=True)
+                raw = gh.get(f"https://raw.githubusercontent.com/{repo['full_name']}/{repo['default_branch']}/{fname}")
+            except httpx.HTTPError as e:
+                row["error"] = f"{fname} fetch failed ({type(e).__name__})"
                 continue
+            if raw.status_code != 200 or len(raw.content) > manifests.size_limit(fname):
+                continue
+            row["has_reqs"] = True
+            try:
+                deps = [d for d in manifests.parse(fname, raw.text) if d.pinned and d.version]
+            except Exception:
+                deps = []
+            if deps:
+                row["manifest"] = fname
+                break
+        row["pins"] = len(deps)
+        allowed = [d for d in deps if take()]
+        row["truncated"] = len(allowed) < len(deps)
+        try:
+            found = sources.osv_batch([(d.name, d.version) for d in allowed]) if allowed else {}
+        except Exception:
+            log.warning("OSV batch failed for %s", repo["full_name"], exc_info=True)
+            row["error"] = "OSV lookup failed"
+            found = {}
+        for d in allowed:
+            vulns = found.get((d.name, d.version)) or []
             if vulns:
-                row["packages"].append({"package": m.group(1), "version": m.group(2), "count": len(vulns)})
+                row["packages"].append({"package": d.name, "version": d.version, "count": len(vulns)})
             for v in vulns:
                 key = {"CRITICAL": "critical", "HIGH": "high"}.get(v.get("severity"), "other")
                 row[key] += 1
@@ -491,7 +501,7 @@ def _org_reason(rows, capped):
     if not rows:
         return "no public python repos"
     if not any(r["has_reqs"] for r in rows):
-        return "no requirements.txt found"
+        return "no python manifest found"
     if not any(r["pins"] for r in rows):
         return "no pinned requirements (pkg==x.y.z)"
     if capped:
@@ -815,6 +825,10 @@ def create_samples(request: Request):
             created.append(db.create_project(f"Sample: {d.name}", "sample", d.name))
     if created:
         _audit(request, "project.samples", {"ids": created})
+        # scan them straight away (queued, so MAX_ACTIVE_SCANS still applies): six unscanned cards look broken
+        for pid in created:
+            db.create_scan(pid, "scan", "queued")
+        scanner.kick(lambda fn: _spawn(fn))
     return {"created": created, "projects": db.list_projects()}
 
 

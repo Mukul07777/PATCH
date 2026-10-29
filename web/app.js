@@ -157,12 +157,15 @@ async function runTypes(id) {
   return { size: new Set(evs.map((e) => e.type)).size, trust };
 }
 async function pickBestRun(runs) {
-  const ok = runs.filter((r) => r.ok === true).slice(0, 5);
-  if (!ok.length) return null;
+  // the newest few of this server's runs plus every shipped recording, so a burst of small runs can't hide them
+  const ok = runs.filter((r) => r.ok === true);
+  const pool = [...ok.filter((r) => !r.sample).slice(0, 5), ...ok.filter((r) => r.sample)];
+  if (!pool.length) return null;
   // richest run first (most distinct event types), then the strongest certificate, then newest
-  const sizes = await Promise.all(ok.map((r) => runTypes(r.id).then((t) => t.size * 1000 + t.trust)));
+  const sizes = await Promise.all(pool.map((r) => runTypes(r.id).then((t) => t.size * 1000 + t.trust)));
   let best = 0; sizes.forEach((n, i) => { if (n > sizes[best]) best = i; });
-  return ok[best].id;
+  // a run with no findings, diff or certificate has nothing to show: never auto-replay it
+  return sizes[best] >= 8000 ? pool[best].id : null;
 }
 function setReplayBadge(on) { autoReplay = on; $("#replayBadge").hidden = !on; $("#realBtn").hidden = !on; }
 $("#realBtn").onclick = () => {
