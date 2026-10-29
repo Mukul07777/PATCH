@@ -46,7 +46,7 @@ def _price(name):
 
 PRICES = {"nano": _price("PRICE_NANO"), "super": _price("PRICE_SUPER"), "ultra": _price("PRICE_ULTRA")}
 
-RUNS_DIR = ROOT / "runs"
+RUNS_DIR = Path(os.getenv("PATCHPILOT_RUNS_DIR", "") or ROOT / "runs")  # run logs + work dirs (Docker: /data/runs)
 # Tracked, read-only recorded runs shipped with the repo so fresh clones/deploys have something to replay
 DEMO_RUNS_DIR = ROOT / "demo-runs"
 WORK_DIR = RUNS_DIR / "work"
@@ -79,6 +79,8 @@ GUARD_TIMEOUT = _num("GUARD_TIMEOUT", 30.0)
 # ---------- live getters: Settings page values (SQLite) first, then the environment ----------
 # Call sites use these instead of the module constants so a settings change applies without a restart.
 def _stored(key):
+    if NO_DB:
+        return None
     try:
         from . import settings
         return settings.get(key)
@@ -126,3 +128,35 @@ def max_fix_attempts():
 def allow_remote_repos():
     v = _stored("allow_remote_repos")
     return ALLOW_REMOTE_REPOS if v is None else v == "1"
+
+
+def public_url():
+    """Base URL used for links in notifications (Settings, else PATCHPILOT_PUBLIC_URL); "" when unknown."""
+    return (_stored("public_url") or os.getenv("PATCHPILOT_PUBLIC_URL", "")).strip().rstrip("/")
+
+
+def sandbox_mode():
+    """local (a virtualenv on this host) or docker (each fix run's install and tests in a locked-down container)."""
+    v = (_stored("sandbox") or os.getenv("SANDBOX", "") or "local").strip().lower()
+    return v if v in ("local", "docker") else "local"
+
+
+def sandbox_image():
+    return _stored("sandbox_image") or os.getenv("SANDBOX_IMAGE", "") or "python:3.12-slim"
+
+
+def remote_fix_allowed():
+    """Fix runs on remote repositories run their tests: only inside Docker, or when an admin explicitly allows it."""
+    return sandbox_mode() == "docker" or allow_remote_repos()
+
+
+def smtp():
+    def get(k, env, default=""):
+        return _stored(k) or os.getenv(env, "") or default
+    return {"host": get("smtp_host", "SMTP_HOST"), "port": int(get("smtp_port", "SMTP_PORT", "587")),
+            "user": get("smtp_user", "SMTP_USER"), "password": get("smtp_password", "SMTP_PASSWORD"),
+            "from": get("smtp_from", "SMTP_FROM"), "starttls": get("smtp_starttls", "SMTP_STARTTLS", "1") != "0"}
+
+
+# The CLI scan runs without a database: settings come from the environment only and nothing is cached
+NO_DB = False

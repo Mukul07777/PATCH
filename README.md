@@ -119,15 +119,17 @@ LLM agent that upgrades and repairs code. Start with scan mode.
 ### 1. Run it
 
 ```bash
-# Docker
+# Docker (see "Self-hosting" below for docker compose)
 docker build -t patchpilot .
-docker run -p 8000:8000 -v patchpilot-data:/app/runs -e PATCHPILOT_SECRET_KEY="$(openssl rand -base64 32)" patchpilot
+docker run -p 8000:8000 -v patchpilot-data:/data -e PATCHPILOT_SECRET_KEY="$(openssl rand -base64 32)" patchpilot
 
-# or pip (Python 3.10+)
+# or pip (Python 3.11+)
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn patchpilot.server:app --port 8000
+python -m patchpilot serve --port 8000              # same as: uvicorn patchpilot.server:app --port 8000
 ```
+
+No server needed for a one-off check: `python -m patchpilot scan path/to/repo` (see **CLI and CI** below).
 
 On Windows, `run.bat` does the pip steps for you. No `.env` is needed for scan mode.
 
@@ -184,7 +186,7 @@ A rejected request answers with `{"detail": "<reason>"}`; a `429` carries a `Ret
 
 ### Optional: fix mode (LLM)
 
-Add an OpenAI-compatible LLM key (Settings → Providers, or `NEBIUS_API_KEY` in `.env`; `TAVILY_API_KEY` adds web research). Then **Fix with agent** on a GitHub or sample project upgrades the vulnerable pins, repairs the code until its own pytest suite passes, attacks the fix and prepares a PR. GitHub projects also need `ALLOW_REMOTE_REPOS=1`, because fix mode runs the repository's tests on the server. Uploaded manifests can be scanned but not fixed. The header shows **Scan mode** or **Scan + auto-fix** so it is always clear which one a server offers.
+Add an OpenAI-compatible LLM key (Settings → Providers, or `NEBIUS_API_KEY` in `.env`; `TAVILY_API_KEY` adds web research). Then **Fix with agent** on a GitHub or sample project upgrades the vulnerable pins, repairs the code until its own pytest suite passes, attacks the fix and prepares a PR. GitHub projects need the **Docker sandbox** (`SANDBOX=docker`, or Settings → Fix-run sandbox) or an admin's explicit **Allow fix runs on remote repositories** (`ALLOW_REMOTE_REPOS=1`), because fix mode installs the repository's dependencies and runs its tests. In Docker mode each install runs in a `python:3.12-slim` container (image configurable) with network, and every test / probe run with `--network none`, `--memory 2g --cpus 2 --pids-limit 512`, a read-only root filesystem, a tmpfs `/tmp`, a non-root user, no capabilities, and only the run's work folder mounted. If `SANDBOX=docker` is set and Docker is not available, fix runs are refused with a clear error; `/api/health` reports `sandbox.mode` and whether Docker answers. Uploaded manifests can be scanned but not fixed. The header shows **Scan mode** or **Scan + auto-fix** so it is always clear which one a server offers.
 
 Projects, scans, findings and an audit log of every change are stored in SQLite at `PATCHPILOT_DB` (default `runs/patchpilot.db`); each agent run's events stay in `runs/<id>.jsonl`. With `ALLOW_LOCAL_PATHS=1`, `POST /api/projects {"path": "/abs/dir"}` also accepts a directory on the server.
 
@@ -211,14 +213,44 @@ Secrets are encrypted at rest with Fernet. The key comes from `PATCHPILOT_SECRET
 
 ### Policy, new/fixed tracking and the dashboard
 
-Each project has a **policy** (project page → Policy): a severity threshold (`low`, `moderate`, `high`, `critical`) and an **ignore list** (advisory id or any alias such as a CVE, a required reason, optional expiry, who added it). Findings below the threshold or ignored (and not expired) stay visible but marked *suppressed*, and are left out of counts and the dashboard; unrated findings are never hidden by the threshold. An `auto_fix` flag is stored for a later release. Policy changes and ignores are audit-logged.
+Each project has a **policy** (project page → Policy): a severity threshold (`low`, `moderate`, `high`, `critical`) and an **ignore list** (advisory id or any alias such as a CVE, a required reason, optional expiry, who added it). Findings below the threshold or ignored (and not expired) stay visible but marked *suppressed*, and are left out of counts and the dashboard; unrated findings are never hidden by the threshold. With **Auto-fix new findings** on, a scan that finds new fixable findings at or above the threshold starts an agent fix run when fix mode can run (LLM key, GitHub or sample project, remote fixes allowed, sandbox usable, fewer than 3 runs active); every start or skip is audit-logged with the reason. Off by default. Policy changes and ignores are audit-logged.
 
 Each finished scan is compared with the project's previous findings (keyed by package + advisory): unseen ones are marked **new**, ones no longer reported become **fixed**, and a fixed one that comes back is reopened. `/dashboard` (`GET /api/dashboard`) is computed from stored scans only: open findings by severity (latest scan per project), known-exploited (KEV) count, projects at risk, top vulnerable packages across projects, open findings per day for the last 30 days (UTC), new and fixed in the last 7 days, and mean time to remediate (first seen to the first scan where it is gone).
 
-CLI / batch mode: `python -m patchpilot.cli case:authsvc ...`. Container: see `Dockerfile`.
+### Scheduled scans and notifications
+
+Each project's policy has a **re-scan schedule** (off, daily, or weekly on Mondays, at an hour in UTC); the next run time is shown on the project page. A scheduler thread in the server queues due scans through the normal scan queue, and a lease row in SQLite makes sure only one process schedules when several share a database. Admins can **Scan all projects** from the projects list. GitHub lookups are cached: a tree is fetched once per commit sha, and repository / branch lookups are revalidated with `If-None-Match` (a `304` does not count against GitHub's rate limit).
+
+**Settings → Notifications** adds Slack (incoming webhook), signed generic webhook (HMAC-SHA256 in `X-PatchPilot-Signature`) and email (SMTP with STARTTLS) channels. Channels pick events (`new_findings`, `new_critical`, `kev`, `scan_failed`, `fix_completed`) and a minimum severity; projects opt in per channel (all by default). Only findings a scan sees for the first time trigger a message, each scan notifies a channel at most once, failed sends are retried 3 times with backoff, and every delivery (status, response code, attempts) is in the delivery log next to a **Send test** button. Set **Public URL** in Settings so messages link back to PatchPilot. Payloads, headers and a signature check are in [docs/notifications.md](docs/notifications.md).
+
+### CLI and CI
+
+```bash
+python -m patchpilot scan                                   # current folder, table output, exit 1 on high+
+python -m patchpilot scan requirements.txt --fail-on critical
+python -m patchpilot scan . --format sarif --output patchpilot.sarif --ignore CVE-2019-10906
+python -m patchpilot scan --repo https://github.com/pallets/flask --ref main --format cyclonedx -o sbom.cdx.json
+python -m patchpilot serve --host 0.0.0.0 --port 8000
+python -m patchpilot fix case:authsvc https://github.com/org/repo   # agent batch mode (python -m patchpilot.cli ... still works)
+```
+
+`scan` needs no server, database or API key: manifests are parsed locally, and only OSV.dev, FIRST EPSS, CISA KEV, PyPI (and the GitHub API for `--repo`) are contacted. Formats: `table`, `json`, `sarif` (SARIF 2.1.0: one rule per advisory with `security-severity`, results located at the manifest line that declares the dependency) and `cyclonedx` (CycloneDX 1.5 JSON SBOM with a `vulnerabilities` section). `--fail-on low|moderate|high|critical|none` (default `high`; unrated advisories count as low). Exit codes: **0** nothing at or above the threshold, **1** findings at or above it, **2** the scan could not be completed (unreadable target, or OSV unreachable so nothing was checked). The server exports the same formats for any finished scan: `GET /api/scans/{id}/export?format=sarif|cyclonedx|json|csv` (buttons on the project page).
+
+**GitHub Action**: `action.yml` at the repository root is a composite action (sets up Python, installs PatchPilot from the action folder, scans, optionally uploads SARIF to code scanning). Inputs: `path`, `fail-on`, `format`, `output`, `ignore`, `upload-sarif`. Example workflow: [docs/ci/github-actions.yml](docs/ci/github-actions.yml). A pre-commit hook (`patchpilot-scan`) is in `.pre-commit-hooks.yaml`.
+
+### Self-hosting
+
+```bash
+export PATCHPILOT_SECRET_KEY="$(openssl rand -base64 32)"   # keep it: it decrypts stored secrets
+docker compose up -d                                          # http://localhost:8000 -> create the admin
+```
+
+`docker-compose.yml` runs the image as a non-root user with one volume, `/data`, holding the SQLite database (`PATCHPILOT_DB=/data/patchpilot.db`), `secret.key` (only when `PATCHPILOT_SECRET_KEY` is not set) and run logs / work folders (`PATCHPILOT_RUNS_DIR=/data/runs`), plus a health check on `/api/health`. Back up the volume; keep `PATCHPILOT_SECRET_KEY` (or `secret.key`) separate from database backups. To use the Docker fix-run sandbox from inside the container, uncomment the Docker socket mount: this gives the container root-equivalent control of the host, so only do it on a host dedicated to PatchPilot. Put a TLS reverse proxy in front and set **Public URL** for notification links. Run a single server process per database for the scan workers; the scheduler is already safe across processes. Every endpoint, its access level and examples: [docs/API.md](docs/API.md).
+
+Container: see `Dockerfile` (`python -m patchpilot serve`; override the command for `python -m patchpilot fix ...` batch jobs).
 
 - Pages: `/` landing, `/dashboard` security posture, `/projects` projects and scan results, `/settings` settings, users, API keys and audit log (admins), `/login`, `/setup` (first run only), `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
-- API: `/api/health` (GET/HEAD; includes configured model ids per tier, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`, `/api/dashboard`, `/api/projects/{id}/policy` (GET, PUT), `/api/projects/{id}/ignores` (POST) and `/api/projects/{id}/ignores/{iid}` (DELETE), `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/logout-all`, `/api/auth/password` (POST), and for admins `/api/users/{id}/password` (POST), `/api/settings` (GET, PUT), `/api/settings/test/{llm|tavily|github}` (POST), `/api/users`, `/api/keys`, `/api/audit`. Project and scan calls are limited to 60 a minute per user or API key; runs, org scans and sign-ins to 5 a minute per IP.
+- API (full list with access levels and examples: [docs/API.md](docs/API.md)): `/api/health` (GET/HEAD; includes configured model ids per tier and the sandbox mode, no secrets), `/api/stats`, `/api/projects` (GET, POST), `/api/projects/samples` (POST), `/api/projects/scan-all` (POST, admins), `/api/projects/{id}` (GET, DELETE), `/api/projects/{id}/scan` (POST), `/api/projects/{id}/scans`, `/api/scans/{id}`, `/api/scans/{id}/export`, `/api/channels`, `/api/deliveries`, `/api/runs` (POST takes `{"project": id}` or `{"repo": url}`), `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`, `/api/cases`, `/api/dashboard`, `/api/projects/{id}/policy` (GET, PUT), `/api/projects/{id}/ignores` (POST) and `/api/projects/{id}/ignores/{iid}` (DELETE), `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/logout-all`, `/api/auth/password` (POST), and for admins `/api/users/{id}/password` (POST), `/api/settings` (GET, PUT), `/api/settings/test/{llm|tavily|github}` (POST), `/api/users`, `/api/keys`, `/api/audit`. Project and scan calls are limited to 60 a minute per user or API key; runs, org scans and sign-ins to 5 a minute per IP.
 - Sample projects come from `cases/` (pins from each `requirements.txt`):
   - `authsvc`: PyJWT 1.7.1 + requests 2.25.1
   - `fetcher`: urllib3 1.26.17
@@ -231,7 +263,9 @@ CLI / batch mode: `python -m patchpilot.cli case:authsvc ...`. Container: see `D
 
 Fast, offline unit tests for the agent itself (drift radar, OSV version math, JSON parsing, exploit library,
 risk score and trust ledger) and for the product layer (accounts, sessions, API keys, CSRF, encrypted settings,
-policy suppression, new/fixed tracking, dashboard aggregation). No network, no LLM calls:
+policy suppression, new/fixed tracking, dashboard aggregation, scheduler and lease, notifications (dedupe, HMAC,
+retries, SMTP), SARIF / CycloneDX exports, CLI exit codes, auto-fix conditions, Docker sandbox argv). No network
+(OSV, GitHub and webhooks are mocked with respx), no LLM calls:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
@@ -327,7 +361,7 @@ A first round on Token Factory (`20261029-150603-job` to `20261029-151314-job`, 
 The `Dockerfile` supports both Nebius serverless modes. These steps describe how to deploy; they have not been carried out for this submission. <!-- TODO(owner): update if/when deployed. -->
 
 - **Serverless Endpoint (web app + API).** Build the image and push it to a registry Nebius can pull from, then create an endpoint from it exposing port `8000`. Pass `PATCHPILOT_SECRET_KEY` and `NEBIUS_API_KEY` (and optionally `TAVILY_API_KEY`, `GITHUB_TOKEN`, `PATCHPILOT_PUBLIC_DEMO`, `MODEL_*`, `MODEL_GUARD`) as environment variables or secrets (provider keys can also be set later on `/settings`), and keep `ALLOW_REMOTE_REPOS=0` on a public endpoint. The image's `HEALTHCHECK` polls `/api/health`, which also answers `HEAD`.
-- **Serverless Job (benchmark / batch).** Run the same image with the command overridden to the CLI: `python -m patchpilot.cli <repo-or-case> https://github.com/org/repo`. Runs are recorded under `runs/`; mount or copy that directory out to keep them.
+- **Serverless Job (benchmark / batch).** Run the same image with the command overridden to the CLI: `python -m patchpilot fix <repo-or-case> https://github.com/org/repo`. Runs are recorded under `runs/`; mount or copy that directory out to keep them.
 
 ## Screenshots
 

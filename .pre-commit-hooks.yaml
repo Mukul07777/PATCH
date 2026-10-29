@@ -1,0 +1,13 @@
+# pre-commit hook: scan dependency manifests when they change.
+#   repos:
+#     - repo: https://github.com/Mukul07777/PATCH
+#       rev: <tag or sha>
+#       hooks:
+#         - id: patchpilot-scan
+- id: patchpilot-scan
+  name: PatchPilot dependency scan
+  description: Fail when a pinned dependency has a known vulnerability at or above high severity (OSV.dev).
+  entry: python -m patchpilot scan --fail-on high
+  language: python
+  pass_filenames: false   # always scans the whole repository (lock files and manifests together)
+  files: (^|/)(requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|uv\.lock|Pipfile\.lock)$

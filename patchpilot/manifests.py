@@ -8,7 +8,7 @@ from collections import namedtuple
 
 from packaging.requirements import InvalidRequirement, Requirement
 
-Dep = namedtuple("Dep", "name version source_file pinned")
+Dep = namedtuple("Dep", "name version source_file pinned line", defaults=(None,))  # line: 1-based, where declared
 
 # Names checked, in this order, when a project folder or repository is scanned
 MANIFEST_FILES = ("requirements.txt", "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile.lock")
@@ -22,6 +22,7 @@ SKIP_DIRS = {"node_modules", ".venv", "venv", "env", ".env", ".tox", ".nox", ".g
              "vendored", "_vendor", "third_party", "fixtures", "testdata", "test_data", "__pycache__", "build", "dist"}
 NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*(.*)$")
 EXACT = re.compile(r"^===?\s*([A-Za-z0-9][A-Za-z0-9._+!-]*)$")
+DECL = re.compile(r"""^\s*(?:name\s*=\s*["']([A-Za-z0-9][A-Za-z0-9._-]*)["']|"([A-Za-z0-9][A-Za-z0-9._-]*)"\s*:\s*\{)""")
 POETRY_EXACT = re.compile(r"^=?=?\s*(\d[A-Za-z0-9._+!-]*)$")
 
 
@@ -91,7 +92,29 @@ def parse_ex(filename, text):
         return requirements_ex(text, filename)
     fn = {"pyproject.toml": parse_pyproject, "poetry.lock": parse_lock, "uv.lock": parse_lock,
           "pipfile.lock": parse_pipfile_lock}[kind]
-    return fn(text, filename), []
+    return locate(fn(text, filename), text), []
+
+
+def locate(deps, text):
+    """Fill each Dep's line from the text in one pass: a `name = "pkg"` table entry (lock files) or a
+    `"pkg": {` key (Pipfile.lock); otherwise, for small files, the first line naming the package as a whole word
+    (pyproject dependency lists)."""
+    lines = text.splitlines()
+    index = {}
+    for i, l in enumerate(lines, 1):
+        m = DECL.match(l)
+        if m:
+            index.setdefault(normalize(m.group(1) or m.group(2)), i)
+    out = []
+    for d in deps:
+        if d.line is None:
+            hit = index.get(normalize(d.name))
+            if hit is None and len(text) <= 200_000:
+                word = re.compile(rf"(?<![\w.-]){re.escape(d.name)}(?![\w-])", re.I)
+                hit = next((i for i, l in enumerate(lines, 1) if word.search(l)), None)
+            d = d._replace(line=hit)
+        out.append(d)
+    return out
 
 
 def pep508(spec, source_file):
@@ -114,8 +137,15 @@ EDITABLE = re.compile(r"^(-e|--editable)\s*=?\s*(\S+)")
 
 
 def _lines(text):
-    buf = ""
-    for raw in text.splitlines():
+    for _, line in _numbered(text):
+        yield line
+
+
+def _numbered(text):
+    """(1-based line number where the logical line starts, line) with comments and continuations folded."""
+    buf, start = "", None
+    for n, raw in enumerate(text.splitlines(), 1):
+        start = n if not buf else start
         line = buf + raw
         if line.rstrip().endswith("\\"):  # line continuation
             buf = line.rstrip()[:-1] + " "
@@ -123,14 +153,14 @@ def _lines(text):
         buf = ""
         line = re.split(r"(?:^|\s)#", line, 1)[0].strip()
         if line:
-            yield line
+            yield start, line
 
 
 def requirements_ex(text, source_file="requirements.txt"):
     """(deps, warnings). Includes (-r/-c), editables (-e) and URL / VCS requirements are never followed or
     fetched; each one becomes a warning so the user knows what was not checked."""
     out, warnings = [], []
-    for line in _lines(text):
+    for lineno, line in _numbered(text):
         m = INCLUDE.match(line)
         if m:
             what = "constraints file" if m.group(1) in ("-c", "--constraint") else "file"
@@ -148,7 +178,7 @@ def requirements_ex(text, source_file="requirements.txt"):
             continue
         dep = pep508(line, source_file)
         if dep:
-            out.append(dep)
+            out.append(dep._replace(line=lineno))
     return out, warnings
 
 

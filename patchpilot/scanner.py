@@ -49,6 +49,31 @@ def _gh_fail(r, not_found):
     raise GitHubError(f"GitHub returned HTTP {r.status_code}", 502)
 
 
+def _gh_get(gh, url, params=None, immutable=False):
+    """GET a GitHub API URL through the response cache. immutable=True (a tree by commit sha) is served from the
+    cache without a request; otherwise a cached ETag is sent as If-None-Match and a 304 (which GitHub does not
+    count against the rate limit) is answered from the cache."""
+    key = url + ("?" + "&".join(f"{k}={v}" for k, v in sorted(params.items())) if params else "")
+    hit = None
+    if not config.NO_DB:
+        try:
+            hit = db.gh_cache_get(key)
+        except Exception:
+            log.debug("GitHub cache unavailable", exc_info=True)
+    if hit and immutable:
+        return httpx.Response(200, content=hit["body"].encode(), headers={"content-type": "application/json"})
+    headers = {"If-None-Match": hit["etag"]} if hit and hit["etag"] else {}
+    r = gh.get(url, params=params, headers=headers)
+    if r.status_code == 304 and hit:
+        return httpx.Response(200, content=hit["body"].encode(), headers={"content-type": "application/json"})
+    if r.status_code == 200 and not config.NO_DB and (immutable or r.headers.get("etag")):
+        try:
+            db.gh_cache_put(key, r.headers.get("etag"), r.text)
+        except Exception:
+            log.debug("could not cache %s", key, exc_info=True)
+    return r
+
+
 def parse_github(url):
     m = GITHUB.fullmatch(url or "")
     if not m:
@@ -63,11 +88,12 @@ def check_github(url, ref=None, gh=None):
     own = gh is None
     gh = gh or _gh_client()
     try:
-        r = gh.get(f"https://api.github.com/repos/{owner}/{repo}")
+        r = _gh_get(gh, f"https://api.github.com/repos/{owner}/{repo}")
         if r.status_code != 200:
             _gh_fail(r, "Repository not found or private (add a GitHub token in Settings)")
         ref = ref or r.json().get("default_branch") or "HEAD"
-        c = gh.get(f"https://api.github.com/repos/{owner}/{repo}/commits/{quote(ref, safe='/')}")
+        c = _gh_get(gh, f"https://api.github.com/repos/{owner}/{repo}/commits/{quote(ref, safe='/')}",
+                    immutable=bool(re.fullmatch(r"[0-9a-f]{40}", ref)))
         if c.status_code != 200:
             _gh_fail(c, f"Branch or tag '{ref}' not found")
         return {"owner": owner, "repo": repo, "ref": ref, "sha": c.json()["sha"]}
@@ -85,7 +111,8 @@ def _fetch_github(url, ref, subdir=""):
         info = check_github(url, ref, gh)
         owner, repo, sha = info["owner"], info["repo"], info["sha"]
         try:
-            t = gh.get(f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}", params={"recursive": "1"})
+            t = _gh_get(gh, f"https://api.github.com/repos/{owner}/{repo}/git/trees/{sha}", {"recursive": "1"},
+                        immutable=True)  # a tree by commit sha never changes
         except httpx.HTTPError as e:
             raise ScanError(f"Could not reach GitHub ({type(e).__name__})") from None
         if t.status_code != 200:
@@ -161,7 +188,7 @@ def fetch_manifests(project):
 
 
 def collect(files):
-    """(merged deps, errors, warnings, {(name, version): [files]})."""
+    """(merged deps, errors, warnings, {(name, version): [files]}, {(name, version): first declaration line})."""
     deps, errors, warnings = [], [], []
     for name, text in files:
         try:
@@ -171,11 +198,13 @@ def collect(files):
         except manifests.ManifestError as e:
             errors.append(str(e))
     where = {}
+    lines = {}
     for d in deps:
         where.setdefault((manifests.normalize(d.name), d.version), [])
         if d.source_file not in where[(manifests.normalize(d.name), d.version)]:
             where[(manifests.normalize(d.name), d.version)].append(d.source_file)
-    return manifests.merge(deps), errors, warnings, where
+            lines.setdefault((manifests.normalize(d.name), d.version), d.line)
+    return manifests.merge(deps), errors, warnings, where, lines
 
 
 def _lowest_fix_above(version, fixed):
@@ -192,14 +221,22 @@ def coverage(total, pinned, checked, unpinned):
 
 def scan_project(project):
     """Run one scan synchronously; returns (findings, summary). Raises ScanError for user-facing failures."""
-    files, notes, skipped, info = fetch_manifests(project)
+    return scan_files(*fetch_manifests(project))
+
+
+MAX_SBOM = 20_000  # dependencies kept in a scan summary for SBOM export
+
+
+def scan_files(files, notes=(), skipped=(), info=None):
+    """Scan already-read manifests [(path, text)]: (findings, summary). Used by the server and the CLI."""
+    skipped = list(skipped)
     warnings = list(notes) + [f"{s['path']} skipped: {s['reason']}" for s in skipped]
     if not files:
         if skipped:
             raise ScanError("Every manifest found was skipped: " + "; ".join(warnings))
         raise ScanError("No supported manifest found (requirements*.txt, pyproject.toml, poetry.lock, uv.lock, "
                         "Pipfile.lock, up to 3 folders deep)")
-    deps, errors, warn, where = collect(files)
+    deps, errors, warn, where, lines = collect(files)
     warnings += warn
     pinned = [d for d in deps if d.version]
     if len(pinned) > MAX_DEPS:
@@ -247,6 +284,7 @@ def scan_project(project):
         except Exception:
             log.info("PyPI lookup failed for %s", d.name)
         source_file = ", ".join(where.get((manifests.normalize(d.name), d.version)) or [d.source_file])
+        source_line = lines.get((manifests.normalize(d.name), d.version), d.line)
         packages.append({"package": d.name, "version": d.version, "advisories": len(vulns), "latest": latest,
                          "safe": sources.min_safe_version(d.version, vulns), "source_file": source_file})
         for v in vulns:
@@ -257,13 +295,16 @@ def scan_project(project):
                 "cvss_score": v.get("cvss_score"),
                 "epss": (epss.get(v.get("cve")) or {}).get("epss"), "kev": v.get("cve") in kev,
                 "fixed_in": _lowest_fix_above(d.version, v.get("fixed") or []), "summary": (v.get("summary") or "")[:500],
-                "reachable": None, "source_file": source_file,
+                "reachable": None, "source_file": source_file, "source_line": source_line,
             })
     summary = {"files": [n for n, _ in files], "skipped_files": skipped, "dependencies": len(deps),
                "pinned": len(pinned), "unpinned": unpinned, "vulnerable_packages": packages, "errors": errors,
                "warnings": warnings, "not_on_pypi": missing,
                "coverage": coverage(len(deps), len(pinned), checked, unpinned),
-               "epss": "ok" if epss_ok else "unavailable"}
+               "epss": "ok" if epss_ok else "unavailable",
+               # every dependency (for SBOM export): [name, version or None, first file, line]
+               "deps": [[d.name, d.version, (where.get((manifests.normalize(d.name), d.version)) or [d.source_file])[0],
+                         lines.get((manifests.normalize(d.name), d.version), d.line)] for d in deps[:MAX_SBOM]]}
     if info:
         summary["ref"], summary["commit"] = info["ref"], info["sha"]
     return findings, summary
@@ -280,11 +321,22 @@ def run_scan(scan_id, project_id):
         db.add_findings(scan_id, project_id, findings)
         summary["diff"] = db.track_findings(scan_id, project_id, findings)  # new / fixed since the last scan
         db.update_scan(scan_id, "done", summary)
+        ok = True
     except ScanError as e:
         db.update_scan(scan_id, "error", {"error": str(e)})
+        ok = False
     except Exception as e:
         log.exception("scan %s crashed", scan_id)
         db.update_scan(scan_id, "error", {"error": f"{type(e).__name__}: {e}"[:300]})
+        ok = False
+    for hook in AFTER_SCAN:  # notifications, auto-fix: never allowed to break the queue
+        try:
+            hook(scan_id, project_id, ok)
+        except Exception:
+            log.exception("after-scan hook %s failed for scan %s", getattr(hook, "__name__", hook), scan_id)
+
+
+AFTER_SCAN = []  # fn(scan_id, project_id, ok) called after every scan ends (registered by notify / server)
 
 
 # ---------- queue ----------

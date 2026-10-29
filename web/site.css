@@ -294,3 +294,12 @@ tr.suppressed td { opacity: .6; }
 @media (max-width: 760px) {
   .db-grid, .fm .row2 { grid-template-columns: 1fr; }
 }
+/* round 4: notifications, schedules, exports */
+.st-warn { font-size: 13px; color: var(--text); border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); padding: 8px 12px; border-radius: 6px; margin: 6px 0 12px; }
+.st-events, .pj-chans { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 10px 0; display: flex; flex-wrap: wrap; gap: 8px 18px; min-width: 0; }
+.st-events legend, .pj-chans legend { font-weight: 700; padding: 0 4px; }
+.pj-chans > div { display: flex; flex-wrap: wrap; gap: 8px 18px; width: 100%; }
+.pj-chans .check, .st-events .check { display: inline-flex; gap: 8px; align-items: center; font-weight: 500; }
+.pj-chans input, .st-events input { width: auto; flex: none; accent-color: var(--accent); }
+.pj-export { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
+.pj-listhead .pj-actions { display: flex; gap: 8px; flex-wrap: wrap; }

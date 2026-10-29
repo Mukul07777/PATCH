@@ -11,7 +11,8 @@
   let health = {}, current = null, sort = { key: "severity", dir: 1 }, findings = [], poll = null, lastScanId = null;
 
   const api = window.ppApi;
-  let canEdit = false;  // anonymous public-demo visitors get a read-only view
+  let canEdit = false, isAdmin = false;  // anonymous public-demo visitors get a read-only view
+  let channels = [];
   const say = (msg, bad) => { const el = $("#status"); el.textContent = msg || ""; el.classList.toggle("bad", !!bad); };
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "–");
   const sevKey = (s) => { s = (s || "UNKNOWN").toUpperCase(); return s === "MEDIUM" ? "MODERATE" : SEV.includes(s) ? s : "UNKNOWN"; };
@@ -54,6 +55,7 @@
       box.innerHTML = `<div class="empty span-all">Could not load projects: ${esc(e.message)}</div>`; return;
     }
     $("#samplesBtn").hidden = !canEdit || list.some((p) => p.source_type === "sample");
+    $("#scanAllBtn").hidden = !isAdmin || !list.length;
     $("#newForm").hidden = !canEdit; $("#newTitle").hidden = !canEdit;
     if (!list.length) {
       box.innerHTML = `<div class="empty span-all">No projects yet. Add your own below, or <button type="button" class="btn ghost sm" id="emptySamples">add the sample projects</button> to try PatchPilot on bundled vulnerable code.</div>`;
@@ -66,6 +68,16 @@
         <span class="pj-sev">${scanState(p.last_scan)}</span>
         <span class="pj-when">Last scan: ${esc(when(p.last_scan_at))}</span></a>`).join("");
   }
+
+  $("#scanAllBtn").addEventListener("click", async () => {
+    const b = $("#scanAllBtn"); b.disabled = true;
+    try {
+      const r = await api("/api/projects/scan-all", { method: "POST" });
+      say(r.queued ? `Queued ${r.queued} scan${r.queued === 1 ? "" : "s"}. Results appear as each one finishes.` : "Every project already has a scan queued or running.");
+      setTimeout(loadList, 1500);
+    } catch (e) { say(e.message, true); }
+    finally { b.disabled = false; }
+  });
 
   async function addSamples() {
     say("Adding sample projects…");
@@ -141,6 +153,13 @@
     let policy;
     try { policy = await api(`/api/projects/${current.id}/policy`); } catch (e) { $("#ignores").innerHTML = ""; return; }
     $("#threshold").value = policy.severity_threshold; $("#autoFix").checked = policy.auto_fix;
+    $("#schedule").value = policy.schedule || "off"; $("#scheduleHour").value = String(policy.schedule_hour ?? 3);
+    $("#scheduleHour").disabled = $("#schedule").value === "off";
+    $("#nextRun").textContent = policy.schedule !== "off" && policy.next_run_at
+      ? `Next scheduled scan: ${new Date(policy.next_run_at * 1000).toLocaleString()} (${new Date(policy.next_run_at * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC).`
+      : "No scheduled scans.";
+    $("#chanBox").hidden = !canEdit || !channels.length;
+    $("#chanList").innerHTML = channels.map((c) => `<label class="check"><input type="checkbox" data-chan="${c.id}"${policy.channels === null || policy.channels.includes(c.id) ? " checked" : ""}> ${esc(c.name)} <span class="muted">(${esc(c.type)}${c.enabled ? "" : ", disabled"})</span></label>`).join("");
     const ign = policy.ignores;
     $("#ignores").innerHTML = ign.length ? `<h3>Ignored advisories</h3><div class="tbl-wrap"><table class="bench"><caption class="sr-only">Ignored advisories</caption>
       <thead><tr><th scope="col">Advisory</th><th scope="col">Reason</th><th scope="col">Expires</th><th scope="col">By</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
@@ -158,11 +177,19 @@
     e.preventDefault();
     const err = $("#policyErr"); err.hidden = true;
     try {
-      await api(`/api/projects/${current.id}/policy`, { method: "PUT", body: JSON.stringify({ severity_threshold: $("#threshold").value, auto_fix: $("#autoFix").checked }) });
+      const body = { severity_threshold: $("#threshold").value, auto_fix: $("#autoFix").checked,
+        schedule: $("#schedule").value, schedule_hour: Number($("#scheduleHour").value) };
+      if (channels.length) {
+        const on = [...document.querySelectorAll("[data-chan]")].filter((c) => c.checked).map((c) => Number(c.dataset.chan));
+        body.channels = on.length === channels.length ? null : on;  // all ticked = every channel, including future ones
+      }
+      await api(`/api/projects/${current.id}/policy`, { method: "PUT", body: JSON.stringify(body) });
       say("Policy saved."); await loadPolicy(); refreshScan();
     } catch (x) { err.textContent = x.message; err.hidden = false; }
   });
   const refreshScan = () => { if (lastScanId) loadScan(lastScanId); };
+  $("#scheduleHour").innerHTML = Array.from({ length: 24 }, (_, h) => `<option value="${h}">${String(h).padStart(2, "0")}:00</option>`).join("");
+  $("#schedule").addEventListener("change", () => { $("#scheduleHour").disabled = $("#schedule").value === "off"; });
 
   function fixState(on, why) {
     const a = $("#fixBtn");
@@ -175,7 +202,8 @@
     if (!health.fix_mode) return fixState(false, "Fix mode is off: the server has no LLM API key. Scanning still works.");
     if (t === "upload") return fixState(false, "Uploaded manifests can be scanned but not fixed: the agent needs your code and tests. Add the project as a GitHub repository to fix it.");
     if (t === "path") return fixState(false, "Fix mode is not available for local path projects yet.");
-    if (t === "git" && !health.remote_repos) return fixState(false, "This server does not run remote repositories (ALLOW_REMOTE_REPOS=0), so fixing is limited to sample projects.");
+    if (health.sandbox && !health.sandbox.ready) return fixState(false, "Fix runs are refused: the Docker sandbox is configured but Docker is not available on the server.");
+    if (t === "git" && !health.remote_fix) return fixState(false, "This server does not run remote repositories' tests: an admin can enable the Docker sandbox (or allow remote repos) in Settings. Fixing is limited to sample projects.");
     fixState(true, "Opens the console and runs the agent: upgrade, repair until tests pass, verify, prepare a PR.");
   }
 
@@ -247,7 +275,8 @@
         : `<div class="pj-cov warn" role="note"><b>Partially verified (${cov.checked} of ${cov.total} pinned).</b> ${cov.total - cov.checked} dependenc${cov.total - cov.checked === 1 ? "y was" : "ies were"} not checked. ${lockHint}</div>`;
     const warns = [...(sum.errors || []), ...(sum.warnings || [])];
     const warnBox = warns.length ? `<details class="pj-warn"${sum.errors?.length ? " open" : ""}><summary>${warns.length} warning${warns.length === 1 ? "" : "s"}</summary><ul>${warns.slice(0, 50).map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : "";
-    const head = `${banner}<p class="hint">${notes.join("<br>")}<br>Scanned ${esc(when(s.finished_at))}.</p>${warnBox}`;
+    const dl = ["sarif", "cyclonedx", "json", "csv"].map((f) => `<a class="btn ghost sm no-underline" href="/api/scans/${s.id}/export?format=${f}" download>${{ sarif: "SARIF", cyclonedx: "CycloneDX SBOM", json: "JSON", csv: "CSV" }[f]}<span class="sr-only"> export of scan ${s.id}</span></a>`).join(" ");
+    const head = `${banner}<p class="hint">${notes.join("<br>")}<br>Scanned ${esc(when(s.finished_at))}.</p>${warnBox}<p class="pj-export"><span class="muted">Export:</span> ${dl}</p>`;
     if (!findings.length) {
       $("#findings").innerHTML = head + `<div class="empty">${cov && cov.state !== "verified" ? `No known vulnerabilities in the ${cov.checked} checked dependenc${cov.checked === 1 ? "y" : "ies"}; the rest were not checked.` : "No known vulnerabilities in the pinned dependencies."}</div>`;
       return;
@@ -353,5 +382,9 @@
   }
   addEventListener("popstate", route);
   $("#backLink").addEventListener("click", (e) => { e.preventDefault(); history.pushState(null, "", "/projects"); route(); });
-  Promise.all([window.ppHealth, window.ppReady]).then(([h, a]) => { health = h || {}; canEdit = !!(a && a.user); route(); });
+  Promise.all([window.ppHealth, window.ppReady]).then(async ([h, a]) => {
+    health = h || {}; canEdit = !!(a && a.user); isAdmin = !!(a && a.user && a.user.role === "admin");
+    if (canEdit) { try { channels = await api("/api/channels"); } catch { channels = []; } }
+    route();
+  });
 })();

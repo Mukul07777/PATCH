@@ -22,7 +22,7 @@ from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse, Re
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, config, db, manifests, scanner, settings, sources
+from . import auth, config, db, export, manifests, notify, sandbox, scanner, scheduler, settings, sources
 from .agent import PIN, Agent
 
 
@@ -38,7 +38,9 @@ class _GZipExceptSSE(GZipMiddleware):
 @contextlib.asynccontextmanager
 async def _lifespan(_app):
     _resume_queue()
+    scheduler.start(lambda fn: _spawn(fn))  # PATCHPILOT_SCHEDULER=0 turns it off
     yield
+    scheduler.stop()
 
 
 app = FastAPI(title="PatchPilot", lifespan=_lifespan)
@@ -66,7 +68,7 @@ CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-
 SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
                     "Referrer-Policy": "strict-origin-when-cross-origin"}
 log = logging.getLogger(__name__)
-config.RUNS_DIR.mkdir(exist_ok=True)
+config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class RunRequest(BaseModel):
@@ -307,6 +309,12 @@ def _record(run_id):
                 db.finish_run(run_id, bool(ev.get("ok")), {"error": ev["error"]} if ev.get("error") else None)
             except Exception:
                 log.warning("could not record end of run %s", run_id, exc_info=True)
+            try:
+                pid = db.runs_by_id().get(run_id)
+                if pid:
+                    notify.fix_completed(pid, run_id, bool(ev.get("ok")), ev.get("error"))
+            except Exception:
+                log.warning("fix_completed notification failed for run %s", run_id, exc_info=True)
     return emit
 
 
@@ -333,7 +341,18 @@ def health():
             "github": bool(config.github_token()), "remote_repos": config.allow_remote_repos(),
             "local_paths": config.ALLOW_LOCAL_PATHS, "fix_mode": bool(config.llm_api_key()), "scan_mode": True,
             "models": {t: (m or None) for t, m in config.model_overrides().items()},
-            "guard_model": config.model_guard() or None, "public_demo": _public_demo()}
+            "guard_model": config.model_guard() or None, "public_demo": _public_demo(),
+            "sandbox": _sandbox_state(), "remote_fix": config.remote_fix_allowed(),
+            "scheduler": os.getenv("PATCHPILOT_SCHEDULER", "1") != "0", "public_url": bool(config.public_url())}
+
+
+def _sandbox_state():
+    """Where fix-run tests execute: mode, and for docker whether the daemon answers (so the UI can explain)."""
+    mode = config.sandbox_mode()
+    out = {"mode": mode, "image": config.sandbox_image() if mode == "docker" else None}
+    out["docker"] = sandbox.docker_available() if mode == "docker" else None
+    out["ready"] = mode == "local" or bool(out["docker"])
+    return out
 
 
 @app.get("/api/stats")
@@ -493,26 +512,87 @@ def _fix_target(req):
     raise HTTPException(400, "Fix mode is not available for local path projects yet")
 
 
-@app.post("/api/runs")
-def start_run(req: RunRequest, request: Request):
-    _need(request)
-    if not config.llm_api_key():
-        raise HTTPException(400, "No LLM API key is configured on the server (Settings or NEBIUS_API_KEY)")
-    repo, project_id = _fix_target(req)
+def _active_runs():
     with _runs_lock:
-        if sum(1 for v in RUNS.values() if not v["done"]) >= MAX_ACTIVE_RUNS:
-            raise HTTPException(429, "Too many runs in progress; try again shortly", headers={"Retry-After": "30"})
-    _limit(_ip(request), "Too many runs; try again in a minute")
+        return sum(1 for v in RUNS.values() if not v["done"])
+
+
+def _launch(repo, project_id):
+    """Start an agent fix run in a thread; the caller has checked keys, sandbox and the run budget."""
     run_id = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
     with _runs_lock:
         RUNS[run_id] = {"events": [], "done": False}
     _evict()
     emit = _record(run_id)
     db.create_scan(project_id, "fix", "running", run_id)
-    _audit(request, "run.start", {"run_id": run_id, "project_id": project_id, "repo": repo})
     emit({"type": "start", "repo": repo, "project": project_id, "t": 0})
     threading.Thread(target=_run_agent, args=(run_id, repo, emit), daemon=True).start()
+    return run_id
+
+
+@app.post("/api/runs")
+def start_run(req: RunRequest, request: Request):
+    _need(request)
+    if not config.llm_api_key():
+        raise HTTPException(400, "No LLM API key is configured on the server (Settings or NEBIUS_API_KEY)")
+    repo, project_id = _fix_target(req)
+    try:
+        sandbox.check_mode()
+    except sandbox.SandboxUnavailable as e:
+        raise HTTPException(503, str(e))
+    if repo.startswith("https://") and not config.remote_fix_allowed():
+        raise HTTPException(403, "Fix runs on remote repositories are disabled: use the Docker sandbox (SANDBOX=docker) "
+                                 "or let an admin allow remote repos in Settings")
+    if _active_runs() >= MAX_ACTIVE_RUNS:
+        raise HTTPException(429, "Too many runs in progress; try again shortly", headers={"Retry-After": "30"})
+    _limit(_ip(request), "Too many runs; try again in a minute")
+    run_id = _launch(repo, project_id)
+    _audit(request, "run.start", {"run_id": run_id, "project_id": project_id, "repo": repo})
     return {"id": run_id}
+
+
+def autofix_after_scan(scan_id, project_id, ok):
+    """Scanner hook: when a project's policy has auto_fix on and this scan found new fixable findings at or above
+    its threshold, start an agent fix run (if fix mode can run here). Returns why it did or did not start."""
+    if not ok:
+        return "scan failed"
+    pol = db.get_policy(project_id)
+    if not pol["auto_fix"]:
+        return "auto_fix off"
+    project = db.get_project(project_id)
+    if project is None or project["source_type"] not in ("git", "sample"):
+        return "not a repository project"
+    fixable = [f for f in db.new_findings(scan_id) if not f.get("suppressed") and f.get("fixed_in")]
+    if not fixable:
+        return "no new fixable findings"
+    reason = None
+    if not config.llm_api_key():
+        reason = "no LLM API key"
+    elif project["source_type"] == "git" and not config.remote_fix_allowed():
+        reason = "remote fix runs not allowed (enable the Docker sandbox or allow remote repos)"
+    else:
+        try:
+            sandbox.check_mode()
+        except sandbox.SandboxUnavailable:
+            reason = "Docker sandbox unavailable"
+    if reason is None:
+        with _runs_lock:
+            if any(r["kind"] == "fix" and r["status"] == "running" for r in db.list_scans(project_id, 5)):
+                reason = "a fix run is already in progress for this project"
+            elif _active_runs() >= MAX_ACTIVE_RUNS:
+                reason = f"{MAX_ACTIVE_RUNS} fix runs already in progress"
+    if reason:
+        db.audit("auto-fix", "autofix.skipped", {"project_id": project_id, "scan_id": scan_id, "reason": reason})
+        return reason
+    repo = project["source"] if project["source_type"] == "git" else f"case:{project['source']}"
+    run_id = _launch(repo, project_id)
+    db.audit("auto-fix", "autofix.start", {"project_id": project_id, "scan_id": scan_id, "run_id": run_id,
+                                           "findings": len(fixable)})
+    return "started"
+
+
+if autofix_after_scan not in scanner.AFTER_SCAN:
+    scanner.AFTER_SCAN.append(autofix_after_scan)
 
 
 @app.api_route("/api/runs", methods=["GET", "HEAD"])
@@ -698,6 +778,21 @@ def create_project(req: ProjectRequest, request: Request):
     return db.get_project(pid)
 
 
+@app.post("/api/projects/scan-all", status_code=202)
+def scan_all(request: Request):
+    """Admin: queue a scan for every project that has none queued or running."""
+    _need(request, "admin")
+    _limit("scanall:" + _ip(request), "Too many requests; try again in a minute")
+    queued = []
+    for p in db.list_projects():
+        if not db.active_scan(p["id"]):
+            queued.append(db.create_scan(p["id"], "scan", "queued"))
+    _audit(request, "scan.all", {"scans": len(queued)})
+    for _ in range(min(len(queued), scanner.MAX_ACTIVE_SCANS)):
+        scanner.kick(lambda fn: _spawn(fn))
+    return {"queued": len(queued), "scan_ids": queued}
+
+
 @app.post("/api/projects/samples", status_code=201)
 def create_samples(request: Request):
     """Add the bundled demo cases as sample projects (skipping any already added)."""
@@ -770,10 +865,34 @@ def get_scan(sid: int, request: Request):
     return s
 
 
+@app.get("/api/scans/{sid}/export")
+def export_scan(sid: int, request: Request, format: str = Query("sarif", pattern="^(sarif|cyclonedx|json|csv)$")):
+    """A finished scan as SARIF 2.1.0, CycloneDX 1.5 JSON, JSON or CSV (policy-suppressed findings are left out
+    of SARIF and CycloneDX, and marked in JSON / CSV)."""
+    s = db.get_scan(sid)
+    if s is None or s["project_id"] is None or s["kind"] != "scan":
+        raise HTTPException(404, "Unknown scan")
+    p = _visible(request, s["project_id"])
+    if s["status"] != "done":
+        raise HTTPException(409, "The scan has not finished")
+    summary = s["summary"] or {}
+    report = {"name": p["name"], "findings": s["findings"], "deps": summary.get("deps") or [],
+              "files": summary.get("files") or [], "commit": summary.get("commit"),
+              "repository": p["source"] if p["source_type"] == "git" else None,
+              "summary": {k: v for k, v in summary.items() if k != "deps"}}
+    mime, ext = export.FORMATS[format]
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "-", p["name"]).strip("-")[:60] or "project"
+    return Response(export.render(report, format), media_type=mime, headers={
+        "Content-Disposition": f'attachment; filename="patchpilot-{slug}-scan{sid}.{ext}"'})
+
+
 # ---------- per-project policy ----------
 class PolicyRequest(BaseModel):
     severity_threshold: str = Field("low", pattern="^(low|moderate|high|critical)$")
-    auto_fix: bool = False  # stored now; acted on by a later release
+    auto_fix: bool = False  # start a fix run when a scan finds new fixable findings (if fix mode can run)
+    schedule: str | None = Field(None, pattern="^(off|daily|weekly)$")  # None keeps the stored schedule
+    schedule_hour: int | None = Field(None, ge=0, le=23)  # UTC
+    channels: list[int] | None = Field(None, max_length=100)  # None = every notification channel
 
 
 class IgnoreRequest(BaseModel):
@@ -792,10 +911,18 @@ def get_policy(pid: int, request: Request):
 def put_policy(pid: int, req: PolicyRequest, request: Request):
     user = _need(request)
     _project_or_404(pid)
-    db.set_policy(pid, req.severity_threshold, req.auto_fix, user["label"])
+    chans = req.channels if "channels" in req.model_fields_set else False
+    if chans:
+        known = {c["id"] for c in db.list_channels()}
+        if any(c not in known for c in chans):
+            raise HTTPException(422, "channels: unknown notification channel id")
+    db.set_policy(pid, req.severity_threshold, req.auto_fix, user["label"], schedule=req.schedule,
+                  schedule_hour=req.schedule_hour, channels=chans)
+    pol = db.get_policy(pid)
     _audit(request, "policy.update", {"project_id": pid, "severity_threshold": req.severity_threshold,
-                                      "auto_fix": req.auto_fix})
-    return db.get_policy(pid)
+                                      "auto_fix": req.auto_fix, "schedule": pol["schedule"],
+                                      "schedule_hour": pol["schedule_hour"], "channels": pol["channels"]})
+    return pol
 
 
 @app.post("/api/projects/{pid}/ignores", status_code=201)
@@ -1097,6 +1224,84 @@ def test_connection(service: str, request: Request):
             raise HTTPException(404, "Unknown service")
     _audit(request, "settings.test", {"service": service, "ok": result["ok"]})
     return result
+
+
+# ---------- notification channels ----------
+class ChannelRequest(BaseModel):
+    type: str = Field(..., pattern="^(slack|webhook|email)$")
+    name: str = Field(..., max_length=80)
+    config: dict = Field(default_factory=dict)  # slack {url}; webhook {url, secret?}; email {to: [..] or "a, b"}
+    events: list[str] = Field(..., max_length=len(notify.EVENTS))
+    min_severity: str = Field("low", pattern="^(low|moderate|high|critical)$")
+    enabled: bool = True
+
+
+@app.get("/api/channels")
+def list_channels(request: Request):
+    """Admins see each channel's (masked) config; members only what they need to opt projects in or out."""
+    user = _need(request)
+    rows = db.list_channels()
+    if user["role"] != "admin":
+        return [{k: c[k] for k in ("id", "type", "name", "events", "enabled")} for c in rows]
+    return [notify.public(c) for c in rows]
+
+
+def _save_channel(request, cid, req):
+    _need(request, "admin")
+    try:
+        cid = notify.save(cid, req.type, req.name, req.config, req.events, req.min_severity, req.enabled)
+    except notify.ChannelError as e:
+        raise HTTPException(422, str(e))
+    except LookupError:
+        raise HTTPException(404, "Unknown channel")
+    return cid
+
+
+@app.post("/api/channels", status_code=201)
+def create_channel(req: ChannelRequest, request: Request):
+    cid = _save_channel(request, None, req)
+    _audit(request, "channel.create", {"channel_id": cid, "type": req.type, "name": req.name.strip(),
+                                       "events": sorted(req.events)})
+    row = notify.public(db.get_channel(cid))
+    if req.type == "webhook":  # the signing secret is shown once, when it is set (generated if left blank)
+        row["secret"] = notify.config_of(db.get_channel(cid)).get("secret")
+    return row
+
+
+@app.put("/api/channels/{cid}")
+def update_channel(cid: int, req: ChannelRequest, request: Request):
+    _save_channel(request, cid, req)
+    _audit(request, "channel.update", {"channel_id": cid, "type": req.type, "name": req.name.strip(),
+                                       "events": sorted(req.events), "enabled": req.enabled})
+    return notify.public(db.get_channel(cid))
+
+
+@app.delete("/api/channels/{cid}", status_code=204)
+def delete_channel(cid: int, request: Request):
+    _need(request, "admin")
+    if not db.delete_channel(cid):
+        raise HTTPException(404, "Unknown channel")
+    _audit(request, "channel.delete", {"channel_id": cid})
+
+
+@app.post("/api/channels/{cid}/test")
+def test_channel(cid: int, request: Request):
+    _need(request, "admin")
+    _limit("probe:" + _ip(request), "Too many tests; try again in a minute")
+    row = db.get_channel(cid)
+    if row is None:
+        raise HTTPException(404, "Unknown channel")
+    status = notify.send_test(row)
+    last = db.list_deliveries(cid, 1)
+    _audit(request, "channel.test", {"channel_id": cid, "status": status})
+    return {"ok": status == "ok", "status": status, "delivery": last[0] if last else None}
+
+
+@app.get("/api/deliveries")
+def list_deliveries(request: Request, channel: int | None = Query(None, ge=1),
+                    limit: int = Query(50, ge=1, le=200)):
+    _need(request, "admin")
+    return db.list_deliveries(channel, limit)
 
 
 @app.api_route("/robots.txt", methods=["GET", "HEAD"], include_in_schema=False)

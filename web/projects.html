@@ -29,7 +29,7 @@
   <div id="status" class="pj-status" role="status" aria-live="polite"></div>
 
   <section id="listView" aria-labelledby="listTitle">
-    <div class="filters pj-bar pj-listhead"><h2 id="listTitle">Projects</h2><button type="button" class="btn ghost sm" id="samplesBtn">Add sample projects</button></div>
+    <div class="filters pj-bar pj-listhead"><h2 id="listTitle">Projects</h2><span class="pj-actions"><button type="button" class="btn ghost sm" id="scanAllBtn" hidden>Scan all projects</button><button type="button" class="btn ghost sm" id="samplesBtn">Add sample projects</button></span></div>
     <div id="projects" class="pj-grid"><div class="empty span-all">Loading projects…</div></div>
 
     <div class="filters pj-newhead"><h2 id="newTitle">New project</h2></div>
@@ -83,8 +83,15 @@
         <div class="row2">
           <div><label for="threshold">Report findings rated at least</label>
             <select id="threshold"><option value="low">Low (everything)</option><option value="moderate">Moderate</option><option value="high">High</option><option value="critical">Critical</option></select></div>
-          <div><span aria-hidden="true">&nbsp;</span><label class="check"><input id="autoFix" type="checkbox"> Auto-fix new findings <span class="muted">(saved now, acted on in a later release)</span></label></div>
+          <div><span aria-hidden="true">&nbsp;</span><label class="check"><input id="autoFix" type="checkbox" aria-describedby="autoFixHint"> Auto-fix new findings</label></div>
+          <div><label for="schedule">Re-scan automatically</label>
+            <select id="schedule"><option value="off">Off</option><option value="daily">Daily</option><option value="weekly">Weekly (Mondays)</option></select></div>
+          <div><label for="scheduleHour">At (UTC)</label><select id="scheduleHour"></select></div>
         </div>
+        <p class="hint" id="nextRun"></p>
+        <p class="hint" id="autoFixHint">Auto-fix starts an agent fix run when a scan finds new fixable findings at or above the threshold. It needs an LLM key, a GitHub or sample project, and for GitHub projects the Docker sandbox or remote repos allowed by an admin.</p>
+        <fieldset class="pj-chans" id="chanBox" hidden><legend>Notify these channels</legend><div id="chanList"></div>
+          <p class="hint">New findings, failed scans and finished fix runs are sent to the ticked channels (all channels by default). Channels are managed in Settings.</p></fieldset>
         <p class="hint">Findings below the threshold, and ignored advisories, are shown as suppressed and left out of counts and the dashboard. Unrated findings are always reported.</p>
         <p class="pj-err" id="policyErr" role="alert" hidden></p>
         <div class="pj-actions"><button class="btn ghost" type="submit" id="policyBtn">Save policy</button></div>

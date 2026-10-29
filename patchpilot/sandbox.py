@@ -3,9 +3,12 @@ import os
 import re
 import shutil
 import subprocess
-import threading
 import sys
+import threading
+import time
 from pathlib import Path
+
+from . import config
 
 
 def venv_python(venv):
@@ -38,17 +41,96 @@ def run(cmd, cwd, timeout=600):
     return p.returncode, (p.stdout or "") + (p.stderr or "")
 
 
+# ---------- Docker mode ----------
+DOCKER_WORK = "/work"
+DOCKER_VENV = "/work/.patchpilot/venv"  # inside the mounted work dir: the container's root filesystem is read-only
+_docker_cache = {}
+
+
+class SandboxUnavailable(RuntimeError):
+    pass
+
+
+def docker_available(now=None):
+    """True when a docker CLI is on PATH and its daemon answers (cached for 60 s)."""
+    now = time.monotonic() if now is None else now
+    hit = _docker_cache.get("ok")
+    if hit and now - hit[0] < 60:
+        return hit[1]
+    exe = shutil.which("docker")
+    ok = False
+    if exe:
+        try:
+            ok = subprocess.run([exe, "info", "--format", "{{.ServerVersion}}"], capture_output=True, text=True,
+                                timeout=10).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            ok = False
+    _docker_cache["ok"] = (now, ok)
+    return ok
+
+
+def check_mode():
+    """Raise SandboxUnavailable when SANDBOX=docker is configured but docker cannot be used."""
+    if config.sandbox_mode() == "docker" and not docker_available():
+        raise SandboxUnavailable("SANDBOX=docker is configured but Docker is not available on this server "
+                                 "(docker CLI missing or daemon not running); fix runs are refused until it is")
+
+
+def _user():
+    getuid = getattr(os, "getuid", None)
+    uid = getuid() if getuid else 1000
+    gid = os.getgid() if getuid else 1000
+    return f"{uid}:{gid}" if uid else "1000:1000"  # never root inside the container
+
+
+def docker_argv(repo, cmd, network, image=None):
+    """`docker run` for one sandbox step. Only the work dir is mounted (rw); the root filesystem is read-only,
+    /tmp is a tmpfs, the process runs as a non-root user with no extra capabilities and bounded memory, CPU
+    and process count. network=False (tests, scripts) runs with --network none; only the install step has a
+    network."""
+    return ["docker", "run", "--rm", "-i",
+            "--network", "bridge" if network else "none",
+            "--memory", "2g", "--cpus", "2", "--pids-limit", "512",
+            "--read-only", "--tmpfs", "/tmp:rw,exec,size=512m",
+            "--user", _user(), "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "-e", "HOME=/tmp", "-e", "PIP_DISABLE_PIP_VERSION_CHECK=1", "-e", "PYTHONDONTWRITEBYTECODE=1",
+            "-e", "PIP_CACHE_DIR=/tmp/pip-cache",
+            "-v", f"{Path(repo).resolve()}:{DOCKER_WORK}:rw", "-w", DOCKER_WORK,
+            image or config.sandbox_image(), *cmd]
+
+
+def _to_container(arg, repo):
+    """Host paths inside the work dir become /work/...; anything else passes through unchanged."""
+    try:
+        rel = Path(arg).resolve().relative_to(Path(repo).resolve())
+    except (ValueError, OSError):
+        return arg
+    return f"{DOCKER_WORK}/{rel.as_posix()}" if Path(arg).exists() else arg
+
+
 class Sandbox:
-    def __init__(self, repo_dir, log):
+    def __init__(self, repo_dir, log, mode=None):
         self.repo = Path(repo_dir)
         self.venv = self.repo.parent / (self.repo.name + "-venv")
         self.log = log
-
-        self.uv = uv_path()
+        self.mode = mode or config.sandbox_mode()
+        if self.mode == "docker":
+            check_mode()
+        self.uv = uv_path() if self.mode == "local" else None
         self._prep = None
         self._prep_result = None
 
+    def _py(self, args, network=False, timeout=600):
+        """Run the sandbox interpreter with args: (exit code, output)."""
+        if self.mode == "docker":
+            args = [_to_container(a, self.repo) for a in args]
+            return run(docker_argv(self.repo, [f"{DOCKER_VENV}/bin/python", *args], network), cwd=self.repo,
+                       timeout=timeout)
+        return run([venv_python(self.venv), *args], cwd=self.repo, timeout=timeout)
+
     def ensure_venv(self):
+        if self.mode == "docker":
+            return
         if not self.venv.exists():
             self.log("Creating isolated virtualenv" + (" (uv)" if self.uv else ""))
             cmd = ([self.uv, "venv", "-q", "--python", sys.executable, str(self.venv)] if self.uv
@@ -58,6 +140,12 @@ class Sandbox:
                 raise RuntimeError(out)
 
     def install(self):
+        if self.mode == "docker":
+            self.log(f"Installing requirements.txt in a Docker sandbox ({config.sandbox_image()})")
+            script = (f"test -x {DOCKER_VENV}/bin/python || python -m venv {DOCKER_VENV}; "
+                      f"{DOCKER_VENV}/bin/python -m pip install -q -r requirements.txt pytest")
+            code, out = run(docker_argv(self.repo, ["sh", "-c", script], network=True), cwd=self.repo)
+            return code == 0, out[-4000:]
         self.ensure_venv()
         self.log("Installing requirements.txt")
         if self.uv:
@@ -87,19 +175,18 @@ class Sandbox:
 
     def python(self, script, *args):
         """Run a script with the sandbox interpreter; (ok, stdout+stderr)."""
-        code, out = run([venv_python(self.venv), script, *args], cwd=self.repo, timeout=120)
+        code, out = self._py([script, *args], timeout=120)
         return code == 0, out
 
     def test_cases(self, target):
         """Per-test outcome for one file: {"test_name[param]": True/False}."""
-        _, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "--tb=no", target],
-                     cwd=self.repo)
+        _, out = self._py(["-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "--tb=no", target])
         return {m.group(2): m.group(1) == "PASSED"
                 for m in re.finditer(r"^(PASSED|FAILED|ERROR) \S*?::(\S+)", out, re.M)}
 
     def test(self, target=None):
-        code, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",
-                         *([target] if target else [])], cwd=self.repo)
+        code, out = self._py(["-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",
+                              *([target] if target else [])])
         summary = next((l for l in reversed(out.splitlines()) if "passed" in l or "failed" in l or "error" in l),
                        out.strip().splitlines()[-1] if out.strip() else "no output")
         return code == 0, summary.strip("= "), out[-8000:]

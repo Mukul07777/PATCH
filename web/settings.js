@@ -3,15 +3,34 @@
   const $ = (s) => document.querySelector(s);
   const esc = window.ppEsc, api = window.ppApi;
   const SECRETS = ["llm_api_key", "tavily_api_key", "github_token"];
-  const PLAIN = ["llm_base_url", "model_nano", "model_super", "model_ultra", "model_guard", "max_fix_attempts"];
+  const PLAIN = ["llm_base_url", "model_nano", "model_super", "model_ultra", "model_guard", "max_fix_attempts", "sandbox", "sandbox_image", "public_url"];
+  const SMTP = ["smtp_host", "smtp_port", "smtp_user", "smtp_from"];
+  const EVENT_LABEL = { new_findings: "new findings", new_critical: "new critical", kev: "KEV", scan_failed: "scan failed", fix_completed: "fix finished", test: "test" };
   const when = (t) => (t ? new Date(t * 1000).toLocaleString() : "–");
   const say = (msg, bad) => { const el = $("#status"); el.textContent = msg || ""; el.classList.toggle("bad", !!bad); };
   const err = (id, msg) => { const el = $(id); el.textContent = msg || ""; el.hidden = !msg; };
   let me = null, auditPage = 1;
 
   // ---------- providers ----------
+  function secretState(k, v) {
+    $("#" + k).value = "";
+    $("#" + k).placeholder = v.set ? "•••• stored, type to replace" : "not set";
+    $(`#${k}_st`).textContent = v.set ? `Set${v.last4 ? `, ends in ${v.last4}` : ""} (from ${v.source === "settings" ? "these settings" : "the server environment"})` : "Not set";
+  }
+  async function sandboxNote() {
+    const h = await (window.ppHealth || Promise.resolve({}));
+    const sb = h.sandbox || {};
+    $("#sandboxSt").textContent = sb.mode === "docker"
+      ? (sb.ready ? `Docker sandbox active (${sb.image}): installs run with network, tests with --network none, 2 GB memory, 2 CPUs, read-only root, non-root user. Remote repositories may be fixed.`
+        : "Docker sandbox selected but Docker is not available on this server: fix runs are refused until it is.")
+      : "Local virtualenv: fix-run tests run on this server as the PatchPilot user. Choose Docker to isolate them (and to allow remote repositories without the switch above).";
+  }
   function fill(s) {
-    PLAIN.forEach((k) => { $("#" + k).value = s[k].value ?? ""; });
+    PLAIN.forEach((k) => { $("#" + k).value = s[k].value ?? (k === "sandbox" ? "local" : ""); });
+    SMTP.forEach((k) => { $("#" + k).value = s[k].value ?? ""; });
+    $("#smtp_starttls").checked = s.smtp_starttls.value !== "0";
+    secretState("smtp_password", s.smtp_password);
+    sandboxNote();
     $("#allow_remote_repos").checked = !!s.allow_remote_repos.value;
     SECRETS.forEach((k) => {
       const v = s[k];
@@ -35,6 +54,7 @@
       $("#clearSecrets").checked = false;
       say("Settings saved. They apply to the next scan or run.");
       window.ppHealth = fetch("/api/health").then((r) => r.json()).catch(() => ({}));
+      sandboxNote();
     } catch (x) { err("#setErr", x.message); }
     finally { btn.disabled = false; }
   });
@@ -47,6 +67,96 @@
     } catch (x) { out.textContent = `${name}: ${x.message}`; }
     finally { b.disabled = false; }
   }));
+
+  // ---------- email (SMTP) ----------
+  $("#smtpForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); err("#smtpErr", "");
+    const body = {};
+    SMTP.forEach((k) => { body[k] = $("#" + k).value.trim(); });
+    body.smtp_starttls = $("#smtp_starttls").checked;
+    const pw = $("#smtp_password").value;
+    if (pw) body.smtp_password = pw;
+    try { fill(await api("/api/settings", { method: "PUT", body: JSON.stringify(body) })); say("Email settings saved."); loadAudit(); }
+    catch (x) { err("#smtpErr", x.message); }
+  });
+
+  // ---------- notification channels ----------
+  let chans = [], editing = null;
+  function showType() {
+    const t = $("#c_type").value;
+    document.querySelectorAll("#chanForm [data-for]").forEach((d) => { d.hidden = !d.dataset.for.split(" ").includes(t); });
+    $("#c_url").placeholder = t === "slack" ? "https://hooks.slack.com/services/…" : "https://example.com/hooks/patchpilot";
+  }
+  $("#c_type").addEventListener("change", showType);
+  function resetChan() {
+    editing = null; $("#chanForm").reset(); showType();
+    $("#chanTitle").textContent = "Add a channel"; $("#chanSave").textContent = "Add channel"; $("#chanCancel").hidden = true;
+    $("#c_type").disabled = false;
+  }
+  $("#chanCancel").onclick = resetChan;
+  async function loadChannels() {
+    chans = await api("/api/channels");
+    const cfg = (c) => c.type === "email" ? (c.config.to || []).join(", ") : (c.config.url || "") + (c.type === "webhook" && c.config.secret_last4 ? ` (secret …${c.config.secret_last4})` : "");
+    $("#channels").innerHTML = chans.length ? `<table class="bench"><caption class="sr-only">Notification channels</caption>
+      <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Target</th><th scope="col">Events</th><th scope="col">Min severity</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <tbody>${chans.map((c) => `<tr><td>${esc(c.name)}${c.enabled ? "" : ' <span class="status na">disabled</span>'}${c.readable ? "" : ' <span class="status bad">unreadable</span>'}</td><td><span class="tag">${esc(c.type)}</span></td>
+        <td class="pj-sum"><code>${esc(cfg(c))}</code></td><td>${c.events.map((e) => esc(EVENT_LABEL[e] || e)).join(", ")}</td><td>${esc(c.min_severity)}</td>
+        <td><button type="button" class="btn ghost sm" data-ctest="${c.id}">Send test<span class="sr-only"> to ${esc(c.name)}</span></button>
+          <button type="button" class="btn ghost sm" data-cedit="${c.id}">Edit<span class="sr-only"> ${esc(c.name)}</span></button>
+          <button type="button" class="btn ghost sm" data-cdel="${c.id}">Delete<span class="sr-only"> ${esc(c.name)}</span></button></td></tr>`).join("")}</tbody></table>`
+      : '<div class="empty">No channels yet.</div>';
+    $("#channels").querySelectorAll("[data-ctest]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true; say("Sending a test message…");
+      try {
+        const r = await api(`/api/channels/${b.dataset.ctest}/test`, { method: "POST" });
+        const d = r.delivery || {};
+        say(r.ok ? `Test delivered${d.response_code ? ` (HTTP ${d.response_code})` : ""}.` : `Test failed: ${d.error || r.status}`, !r.ok);
+        loadDeliveries(); loadAudit();
+      } catch (x) { say(x.message, true); }
+      finally { b.disabled = false; }
+    }));
+    $("#channels").querySelectorAll("[data-cedit]").forEach((b) => b.addEventListener("click", () => {
+      const c = chans.find((x) => x.id === Number(b.dataset.cedit));
+      editing = c.id; $("#c_type").value = c.type; $("#c_type").disabled = true; showType();
+      $("#c_name").value = c.name; $("#c_sev").value = c.min_severity; $("#c_enabled").checked = c.enabled;
+      $("#c_url").value = c.type === "webhook" ? c.config.url || "" : ""; $("#c_url").placeholder = c.type === "slack" ? "stored, type to replace" : $("#c_url").placeholder;
+      $("#c_to").value = (c.config.to || []).join(", "); $("#c_secret").value = "";
+      document.querySelectorAll("#chanForm [name=ev]").forEach((x) => { x.checked = c.events.includes(x.value); });
+      $("#chanTitle").textContent = `Edit ${c.name}`; $("#chanSave").textContent = "Save channel"; $("#chanCancel").hidden = false;
+      $("#c_name").focus();
+    }));
+    $("#channels").querySelectorAll("[data-cdel]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Delete this channel and its delivery log?")) return;
+      try { await api(`/api/channels/${b.dataset.cdel}`, { method: "DELETE" }); say("Channel deleted."); if (editing === Number(b.dataset.cdel)) resetChan(); loadChannels(); loadDeliveries(); loadAudit(); }
+      catch (x) { say(x.message, true); }
+    }));
+  }
+  $("#chanForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); err("#chanErr", "");
+    const type = $("#c_type").value;
+    const config = type === "email" ? { to: $("#c_to").value } : { url: $("#c_url").value.trim() };
+    if (type === "webhook" && $("#c_secret").value.trim()) config.secret = $("#c_secret").value.trim();
+    const body = { type, name: $("#c_name").value.trim(), config, min_severity: $("#c_sev").value, enabled: $("#c_enabled").checked,
+      events: [...document.querySelectorAll("#chanForm [name=ev]")].filter((x) => x.checked).map((x) => x.value) };
+    if (!body.name) return err("#chanErr", "Give the channel a name.");
+    if (!body.events.length) return err("#chanErr", "Pick at least one event.");
+    try {
+      const r = await api(editing ? `/api/channels/${editing}` : "/api/channels", { method: editing ? "PUT" : "POST", body: JSON.stringify(body) });
+      const box = $("#chanSecret");
+      if (r.secret) { box.hidden = false; box.innerHTML = `<p><b>Signing secret</b> (verify <code>X-PatchPilot-Signature</code> with it; shown once):</p><div class="st-newkey">${esc(r.secret)}</div>`; }
+      else box.hidden = true;
+      say(editing ? "Channel saved." : `Added ${body.name}.`); resetChan(); loadChannels(); loadAudit();
+    } catch (x) { err("#chanErr", x.message); }
+  });
+  async function loadDeliveries() {
+    const rows = await api("/api/deliveries?limit=25");
+    $("#deliveries").innerHTML = rows.length ? `<table class="bench"><caption class="sr-only">Recent notification deliveries</caption>
+      <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Event</th><th scope="col">Status</th><th scope="col">Response</th><th scope="col">Attempts</th></tr></thead>
+      <tbody>${rows.map((d) => `<tr><td>${esc(when(d.created_at))}</td><td>${esc(d.channel || "(deleted)")}</td><td>${esc(EVENT_LABEL[d.event] || d.event)}</td>
+        <td><span class="status ${d.status === "ok" ? "ok" : d.status === "failed" ? "bad" : "na"}">${esc(d.status)}</span></td>
+        <td>${esc(d.response_code ?? "")} ${d.error ? `<span class="muted">${esc(d.error)}</span>` : ""}</td><td>${esc(d.attempts)}</td></tr>`).join("")}</tbody></table>`
+      : '<div class="empty">Nothing delivered yet.</div>';
+  }
 
   // ---------- users ----------
   async function loadUsers() {
@@ -158,10 +268,11 @@
     if (!me) return;
     if (me.via === "session") { $("#secAccount").hidden = false; $("#acctWho").textContent = `Signed in as ${me.email} (${me.role}).`; }
     if (me.role !== "admin") { $("#denied").hidden = false; return; }
-    ["#secProviders", "#secUsers", "#secKeys", "#secAudit"].forEach((s) => ($(s).hidden = false));
+    ["#secProviders", "#secNotify", "#secUsers", "#secKeys", "#secAudit"].forEach((s) => ($(s).hidden = false));
+    showType();
     try {
       fill(await api("/api/settings"));
-      await Promise.all([loadUsers(), loadKeys(), loadAudit()]);
+      await Promise.all([loadChannels(), loadDeliveries(), loadUsers(), loadKeys(), loadAudit()]);
     } catch (x) { say(`Could not load settings: ${x.message}`, true); }
   });
 })();

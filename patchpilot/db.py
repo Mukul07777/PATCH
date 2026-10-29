@@ -129,6 +129,52 @@ MIGRATIONS = [
     ALTER TABLE findings ADD COLUMN source_file TEXT;
     ALTER TABLE findings ADD COLUMN cvss_score REAL
     """,
+    # 4: scheduled re-scans, a lease so only one process schedules, notification channels + delivery log,
+    # the manifest line of each finding (SARIF) and a GitHub API response cache (ETags)
+    """
+    ALTER TABLE project_policy ADD COLUMN schedule TEXT NOT NULL DEFAULT 'off';
+    ALTER TABLE project_policy ADD COLUMN schedule_hour INTEGER NOT NULL DEFAULT 3;
+    ALTER TABLE project_policy ADD COLUMN next_run_at REAL;
+    ALTER TABLE project_policy ADD COLUMN channels TEXT;
+    ALTER TABLE findings ADD COLUMN source_line INTEGER;
+    CREATE TABLE leases (
+        name TEXT PRIMARY KEY,
+        holder TEXT NOT NULL,
+        expires_at REAL NOT NULL
+    );
+    CREATE TABLE channels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK (type IN ('slack', 'webhook', 'email')),
+        name TEXT NOT NULL,
+        config TEXT NOT NULL,
+        events TEXT NOT NULL,
+        min_severity TEXT NOT NULL DEFAULT 'low',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at REAL NOT NULL,
+        updated_at REAL
+    );
+    CREATE TABLE deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+        event TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL,
+        project_id INTEGER,
+        status TEXT NOT NULL,
+        response_code INTEGER,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        created_at REAL NOT NULL,
+        finished_at REAL,
+        UNIQUE (channel_id, dedupe_key)
+    );
+    CREATE INDEX deliveries_channel ON deliveries(channel_id, id);
+    CREATE TABLE gh_cache (
+        url TEXT PRIMARY KEY,
+        etag TEXT,
+        body TEXT NOT NULL,
+        fetched_at REAL NOT NULL
+    )
+    """,
 ]
 
 _lock = threading.RLock()
@@ -368,11 +414,12 @@ def add_findings(scan_id, project_id, rows):
         try:
             conn.executemany(
                 "INSERT INTO findings (scan_id, project_id, package, version, vuln_id, aliases, severity, cvss, epss, kev, "
-                "fixed_in, summary, reachable, source_file, cvss_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "fixed_in, summary, reachable, source_file, cvss_score, source_line) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [(scan_id, project_id, f["package"], f.get("version"), f["vuln_id"], json.dumps(f.get("aliases") or []),
                   f.get("severity"), f.get("cvss"), f.get("epss"), 1 if f.get("kev") else 0, f.get("fixed_in"),
                   f.get("summary"), None if f.get("reachable") is None else int(bool(f["reachable"])),
-                  f.get("source_file"), f.get("cvss_score")) for f in rows])
+                  f.get("source_file"), f.get("cvss_score"), f.get("source_line")) for f in rows])
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
@@ -476,20 +523,152 @@ def track_findings(scan_id, project_id, rows, now=None):
 
 
 # ---------- policy ----------
+SCHEDULES = ("off", "daily", "weekly")
+
+
 def get_policy(project_id):
-    rows = _q("SELECT severity_threshold, auto_fix, updated_at, updated_by FROM project_policy WHERE project_id = ?",
-              (project_id,))
-    p = rows[0] if rows else {"severity_threshold": "low", "auto_fix": 0, "updated_at": None, "updated_by": None}
+    rows = _q("SELECT severity_threshold, auto_fix, schedule, schedule_hour, next_run_at, channels, updated_at, "
+              "updated_by FROM project_policy WHERE project_id = ?", (project_id,))
+    p = rows[0] if rows else {"severity_threshold": "low", "auto_fix": 0, "schedule": "off", "schedule_hour": 3,
+                              "next_run_at": None, "channels": None, "updated_at": None, "updated_by": None}
     p["auto_fix"] = bool(p["auto_fix"])
+    p["channels"] = None if p["channels"] is None else json.loads(p["channels"])  # None = every channel
     p["ignores"] = list_ignores(project_id)
     return p
 
 
-def set_policy(project_id, severity_threshold, auto_fix, actor):
-    _x("INSERT INTO project_policy (project_id, severity_threshold, auto_fix, updated_at, updated_by) "
-       "VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET severity_threshold = excluded.severity_threshold, "
-       "auto_fix = excluded.auto_fix, updated_at = excluded.updated_at, updated_by = excluded.updated_by",
-       (project_id, severity_threshold, 1 if auto_fix else 0, time.time(), actor))
+def next_run(schedule, hour, now=None):
+    """Next UTC time a schedule fires strictly after `now`: daily at hour:00, weekly on Mondays at hour:00."""
+    if schedule not in ("daily", "weekly"):
+        return None
+    now = time.time() if now is None else now
+    t = now - now % 86400 + hour * 3600
+    while t <= now or (schedule == "weekly" and time.gmtime(t).tm_wday != 0):
+        t += 86400
+    return t
+
+
+def set_policy(project_id, severity_threshold, auto_fix, actor, schedule=None, schedule_hour=None, channels=False,
+               now=None):
+    """Upsert a project's policy. schedule / schedule_hour left as None (channels: False) keep the stored value;
+    changing the schedule recomputes next_run_at. channels None = notify every channel."""
+    cur = get_policy(project_id)
+    schedule = cur["schedule"] if schedule is None else schedule
+    hour = cur["schedule_hour"] if schedule_hour is None else schedule_hour
+    chans = cur["channels"] if channels is False else channels
+    nxt = cur["next_run_at"]
+    if schedule != cur["schedule"] or hour != cur["schedule_hour"] or (schedule != "off" and nxt is None):
+        nxt = next_run(schedule, hour, now)
+    _x("INSERT INTO project_policy (project_id, severity_threshold, auto_fix, schedule, schedule_hour, next_run_at, "
+       "channels, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET "
+       "severity_threshold = excluded.severity_threshold, auto_fix = excluded.auto_fix, schedule = excluded.schedule, "
+       "schedule_hour = excluded.schedule_hour, next_run_at = excluded.next_run_at, channels = excluded.channels, "
+       "updated_at = excluded.updated_at, updated_by = excluded.updated_by",
+       (project_id, severity_threshold, 1 if auto_fix else 0, schedule, hour, nxt,
+        None if chans is None else json.dumps(sorted(set(chans))), time.time(), actor))
+
+
+def due_schedules(now):
+    return _q("SELECT project_id, schedule, schedule_hour FROM project_policy WHERE schedule != 'off' "
+              "AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at", (now,))
+
+
+def set_next_run(project_id, t):
+    _x("UPDATE project_policy SET next_run_at = ? WHERE project_id = ?", (t, project_id))
+
+
+def new_findings(scan_id):
+    """Findings of a scan whose (package, vuln) was first seen (or reopened) by that scan, policy-annotated."""
+    s = get_scan(scan_id)
+    return [f for f in (s or {}).get("findings", []) if f.get("new")]
+
+
+# ---------- lease (one scheduler across processes) ----------
+def acquire_lease(name, holder, ttl, now=None):
+    """Take or renew lease `name` for `holder` unless another holder's lease is still live. True when held."""
+    now = time.time() if now is None else now
+    with _lock:
+        conn = _connect()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute("SELECT holder, expires_at FROM leases WHERE name = ?", (name,)).fetchone()
+            if row and row["holder"] != holder and row["expires_at"] > now:
+                conn.execute("COMMIT")
+                return False
+            conn.execute("INSERT INTO leases (name, holder, expires_at) VALUES (?, ?, ?) ON CONFLICT(name) DO UPDATE "
+                         "SET holder = excluded.holder, expires_at = excluded.expires_at", (name, holder, now + ttl))
+            conn.execute("COMMIT")
+            return True
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
+def release_lease(name, holder):
+    _x("DELETE FROM leases WHERE name = ? AND holder = ?", (name, holder))
+
+
+# ---------- notification channels + delivery log (channel config arrives already encrypted) ----------
+def _channel_row(r):
+    r = dict(r)
+    r["events"] = json.loads(r["events"])
+    r["enabled"] = bool(r["enabled"])
+    return r
+
+
+def list_channels():
+    return [_channel_row(r) for r in _q("SELECT * FROM channels ORDER BY id")]
+
+
+def get_channel(cid):
+    rows = _q("SELECT * FROM channels WHERE id = ?", (cid,))
+    return _channel_row(rows[0]) if rows else None
+
+
+def save_channel(cid, type_, name, config_enc, events, min_severity, enabled):
+    if cid is None:
+        return _x("INSERT INTO channels (type, name, config, events, min_severity, enabled, created_at) "
+                  "VALUES (?, ?, ?, ?, ?, ?, ?)", (type_, name, config_enc, json.dumps(events), min_severity,
+                                                   1 if enabled else 0, time.time()))
+    _x("UPDATE channels SET type = ?, name = ?, config = ?, events = ?, min_severity = ?, enabled = ?, updated_at = ? "
+       "WHERE id = ?", (type_, name, config_enc, json.dumps(events), min_severity, 1 if enabled else 0, time.time(), cid))
+    return cid
+
+
+def delete_channel(cid):
+    with _lock:
+        return _connect().execute("DELETE FROM channels WHERE id = ?", (cid,)).rowcount > 0
+
+
+def start_delivery(channel_id, event, dedupe_key, project_id):
+    """Claim a delivery; None when this (channel, dedupe_key) was already sent or is in flight (dedupe)."""
+    with _lock:
+        cur = _connect().execute(
+            "INSERT OR IGNORE INTO deliveries (channel_id, event, dedupe_key, project_id, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?)", (channel_id, event, dedupe_key, project_id, time.time()))
+        return cur.lastrowid if cur.rowcount else None
+
+
+def finish_delivery(did, status, code, attempts, error=None):
+    _x("UPDATE deliveries SET status = ?, response_code = ?, attempts = ?, error = ?, finished_at = ? WHERE id = ?",
+       (status, code, attempts, str(error)[:300] if error else None, time.time(), did))
+
+
+def list_deliveries(channel_id=None, limit=50):
+    where, args = ("WHERE d.channel_id = ? ", (channel_id, limit)) if channel_id else ("", (limit,))
+    return _q("SELECT d.*, c.name AS channel FROM deliveries d LEFT JOIN channels c ON c.id = d.channel_id "
+              f"{where}ORDER BY d.id DESC LIMIT ?", args)
+
+
+# ---------- GitHub API response cache ----------
+def gh_cache_get(url):
+    rows = _q("SELECT etag, body FROM gh_cache WHERE url = ?", (url,))
+    return rows[0] if rows else None
+
+
+def gh_cache_put(url, etag, body):
+    _x("INSERT INTO gh_cache (url, etag, body, fetched_at) VALUES (?, ?, ?, ?) ON CONFLICT(url) DO UPDATE SET "
+       "etag = excluded.etag, body = excluded.body, fetched_at = excluded.fetched_at", (url, etag, body, time.time()))
 
 
 def list_ignores(project_id):

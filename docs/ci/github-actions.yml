@@ -1,0 +1,23 @@
+# Copy to .github/workflows/patchpilot.yml in your repository.
+name: Dependency scan
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"   # weekly, so new advisories surface without a code change
+permissions:
+  contents: read
+  security-events: write   # upload SARIF to code scanning
+jobs:
+  patchpilot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Mukul07777/PATCH@main   # pin a tag or commit sha in production
+        with:
+          path: .
+          fail-on: high
+          format: sarif
+          output: patchpilot.sarif
+          # ignore: GHSA-xxxx-xxxx-xxxx CVE-2024-0001

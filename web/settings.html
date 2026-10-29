@@ -61,8 +61,17 @@
       <input id="github_token" type="password" autocomplete="off" aria-describedby="github_token_st"><span class="st-secret" id="github_token_st"></span>
       <div class="row2">
         <div><label for="max_fix_attempts">Max fix attempts <span class="muted">(1 to 10)</span></label><input id="max_fix_attempts" type="number" min="1" max="10"></div>
-        <div><span class="lbl-sp" aria-hidden="true">&nbsp;</span><label class="check"><input id="allow_remote_repos" type="checkbox"> Allow fix runs on remote repositories</label></div>
+        <div><span class="lbl-sp" aria-hidden="true">&nbsp;</span><label class="check"><input id="allow_remote_repos" type="checkbox" aria-describedby="remoteWarn"> Allow fix runs on remote repositories</label></div>
       </div>
+      <p class="st-warn" id="remoteWarn">Fix runs install a repository's dependencies and run its tests. Without the Docker sandbox that code runs directly on this server with its permissions: only allow remote repositories you trust.</p>
+      <h3>Sandbox and links</h3>
+      <div class="row2">
+        <div><label for="sandbox">Fix-run sandbox</label><select id="sandbox" aria-describedby="sandboxSt"><option value="local">Local virtualenv</option><option value="docker">Docker container</option></select></div>
+        <div><label for="sandbox_image">Docker image</label><input id="sandbox_image" autocomplete="off" placeholder="python:3.12-slim"></div>
+      </div>
+      <p class="hint" id="sandboxSt"></p>
+      <label for="public_url">Public URL <span class="muted">(links in notifications)</span></label>
+      <input id="public_url" autocomplete="off" inputmode="url" placeholder="https://patchpilot.example.com">
       <p class="hint">Leave a key field empty to keep the stored key. Tick “clear” to remove a stored value and fall back to the server environment.</p>
       <label class="check"><input id="clearSecrets" type="checkbox"> Clear the stored keys I left empty</label>
       <p class="pj-err" id="setErr" role="alert" hidden></p>
@@ -75,6 +84,49 @@
       <button type="button" class="btn ghost sm" data-test="github">Test GitHub</button>
       <span id="testOut" role="status" aria-live="polite"></span>
     </div>
+  </section>
+
+  <section class="card glass st-sec" id="secNotify" aria-labelledby="notifyTitle" hidden>
+    <h2 id="notifyTitle">Notifications</h2>
+    <p class="hint">Channels hear about findings a scan sees for the first time, failed scans and finished fix runs. Each scan is sent at most once per channel; failed sends are retried 3 times. Projects can opt out of channels in their policy.</p>
+    <div id="channels" class="tbl-wrap"></div>
+    <form id="chanForm" class="fm" novalidate aria-labelledby="chanTitle">
+      <h3 id="chanTitle">Add a channel</h3>
+      <div class="row2">
+        <div><label for="c_type">Type</label><select id="c_type"><option value="webhook">Webhook (signed JSON)</option><option value="slack">Slack incoming webhook</option><option value="email">Email (SMTP)</option></select></div>
+        <div><label for="c_name">Name</label><input id="c_name" autocomplete="off" maxlength="80" placeholder="security-alerts"></div>
+        <div data-for="webhook slack"><label for="c_url">URL</label><input id="c_url" autocomplete="off" inputmode="url" placeholder="https://"></div>
+        <div data-for="webhook"><label for="c_secret">Signing secret <span class="muted">(blank: generate / keep)</span></label><input id="c_secret" type="password" autocomplete="off"></div>
+        <div data-for="email" hidden><label for="c_to">Recipients <span class="muted">(comma separated)</span></label><input id="c_to" autocomplete="off" placeholder="sec@example.com"></div>
+        <div><label for="c_sev">Minimum severity</label><select id="c_sev"><option value="low">Low (all)</option><option value="moderate">Moderate</option><option value="high">High</option><option value="critical">Critical</option></select></div>
+      </div>
+      <fieldset class="st-events"><legend>Events</legend>
+        <label class="check"><input type="checkbox" name="ev" value="new_findings" checked> New findings</label>
+        <label class="check"><input type="checkbox" name="ev" value="new_critical"> New critical</label>
+        <label class="check"><input type="checkbox" name="ev" value="kev"> New known-exploited (KEV)</label>
+        <label class="check"><input type="checkbox" name="ev" value="scan_failed" checked> Scan failed</label>
+        <label class="check"><input type="checkbox" name="ev" value="fix_completed"> Fix run finished</label>
+      </fieldset>
+      <label class="check"><input id="c_enabled" type="checkbox" checked> Enabled</label>
+      <p class="pj-err" id="chanErr" role="alert" hidden></p>
+      <div id="chanSecret" hidden></div>
+      <div class="pj-actions"><button class="btn ghost" type="submit" id="chanSave">Add channel</button><button class="btn ghost" type="button" id="chanCancel" hidden>Cancel</button></div>
+    </form>
+    <form id="smtpForm" class="fm" novalidate aria-labelledby="smtpTitle">
+      <h3 id="smtpTitle">Email server (SMTP)</h3>
+      <div class="row2">
+        <div><label for="smtp_host">Host</label><input id="smtp_host" autocomplete="off" placeholder="smtp.example.com"></div>
+        <div><label for="smtp_port">Port</label><input id="smtp_port" type="number" min="1" max="65535" placeholder="587"></div>
+        <div><label for="smtp_user">User</label><input id="smtp_user" autocomplete="off"></div>
+        <div><label for="smtp_password">Password</label><input id="smtp_password" type="password" autocomplete="off" aria-describedby="smtp_password_st"><span class="st-secret" id="smtp_password_st"></span></div>
+        <div><label for="smtp_from">From address</label><input id="smtp_from" type="email" autocomplete="off" placeholder="patchpilot@example.com"></div>
+        <div><span class="lbl-sp" aria-hidden="true">&nbsp;</span><label class="check"><input id="smtp_starttls" type="checkbox" checked> Use STARTTLS <span class="muted">(port 465 uses TLS directly)</span></label></div>
+      </div>
+      <p class="pj-err" id="smtpErr" role="alert" hidden></p>
+      <div class="pj-actions"><button class="btn ghost" type="submit">Save email settings</button></div>
+    </form>
+    <h3 id="delTitle">Delivery log</h3>
+    <div id="deliveries" class="tbl-wrap"></div>
   </section>
 
   <section class="card glass st-sec" id="secUsers" aria-labelledby="usersTitle" hidden>

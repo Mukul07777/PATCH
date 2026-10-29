@@ -18,9 +18,12 @@ from . import config, db
 
 log = logging.getLogger(__name__)
 
-SECRETS = ("llm_api_key", "tavily_api_key", "github_token")
+SECRETS = ("llm_api_key", "tavily_api_key", "github_token", "smtp_password")
 PLAIN = ("llm_base_url", "model_nano", "model_super", "model_ultra", "model_guard", "max_fix_attempts",
-         "allow_remote_repos")
+         "allow_remote_repos", "public_url", "sandbox", "sandbox_image", "smtp_host", "smtp_port", "smtp_user",
+         "smtp_from", "smtp_starttls")
+IMAGE = re.compile(r"[a-z0-9][a-z0-9._/:@-]{0,200}")
+EMAIL = re.compile(r"[^@\s]{1,64}@[^@\s]{1,190}")
 KEYS = SECRETS + PLAIN
 MODEL = re.compile(r"[\w./:@+-]{1,200}")
 
@@ -61,6 +64,19 @@ def _cipher():
         return f
 
 
+def encrypt(text):
+    """Encrypt any text with the settings key (notification channel configs use it too)."""
+    return _cipher().encrypt(text.encode()).decode()
+
+
+def decrypt(token):
+    """Inverse of encrypt; None when the current key cannot read it."""
+    try:
+        return _cipher().decrypt(token.encode()).decode()
+    except InvalidToken:
+        return None
+
+
 def get(key):
     """Stored value (decrypted) or None when unset or unreadable."""
     row = db.get_setting(key)
@@ -97,10 +113,38 @@ def _clean(key, value):
         if not 1 <= n <= 10:
             raise SettingsError("max_fix_attempts must be between 1 and 10")
         return str(n)
-    if key == "allow_remote_repos":
+    if key in ("allow_remote_repos", "smtp_starttls"):
         if value not in (True, False, "1", "0", "true", "false"):
-            raise SettingsError("allow_remote_repos must be true or false")
+            raise SettingsError(f"{key} must be true or false")
         return "1" if value in (True, "1", "true") else "0"
+    if key == "public_url":
+        if not isinstance(value, str) or len(value) > 300 or not re.fullmatch(r"https?://[^\s/?#]+(/[^\s?#]*)?", value):
+            raise SettingsError("public_url must be an http(s) URL such as https://patchpilot.example.com")
+        return value.rstrip("/")
+    if key == "sandbox":
+        if value not in ("local", "docker"):
+            raise SettingsError("sandbox must be local or docker")
+        return value
+    if key == "sandbox_image":
+        if not isinstance(value, str) or not IMAGE.fullmatch(value):
+            raise SettingsError("sandbox_image must be a Docker image name such as python:3.12-slim")
+        return value
+    if key in ("smtp_host", "smtp_user"):
+        if not isinstance(value, str) or len(value) > 200 or any(c.isspace() for c in value):
+            raise SettingsError(f"{key} must be a host name / user name without spaces")
+        return value
+    if key == "smtp_port":
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise SettingsError("smtp_port must be a whole number") from None
+        if not 1 <= n <= 65535:
+            raise SettingsError("smtp_port must be between 1 and 65535")
+        return str(n)
+    if key == "smtp_from":
+        if not isinstance(value, str) or not EMAIL.fullmatch(value):
+            raise SettingsError("smtp_from must be an email address")
+        return value
     raise SettingsError(f"Unknown setting {key}")
 
 
@@ -128,7 +172,11 @@ def _effective(key):
             "github_token": config.github_token, "llm_base_url": config.llm_base_url,
             "model_nano": lambda: config.model("nano"), "model_super": lambda: config.model("super"),
             "model_ultra": lambda: config.model("ultra"), "model_guard": config.model_guard,
-            "max_fix_attempts": config.max_fix_attempts, "allow_remote_repos": config.allow_remote_repos}[key]()
+            "max_fix_attempts": config.max_fix_attempts, "allow_remote_repos": config.allow_remote_repos,
+            "public_url": config.public_url, "sandbox": config.sandbox_mode, "sandbox_image": config.sandbox_image,
+            "smtp_host": lambda: config.smtp()["host"], "smtp_port": lambda: config.smtp()["port"],
+            "smtp_user": lambda: config.smtp()["user"], "smtp_password": lambda: config.smtp()["password"],
+            "smtp_from": lambda: config.smtp()["from"], "smtp_starttls": lambda: config.smtp()["starttls"]}[key]()
 
 
 def public():

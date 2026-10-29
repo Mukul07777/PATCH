@@ -1,0 +1,36 @@
+# Self-hosted PatchPilot: docker compose up -d, then open http://localhost:8000 and create the admin account.
+services:
+  patchpilot:
+    build: .
+    image: patchpilot:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      PATCHPILOT_DB: /data/patchpilot.db
+      PATCHPILOT_RUNS_DIR: /data/runs
+      # Encrypts stored secrets (provider keys, SMTP password, notification webhooks). Without it a random key is
+      # generated into /data/secret.key: then back up /data and keep that file private.
+      PATCHPILOT_SECRET_KEY: ${PATCHPILOT_SECRET_KEY:-}
+      # Base URL for links in Slack / webhook / email notifications (can also be set in Settings)
+      PATCHPILOT_PUBLIC_URL: ${PATCHPILOT_PUBLIC_URL:-}
+      # Optional: LLM fix mode
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # local | docker (docker needs the socket mount below)
+      SANDBOX: ${SANDBOX:-local}
+    volumes:
+      - patchpilot-data:/data
+      # SECURITY WARNING: mounting the Docker socket lets this container start containers on the host, which is
+      # equivalent to root on the host. Only enable it for SANDBOX=docker on a host dedicated to PatchPilot.
+      # The container user also needs access to the socket (e.g. group_add with the socket's group id).
+      # - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  patchpilot-data:

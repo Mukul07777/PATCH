@@ -255,8 +255,9 @@ class Agent:
         self.work.parent.mkdir(parents=True, exist_ok=True)
         src = str(self.repo_src)
         if src.startswith("https://"):
-            if not config.allow_remote_repos():
-                raise RuntimeError("Remote repositories are disabled on this deployment (ALLOW_REMOTE_REPOS=0)")
+            if not config.remote_fix_allowed():
+                raise RuntimeError("Fix runs on remote repositories are disabled on this deployment: use the Docker "
+                                   "sandbox (SANDBOX=docker) or let an admin allow remote repos in Settings")
             subprocess.run(["git", "clone", "--depth", "1", src, str(self.work)], check=True,
                            capture_output=True, text=True)
         else:
