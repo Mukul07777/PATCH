@@ -53,6 +53,8 @@
       <input id="repo" name="repo" placeholder="…or paste a public GitHub repo URL (pinned requirements.txt + pytest)" autocomplete="off">
       <button class="btn-run" id="runBtn" type="submit"><span>Launch agent</span><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </form>
+    <p class="hint" id="remoteOff" hidden>Remote repos are disabled on this public demo. Pick a case above.</p>
+    <p class="hint no-key" id="noKey" hidden>Server has no NEBIUS_API_KEY, so live runs are off. <a href="#history" id="noKeyLink">Replay a recorded run below</a> or try the <a href="/console?demo=1">guided demo</a>.</p>
     <div class="launch-row small">
       <select id="history" aria-label="Recorded runs"><option value="">▶ Replay a recorded run…</option></select>
       <button class="btn ghost" type="button" id="replayBtn">Replay</button>
@@ -62,7 +64,7 @@
 
   <section class="graph card glass">
     <div class="graph-head"><h2>Agent graph</h2><div class="gh-right"><span class="replay-badge" id="replayBadge" hidden><i></i>LIVE REPLAY</span><button class="btn ghost sm" type="button" id="realBtn" hidden>Run it for real</button><span id="phase" class="phase" role="status" aria-live="polite">idle</span></div></div>
-    <svg id="graph" viewBox="0 0 960 250" role="img" aria-label="Live agent graph"></svg>
+    <div class="graph-scroll" tabindex="0" role="region" aria-label="Agent graph, scroll sideways"><svg id="graph" viewBox="0 0 960 250" role="img" aria-label="Live agent graph"></svg></div>
   </section>
 
   <section class="kpis" aria-label="Run metrics">
@@ -87,16 +89,11 @@
         <button class="tab" data-tab="proof" type="button" role="tab" id="tabbtn-proof" aria-controls="tab-proof" aria-selected="false" tabindex="-1">Proof &amp; risk</button>
         <button class="tab" data-tab="drift" type="button" role="tab" id="tabbtn-drift" aria-controls="tab-drift" aria-selected="false" tabindex="-1">Drift radar</button>
         <button class="tab" data-tab="diff" type="button" role="tab" id="tabbtn-diff" aria-controls="tab-diff" aria-selected="false" tabindex="-1">Diff</button>
-        <div class="more" id="more">
-          <button class="tab more-btn" id="moreBtn" type="button" aria-controls="moreMenu" aria-expanded="false">More <span aria-hidden="true">▾</span></button>
-          <div class="more-menu" id="moreMenu" role="presentation" hidden>
-            <button class="tab" data-tab="evidence" type="button" role="tab" id="tabbtn-evidence" aria-controls="tab-evidence" aria-selected="false" tabindex="-1">Evidence</button>
-            <button class="tab" data-tab="reach" type="button" role="tab" id="tabbtn-reach" aria-controls="tab-reach" aria-selected="false" tabindex="-1">Reachability</button>
-            <button class="tab" data-tab="debate" type="button" role="tab" id="tabbtn-debate" aria-controls="tab-debate" aria-selected="false" tabindex="-1">Debate</button>
-            <button class="tab" data-tab="report" type="button" role="tab" id="tabbtn-report" aria-controls="tab-report" aria-selected="false" tabindex="-1">PR report</button>
-            <button class="tab" data-tab="bench" type="button" role="tab" id="tabbtn-bench" aria-controls="tab-bench" aria-selected="false" tabindex="-1">Benchmarks</button>
-          </div>
-        </div>
+        <button class="tab" data-tab="evidence" type="button" role="tab" id="tabbtn-evidence" aria-controls="tab-evidence" aria-selected="false" tabindex="-1">Evidence (Tavily)</button>
+        <button class="tab" data-tab="reach" type="button" role="tab" id="tabbtn-reach" aria-controls="tab-reach" aria-selected="false" tabindex="-1">Reachability</button>
+        <button class="tab" data-tab="debate" type="button" role="tab" id="tabbtn-debate" aria-controls="tab-debate" aria-selected="false" tabindex="-1">Debate</button>
+        <button class="tab" data-tab="report" type="button" role="tab" id="tabbtn-report" aria-controls="tab-report" aria-selected="false" tabindex="-1">PR report</button>
+        <button class="tab" data-tab="bench" type="button" role="tab" id="tabbtn-bench" aria-controls="tab-bench" aria-selected="false" tabindex="-1">Benchmarks</button>
       </div>
       <div class="panel active" id="tab-advisories" role="tabpanel" aria-labelledby="tabbtn-advisories" tabindex="0"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div>
       <div class="panel" id="tab-terminal" role="tabpanel" aria-labelledby="tabbtn-terminal" tabindex="0" hidden><pre class="term" id="term" aria-live="off"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>

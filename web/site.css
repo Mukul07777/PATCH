@@ -85,9 +85,6 @@
 .tcard .badge { display: inline-block; font: 800 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 5px 10px; border-radius: 8px; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); }
 .tcard h3 { font-size: 30px; letter-spacing: -.04em; margin: 18px 0 6px; }
 .tcard p { color: var(--muted); margin: 0 0 20px; }
-.tcard .meter { height: 6px; border-radius: 9px; background: var(--surface-2); overflow: hidden; margin: 6px 0 14px; }
-.tcard .meter i { display: block; height: 100%; width: var(--w); background: var(--c); box-shadow: 0 0 14px var(--c); border-radius: 9px; transform-origin: left; transform: scaleX(0); transition: transform 1.2s cubic-bezier(.2,.8,.2,1); }
-.tcard.in .meter i { transform: scaleX(1); }
 .tcard small { color: var(--muted); font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .1em; }
 
 /* bento */
@@ -121,6 +118,7 @@
 .run .top { display: flex; justify-content: space-between; align-items: center; }
 .run code { font-size: 14px; font-weight: 700; }
 .run .id { color: var(--muted); font: 12px var(--mono); }
+.run .why { color: var(--bad); font-size: 12px; overflow-wrap: anywhere; }
 .run .go { color: var(--accent); font-weight: 700; font-size: 13px; }
 .status { font: 800 10px var(--mono); letter-spacing: .08em; padding: 4px 9px; border-radius: 7px; text-transform: uppercase; }
 .status.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }

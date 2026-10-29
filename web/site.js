@@ -9,7 +9,9 @@ window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" 
 // data-css="--k:v;..." and they are applied here through the CSSOM (allowed under CSP), including for HTML injected later.
 (() => {
   const apply = (el) => {
-    el.getAttribute("data-css").split(";").forEach((d) => {
+    // Declarations split on ';' outside parentheses, so values like url(a;b) survive; a value
+    // itself can't contain a bare ';' (none of ours do).
+    el.getAttribute("data-css").split(/;(?![^(]*\))/).forEach((d) => {
       const i = d.indexOf(":");
       if (i > 0) el.style.setProperty(d.slice(0, i).trim(), d.slice(i + 1).trim());
     });
@@ -21,6 +23,8 @@ window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" 
     n.querySelectorAll("[data-css]").forEach(apply);
   };
   scan(document.documentElement);
+  // Call right after an innerHTML assignment so styles apply before paint (the observer is the safety net).
+  window.ppCss = (root) => scan(root || document.documentElement);
   new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(scan))).observe(document.documentElement, { childList: true, subtree: true });
 })();
 

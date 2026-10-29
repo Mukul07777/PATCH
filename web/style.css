@@ -223,6 +223,9 @@ table.bench { width: 100%; border-collapse: collapse; font-size: 13px; }
 .chip.ultra { background: color-mix(in srgb, var(--ultra) 22%, transparent); color: var(--ultra); }
 .hint { color: var(--muted); font-size: 12px; margin: 14px 0 0; }
 .hint b { color: var(--ok); }
+.launch .hint { margin: 10px 0 0; overflow-wrap: anywhere; }
+.hint.no-key { color: var(--warn); }
+.graph-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 .tests { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .tests li.muted { display: block; }
@@ -253,6 +256,10 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 30px
   .adv { grid-template-columns: 80px 1fr; }
   .adv > div, .adv > .tag { grid-column: 1 / -1; }
   .exp-num { font-size: 72px; }
+}
+@media (max-width: 600px) {
+  .banner { left: 16px; right: 16px; bottom: 16px; transform: none; max-width: none; }
+  #graph { min-width: 640px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -347,14 +354,10 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 30px
 @media (max-width: 640px) { .threat { grid-template-columns: 1fr; } .drift { grid-template-columns: 1fr; } }
 
 /* ---------- More ▾ tab menu ---------- */
-.more { position: relative; }
-.more-btn.active { color: var(--text); border-color: var(--accent); }
-.more-menu { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 170px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 6px; box-shadow: 0 20px 40px -12px rgba(0,0,0,.6); display: grid; }
-.more-menu[hidden] { display: none; }
-.more-menu .tab { text-align: left; border-bottom: 0; border-left: 2px solid transparent; border-radius: 6px; }
-.more-menu .tab:hover { background: var(--surface-2); color: var(--text); }
-.more-menu .tab.active { border-left-color: var(--accent); }
-@media (max-width: 640px) { .tab { padding: 9px 9px; font-size: 12.5px; } .more-menu { right: auto; left: 0; } }
+@media (max-width: 640px) {
+  .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .tab { padding: 9px 9px; font-size: 12.5px; white-space: nowrap; flex: none; }
+}
 
 /* ---------- replay badge ---------- */
 .gh-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }

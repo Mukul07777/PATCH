@@ -308,7 +308,13 @@ def list_runs():
         if not evs:
             continue
         first, last = evs[0], evs[-1]
-        out.append({"id": p.stem, "repo": first.get("repo"), "ok": last.get("ok") if last.get("type") == "done" else None})
+        done = last.get("type") == "done"
+        row = {"id": p.stem, "repo": first.get("repo"), "ok": last.get("ok") if done else None}
+        if done and last.get("ok") is False:
+            # failure reason: the done event's error, else the last error event's msg (older recordings)
+            err = last.get("error") or next((e.get("msg") for e in reversed(evs) if e.get("type") == "error" and e.get("msg")), None)
+            row["error"] = str(err)[:300] if err else None
+        out.append(row)
     return out[:30]
 
 

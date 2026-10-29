@@ -4,6 +4,8 @@
 
 Built on NVIDIA Nemotron (Nano / Super / Ultra), with OpenAI-compatible endpoints for Nebius Token Factory, plus Tavily, OSV, EPSS/KEV and deps.dev.
 
+**Track:** Coding and Agentic Engineering (NVIDIA Global AI Hackathon).
+
 ## Inspiration
 The security fix is usually one line in `requirements.txt`. The problem is the major version behind it: PyJWT 1.x to 2.x, Werkzeug 3, urllib3 2, Jinja2 3.1, bleach 6. The bot bumps the pin, the build goes red, the PR sits there, and the CVE stays in production. Nobody gets paged for a stale Dependabot PR. We wanted an agent that does the part that actually costs time, which is making the upgrade pass, and then proves the vulnerability is really gone instead of just saying so.
 
@@ -24,7 +26,7 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
   - **Super** (`nemotron-3.5-super-vl`) writes the first patch attempts.
   - **Ultra** (`nemotron-3-ultra-550b-a55b`) only joins after Super fails, so the most expensive tier runs only when it is needed. In run `20261029-113639-job` Super's attempts failed, Ultra was called twice, and the run ended green on attempt 3.
   - Every `done` event records usage per tier: calls, tokens, seconds, model id and provider.
-- **Tavily**: web research on the advisory and migration notes. Results are reranked by Tavily score with no extra LLM call, and research runs in parallel with triage.
+- **Tavily**: a live runtime call on every run with advisories (`sources.tavily_search`, `search_depth: "advanced"`, 8 results) for each vulnerable package: "`<package>` upgrade `<old>` to `<new>` breaking changes migration guide". Results are ranked by Tavily's relevance score with no extra LLM call (Nemotron Nano reranks only if scores are missing); the top 4 go to the repair model, which must quote the lines it used with their URL. The console shows them under "Research via Tavily" in the Evidence tab, and the PR report lists them as "Sources consulted (Tavily)". Research runs in parallel with triage.
 - **OSV / EPSS / KEV**: vulnerability, exploit-likelihood and known-exploited data (`sources.py`).
 - **deps.dev**: release trust check before we recommend a version.
 - **Sandbox**: one venv per run (`sandbox.py`), prepared with `uv` in the background. The environment is an allow-list, so no API keys or tokens reach the scanned repo's `setup.py` or `conftest.py`.
@@ -58,6 +60,9 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 - Re-run the 6-case benchmark with curated proofs and publish the results table.
 - npm support (feasibility done: jsonwebtoken 8.5.1 → 9.0.0, CVE-2022-23540).
 - Container sandbox. Today the venv is **not a security boundary**.
+
+## Testing instructions
+Hosted demo: <!-- TODO(owner): hosted demo URL. --> no login or API key is needed to watch a run. Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment keeps `PATCHPILOT_TOKEN` unset (otherwise the browser cannot start runs) and `ALLOW_REMOTE_REPOS=0`. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.server:app --port 8000`. Recorded runs (`runs/*.jsonl`) are not in git, so a fresh clone has none until the agent runs once. <!-- TODO(owner): confirm the hosted deployment ships with the recorded runs listed below. -->
 
 ## Proof
 | Run id | Case | Result |

@@ -47,6 +47,7 @@
         ${t ? `<a class="btn ghost fix" href="/console?repo=${encodeURIComponent(x.url)}">Fix with agent <span aria-hidden="true">→</span></a>` : ""}</div>`;
     }).join("") + (data.osv_capped ? '<div class="empty span-all">Large owner: the advisory lookup limit was reached, so some pins were not checked.</div>'
       : data.reason ? `<div class="empty span-all">Note: ${esc(data.reason)}</div>` : "");
+    window.ppCss($("#heat"));
     window.ppReveal();
   }
 })();

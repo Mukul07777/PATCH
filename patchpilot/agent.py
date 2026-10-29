@@ -75,8 +75,9 @@ class Agent:
         try:
             self._run()
         except Exception as e:  # surface every failure to the UI
-            self._emit({"type": "error", "msg": f"{type(e).__name__}: {e}"})
-            self._emit({"type": "done", "ok": False, "proven": False, **self._meta(), "usage": self.router.cost_report()})
+            msg = f"{type(e).__name__}: {e}"
+            self._emit({"type": "error", "msg": msg})
+            self._emit({"type": "done", "ok": False, "error": msg, "proven": False, **self._meta(), "usage": self.router.cost_report()})
 
     def _run(self):
         self.step("models", "running", "Connecting to Nemotron")

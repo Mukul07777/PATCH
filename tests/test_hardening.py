@@ -132,3 +132,19 @@ def test_runs_cap(monkeypatch):
     monkeypatch.setattr(server, "RUNS", runs)
     server._evict()
     assert len(runs) == server.MAX_RUNS and "r0" in runs
+
+
+def _jsonl(*evs):
+    return "".join(json.dumps(e) + "\n" for e in evs)
+
+
+def test_list_runs_includes_failure_reason(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
+    (tmp_path / "a.jsonl").write_text(_jsonl({"type": "start", "repo": "x"}, {"type": "done", "ok": False, "error": "boom"}), encoding="utf-8")
+    (tmp_path / "b.jsonl").write_text(_jsonl({"type": "start", "repo": "y"}, {"type": "error", "msg": "RateLimit: 429"},
+                                         {"type": "done", "ok": False}), encoding="utf-8")
+    (tmp_path / "c.jsonl").write_text(_jsonl({"type": "start", "repo": "z"}, {"type": "done", "ok": True}), encoding="utf-8")
+    got = {x["id"]: x for x in TestClient(server.app).get("/api/runs").json()}
+    assert got["a"]["error"] == "boom"
+    assert got["b"]["error"] == "RateLimit: 429"
+    assert "error" not in got["c"]

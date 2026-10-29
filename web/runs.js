@@ -11,9 +11,10 @@
       const st = r.ok === true ? ["ok", "secured"] : r.ok === false ? ["bad", "review"] : ["na", "incomplete"];
       return `<a class="run spot rv" data-css="--d:${Math.min(i, 8) * .04}s" href="/console?replay=${encodeURIComponent(r.id)}">
         <div class="top"><span class="status ${st[0]}">${st[1]}</span><span class="go">Replay <span aria-hidden="true">▶</span></span></div>
-        <code>${esc(r.repo)}</code><span class="id">${esc(when(r.id))} · ${esc(r.id.slice(-4))}</span></a>`;
+        <code>${esc(r.repo)}</code>${r.ok === false && r.error ? `<span class="why">${esc(r.error)}</span>` : ""}<span class="id">${esc(when(r.id))} · ${esc(r.id.slice(-4))}</span></a>`;
     }).join("") : runs.length ? '<div class="empty span-all">No runs match this filter.</div>'
       : '<div class="empty span-all">No runs yet. <a href="/console">Launch the agent</a> to record one.</div>';
+    window.ppCss(document.getElementById("runs"));
     window.ppReveal();
   }
   document.querySelectorAll(".chipbtn").forEach((b) => b.addEventListener("click", () => {
@@ -68,6 +69,7 @@
       </div>
       <p class="muted mt-14">Why three tiers: Nano does the cheap work, Ultra only when needed.
         Across the newest ${dones.length} run(s), <b class="c-text">${allTok ? Math.round((1 - ultraTok / allTok) * 100) : 0}%</b> of tokens ran below Ultra.</p>`;
+    window.ppCss(el);
   });
 
   fetch("/api/bench").then((r) => r.json()).catch(() => []).then((rows) => {

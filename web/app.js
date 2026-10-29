@@ -4,22 +4,17 @@ const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const STEPS = [
   ["models", "Connect · Nemotron"], ["checkout", "Check out repo"], ["scan", "Scan · OSV.dev"],
-  ["triage", "Triage · Nemotron Nano"], ["research", "Research · Tavily"], ["plan", "Plan · Nemotron Super"],
+  ["triage", "Triage · Nemotron Nano"], ["research", "Research via Tavily"], ["plan", "Plan · Nemotron Super"],
   ["exploit", "Exploit proof"], ["redteam", "Red-team variants"], ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
 ];
 const TIERS = ["nano", "super", "ultra"];
 const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
-let state, source, selectedCase = "";
+let state, source, selectedCase = "", noLLM = false;  // noLLM: server has no NEBIUS_API_KEY, so only replays work
 
 // ---------- tabs ----------
 const TAB_BTNS = [...document.querySelectorAll(".tab[data-tab]")];
 TAB_BTNS.forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
-const moreMenu = $("#moreMenu"), moreBtn = $("#moreBtn");
-function setMore(open) { moreMenu.hidden = !open; moreBtn.setAttribute("aria-expanded", String(open)); }
-moreBtn.addEventListener("click", (e) => { e.stopPropagation(); setMore(moreMenu.hidden); });
-document.addEventListener("click", (e) => { if (!e.target.closest("#more")) setMore(false); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMore(false); });
-// WAI-ARIA tabs: arrow keys / Home / End move between tabs (tabs in the "More" overflow included).
+// WAI-ARIA tabs: arrow keys / Home / End move between all tabs (the tablist scrolls sideways on narrow screens).
 $(".tabs[role=tablist]").addEventListener("keydown", (e) => {
   const i = TAB_BTNS.indexOf(document.activeElement);
   if (i < 0) return;
@@ -27,7 +22,6 @@ $(".tabs[role=tablist]").addEventListener("keydown", (e) => {
   if (to == null) return;
   e.preventDefault();
   showTab(TAB_BTNS[to].dataset.tab);
-  if (moreMenu.contains(TAB_BTNS[to])) setMore(true);
   TAB_BTNS[to].focus();
 });
 function showTab(name) {
@@ -36,10 +30,9 @@ function showTab(name) {
     b.classList.toggle("active", on); b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1;
   });
   document.querySelectorAll(".panel").forEach((p) => { const on = p.id === "tab-" + name; p.classList.toggle("active", on); p.hidden = !on; });
-  const inMore = moreMenu.querySelector(`[data-tab="${name}"]`);
-  moreBtn.classList.toggle("active", !!inMore);
-  moreBtn.innerHTML = `${inMore ? esc(inMore.textContent) : "More"} <span aria-hidden="true">▾</span>`;
-  setMore(false);
+  // keep the active tab visible in the sideways-scrolling tablist without scrolling the page
+  const btn = TAB_BTNS.find((b) => b.dataset.tab === name), list = btn?.parentElement;
+  if (list && list.scrollWidth > list.clientWidth) list.scrollLeft = Math.max(0, btn.offsetLeft - list.offsetLeft - 24);
   if (name === "bench") loadBench();
 }
 
@@ -78,6 +71,7 @@ function buildGraph() {
       <text class="sub" x="${NW / 2}" y="35">${n.sub}</text>
     </g>`).join("");
   g.innerHTML = `<g id="edges">${edges}</g><g id="packets"></g>${nodes}`;
+  window.ppCss(g);
 }
 function node(k, st) {
   const el = $("#n-" + k);
@@ -113,7 +107,10 @@ async function boot() {
     fetch("/api/cases").then((r) => r.json()).catch(() => []),
     fetch("/api/runs").then((r) => r.json()).catch(() => []),
   ]);
-  if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Remote repos are disabled on this public demo. Pick a case above."; }
+  if (h && h.nebius === false) {
+    noLLM = true; $("#runBtn").disabled = true; $("#runBtn").setAttribute("aria-describedby", "noKey"); $("#noKey").hidden = false;
+  }
+  if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Pick a case above"; $("#remoteOff").hidden = false; }
   const caseList = Array.isArray(cases) ? cases : [], runList = Array.isArray(runs) ? runs : [];
   $("#cases").innerHTML = caseList.map((c, i) => `<button type="button" class="case ${i === 0 ? "active" : ""}" data-id="${esc(c.id)}" role="radio" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}">
     <b>case:${esc(c.id)}</b><small>${(c.pins || []).map(esc).join(" · ")}</small></button>`).join("");
@@ -166,7 +163,7 @@ async function pickBestRun(runs) {
 function setReplayBadge(on) { autoReplay = on; $("#replayBadge").hidden = !on; $("#realBtn").hidden = !on; }
 $("#realBtn").onclick = () => {
   if (source) source.close();
-  setReplayBadge(false); stopDemo(); reset(); $("#runBtn").disabled = false;
+  setReplayBadge(false); stopDemo(); reset(); $("#runBtn").disabled = noLLM;
   $(".launch").scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
   ($("#repo").disabled ? $("#runBtn") : $("#repo")).focus({ preventScroll: true });
 };
@@ -242,6 +239,7 @@ $("#runForm").onsubmit = async (e) => {
   if (!r.ok) return banner(esc((await r.json().catch(() => ({}))).detail || "Could not start run"), false);
   listen((await r.json()).id, 0);
 };
+$("#noKeyLink").onclick = (e) => { e.preventDefault(); $("#history").focus(); };
 $("#replayBtn").onclick = () => { const id = $("#history").value; if (id) { userStarted = true; stopDemo(); listen(id, 4); } };
 
 function listen(id, replay, opts = {}) {
@@ -270,7 +268,7 @@ function listen(id, replay, opts = {}) {
     queue.push(ev); pump();
   });
   src.addEventListener("error", () => {
-    src.close(); $("#runBtn").disabled = false;
+    src.close(); $("#runBtn").disabled = noLLM;
     if (!finished && source === src) { banner("Connection lost. The event stream closed before the run finished.", false); phase("disconnected"); }
   });
 }
@@ -375,7 +373,7 @@ function onTest(ev) {
 
 function onDone(ev) {
   if (source) source.close();
-  $("#runBtn").disabled = false;
+  $("#runBtn").disabled = noLLM;
   if (ev.usage) {
     TIERS.forEach((t) => { const r = ev.usage.tiers[t]; if (r) Object.assign(state.usage[t], { calls: r.calls, tok: r.in + r.out, s: r.seconds, model: r.model }); });
     renderRouting();
@@ -430,6 +428,7 @@ function renderProof() {
       <div class="gauge" data-css="--v:${r.score}"><b>${r.score}</b><small>${r.level} risk</small></div>
       <div class="factors">${r.factors.map((f) => `<div><span>${esc(f.name)}</span><span class="muted">${esc(f.detail)}</span><b>${f.points > 0 ? "+" : ""}${f.points}</b></div>`).join("")}</div></div>` : "";
   $("#tab-proof").innerHTML = renderGuard() + ex + renderRedteam() + renderTrust() + rk;
+  window.ppCss($("#tab-proof"));
 }
 
 // ---------- guardrails + supply-chain trust ----------
@@ -539,6 +538,7 @@ function renderLedger() {
     ${state.vex ? (() => { const n = vexCounts(state.vex); return `<div class="vex-sum"><span class="chip nano">OpenVEX</span>
       <span class="vx ok"><b>${n.fixed}</b> fixed</span><span class="vx bad"><b>${n.affected}</b> affected</span><span class="vx na"><b>${n.not_affected}</b> not affected</span>
       <small class="muted">${(state.vex.statements || []).length} statement(s), static evidence only</small></div>`; })() : ""}</div>`;
+  window.ppCss($("#tab-ledger"));
   $("#dlCert").onclick = () => download(`${L.certificate}.json`, JSON.stringify(L, null, 2));
   $("#dlVex").onclick = async () => {
     let doc = state.vex;
@@ -578,6 +578,7 @@ function renderDebate() {
     <small>Diagnosis</small><p>${esc(p.diagnosis || "—")}</p><small>Fix</small><p>${esc(p.explanation)}</p>
     <div class="muted">${(p.files || []).map((f) => "<span aria-hidden=\"true\">✎</span> " + esc(f)).join("<br>")}</div></div>`;
   }).join("")}</div>`;
+  window.ppCss($("#tab-debate"));
 }
 
 $("#speak").onclick = () => {
@@ -644,10 +645,10 @@ function renderAdvisories() {
 function renderEvidence() {
   const quotes = state.evidence.map((e) => `<div class="ev-card"><span class="chip ${e.tier}">${e.tier} · patch #${e.attempt}</span>
     <blockquote>“${esc(e.quote)}”</blockquote><div class="src">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.url)}</a>` : "migration notes"}</div></div>`).join("");
-  const srcs = state.research.flatMap((r) => r.results.filter((x) => x.url).map((x) => `<li><span class="pk">${esc(r.package)}</span>${x.score != null ? `<span class="rr" title="Nemotron Nano relevance">${(+x.score).toFixed(1)}</span>` : ""}<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`)).join("");
+  const srcs = state.research.flatMap((r) => r.results.filter((x) => x.url).map((x) => `<li><span class="pk">${esc(r.package)}</span>${x.score != null ? `<span class="rr" title="Relevance 0-10 (Tavily score, or Nemotron Nano rerank when Tavily gives none)">${(+x.score).toFixed(1)}</span>` : ""}<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`)).join("");
   $("#tab-evidence").innerHTML =
     (quotes ? `<div class="ev-section">Lines the agent relied on</div>${quotes}` : "") +
-    (srcs ? `<div class="ev-section">Sources found by Tavily</div><ul class="src-list">${srcs}</ul>` : "") ||
+    (srcs ? `<div class="ev-section">Research via Tavily <span class="muted">(top 4 of 8 results by relevance score; listed in the PR report)</span></div><ul class="src-list">${srcs}</ul>` : "") ||
     '<div class="empty">No research yet (is TAVILY_API_KEY set?).</div>';
 }
 
@@ -666,6 +667,7 @@ function renderRouting() {
       <div class="model" title="${esc(u.model)}">${esc(u.model || "—")}</div>
       <div class="bar"><i class="t-${t}" data-css="width:${(u.tok / max) * 100}%"></i></div></div>`;
   }).join("");
+  window.ppCss($("#routing"));
 }
 
 function renderTests() {
