@@ -7,6 +7,7 @@ Three tiers, each used for the job it is good at:
 """
 import json
 import re
+import threading
 import time
 
 import httpx
@@ -32,6 +33,8 @@ class Router:
             headers={"Authorization": f"Bearer {config.NEBIUS_API_KEY}"},
             timeout=300,
         )
+        self._lock = threading.Lock()  # usage counters are updated from worker threads
+        self._unsupported = set()  # (model, feature) pairs the provider rejected; never sent again
 
     def discover(self):
         """Fill any tier without an explicit model from the live /models catalog."""
@@ -58,27 +61,62 @@ class Router:
             raise LLMError("No Nemotron models found on Token Factory. Set MODEL_NANO/SUPER/ULTRA in .env")
         return self.models
 
-    def chat(self, tier, system, user, purpose, max_tokens=4096, temperature=0.2):
+    def _extras(self, model, reasoning, json_mode):
+        """Provider-specific body fields: {feature: {field: value}} (features the provider rejected are dropped)."""
+        out = {}
+        style = reasoning_style()
+        if reasoning in ("low", "off") and style == "openrouter":
+            out["reasoning"] = {"reasoning": {"effort": "low", "exclude": True} if reasoning == "low"
+                                else {"enabled": False, "exclude": True}}
+        elif reasoning == "off" and style == "nim":
+            out["reasoning"] = {"chat_template_kwargs": {"enable_thinking": False}}
+        if json_mode:
+            out["json"] = {"response_format": {"type": "json_object"}}
+        return {k: v for k, v in out.items() if (model, k) not in self._unsupported}
+
+    def chat(self, tier, system, user, purpose, max_tokens=4096, temperature=0.2, reasoning=None, timeout=None,
+             json_mode=False):
+        """reasoning: None (provider default) | "low" | "off". timeout: seconds; exceeding it raises LLMError."""
         model = self.models[tier]
         self.emit({"type": "model_call", "tier": tier, "model": model, "purpose": purpose, "status": "start"})
         t0 = time.time()
-        body = {
+        base = {
             "model": model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        for attempt in range(3):
+        extras = self._extras(model, reasoning, json_mode)
+        kw = {"timeout": timeout} if timeout else {}
+        attempt = 0
+        while True:
+            body = dict(base)
+            for fields in extras.values():
+                body.update(fields)
             try:
-                r = self._client.post("/chat/completions", json=body)
+                r = self._client.post("/chat/completions", json=body, **kw)
+                err = r.text.lower() if r.status_code == 400 else ""
+                rejected = [k for k, f in extras.items() if any(n.lower() in err for n in _names(f) if len(n) > 4)]
+                if rejected:
+                    with self._lock:
+                        self._unsupported.update((model, k) for k in rejected)
+                    for k in rejected:
+                        extras.pop(k)
+                    continue  # retry without the rejected field(s); does not count as an attempt
                 if r.status_code >= 500 or r.status_code == 429:
                     raise httpx.HTTPStatusError("retryable", request=r.request, response=r)
                 r.raise_for_status()
                 break
+            except httpx.TimeoutException as e:
+                if timeout:  # caller asked for a hard cap: let it escalate instead of retrying
+                    raise LLMError(f"{model}: timed out after {timeout}s") from e
+                if attempt == 2:
+                    raise LLMError(f"{model}: {e}") from e
             except (httpx.HTTPStatusError, httpx.TransportError) as e:
                 if attempt == 2:
                     raise LLMError(f"{model}: {e}") from e
-                time.sleep(2 * (attempt + 1))
+            time.sleep(2 * (attempt + 1))
+            attempt += 1
         data = r.json()
         msg = data["choices"][0]["message"]
         text = msg.get("content") or ""
@@ -87,11 +125,12 @@ class Router:
             text = msg.get("reasoning_content") or msg.get("reasoning") or ""
         usage = data.get("usage") or {}
         dt = time.time() - t0
-        u = self.usage[tier]
-        u["calls"] += 1
-        u["in"] += usage.get("prompt_tokens", 0)
-        u["out"] += usage.get("completion_tokens", 0)
-        u["seconds"] += dt
+        with self._lock:
+            u = self.usage[tier]
+            u["calls"] += 1
+            u["in"] += usage.get("prompt_tokens", 0)
+            u["out"] += usage.get("completion_tokens", 0)
+            u["seconds"] += dt
         self.emit({
             "type": "model_call", "tier": tier, "model": model, "purpose": purpose, "status": "done",
             "tokens_in": usage.get("prompt_tokens", 0), "tokens_out": usage.get("completion_tokens", 0),
@@ -100,6 +139,7 @@ class Router:
         return strip_thinking(text)
 
     def chat_json(self, tier, system, user, purpose, **kw):
+        kw.setdefault("json_mode", True)
         text = self.chat(tier, system + "\nRespond with a single JSON object only. No prose.", user, purpose, **kw)
         return parse_json(text)
 
@@ -116,6 +156,24 @@ class Router:
                 all_ultra += (u["in"] * uin + u["out"] * uout) / 1e6
             rows[tier] = row
         return {"tiers": rows, "priced": priced, "total": total, "all_ultra": all_ultra}
+
+
+def reasoning_style(base_url=None):
+    """How this host takes a reasoning switch: "openrouter", "nim" (vLLM chat_template_kwargs) or None."""
+    host = (base_url or config.NEBIUS_BASE_URL).split("//")[-1].split("/")[0]
+    if host == "openrouter.ai":
+        return "openrouter"
+    if host == "integrate.api.nvidia.com" or "vllm" in host or host.startswith(("localhost", "127.0.0.1")):
+        return "nim"
+    return None
+
+
+def _names(fields):
+    """Every key name in a nested body fragment (to match against a 400 error message)."""
+    for k, v in fields.items():
+        yield k
+        if isinstance(v, dict):
+            yield from _names(v)
 
 
 def strip_thinking(text):

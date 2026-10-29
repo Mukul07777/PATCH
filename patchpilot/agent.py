@@ -6,11 +6,12 @@ import re
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config, drift, exploits, reach, sources, vex
-from .llm import Router
+from .llm import LLMError, Router, parse_json
 from .sandbox import Sandbox
 from .github_pr import open_pull_request
 
@@ -83,6 +84,9 @@ class Agent:
         original = self._snapshot()
         pins = self._pins()
         self.step("checkout", "done", detail={"files": len(original), "pins": pins})
+        # venv + baseline install run in the background while the LLM stages think
+        sandbox = Sandbox(self.work, lambda m: self.log(m, "test"))
+        sandbox.prepare()
 
         # 1. real advisories from OSV.dev
         self.step("scan", "running", "Scanning dependencies against OSV.dev")
@@ -103,27 +107,8 @@ class Agent:
             self._emit({"type": "done", "ok": True, "clean": True, "proven": False, **self._meta(), "usage": self.router.cost_report()})
             return
 
-        # 2. Nano triage: is each advisory actually reachable from our code?
-        self.step("triage", "running", "Triage with Nemotron Nano")
-        self.reach = self._reachability(findings, original)
-        triage = self._triage(findings, original)
-        self._emit({"type": "triage", "triage": triage})
-        self._emit({"type": "reach", "packages": {f["package"]: self._usage_snippets(f["package"], original)
-                                                   for f in findings}})
-        self.step("triage", "done")
-
-        # 3. Tavily research: migration guides + breaking changes
-        self.step("research", "running", "Researching upgrade paths with Tavily")
-        research = {}
-        for f in findings:
-            q = f"{f['package']} upgrade {f['current']} to {f['latest']} breaking changes migration guide"
-            hits = self._rerank(q, sources.tavily_search(q, max_results=8))
-            research[f["package"]] = hits
-            self._emit({"type": "research", "package": f["package"], "query": q,
-                        "results": [{"title": h["title"], "url": h["url"], "score": h.get("score")} for h in hits]})
-        if not config.TAVILY_API_KEY:
-            self.log("TAVILY_API_KEY not set - skipping web research", "research")
-        self.step("research", "done")
+        # 2+3. concurrently: reachability (symbol inference) -> Nano triage, and Tavily research; join before plan
+        triage, research = self._analyse(findings, original)
 
         # 4. Super plans target versions
         self.step("plan", "running", "Planning upgrades with Nemotron Super")
@@ -133,9 +118,8 @@ class Agent:
         self._emit({"type": "trust", "packages": self._trust(plan)})
 
         # 5. baseline + apply upgrade
-        sandbox = Sandbox(self.work, lambda m: self.log(m, "test"))
         self.step("test", "running", "Running baseline tests on current pins")
-        ok_install, out = sandbox.install()
+        ok_install, out = sandbox.wait_ready()
         base_ok, base_summary, _ = sandbox.test() if ok_install else (False, "install failed", out)
         self._emit({"type": "test", "label": "baseline", "ok": base_ok, "summary": base_summary})
         exploit = self._exploit_before(findings, original, research, sandbox) if ok_install else None
@@ -217,6 +201,41 @@ class Agent:
                     "seconds": round(time.time() - self.started, 1), "usage": self.router.cost_report()})
 
     # ---------- steps ----------
+    def _analyse(self, findings, original):
+        """Reachability -> triage, and Tavily research, on a small pool (max 3 so the free tier is not hammered)."""
+        self.step("triage", "running", "Triage with Nemotron Nano")
+        self.step("research", "running", "Researching upgrade paths with Tavily")
+
+        def triage_chain():
+            self.reach = self._reachability(findings, original)
+            triage = self._triage(findings, original)
+            self._emit({"type": "triage", "triage": triage})
+            self._emit({"type": "reach", "packages": {f["package"]: self._usage_snippets(f["package"], original)
+                                                       for f in findings}})
+            self.step("triage", "done")
+            return triage
+
+        def research_one(f):
+            q = f"{f['package']} upgrade {f['current']} to {f['latest']} breaking changes migration guide"
+            try:
+                hits = self._rerank(q, sources.tavily_search(q, max_results=8))
+            except Exception as e:
+                self.log(f"Research for {f['package']} failed: {e}", "research")
+                hits = []
+            self._emit({"type": "research", "package": f["package"], "query": q,
+                        "results": [{"title": h["title"], "url": h["url"], "score": h.get("score")} for h in hits]})
+            return f["package"], hits
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            tri = pool.submit(triage_chain)
+            res = [pool.submit(research_one, f) for f in findings]
+            research = dict(r.result() for r in res)
+            if not config.TAVILY_API_KEY:
+                self.log("TAVILY_API_KEY not set - skipping web research", "research")
+            self.step("research", "done")
+            triage = tri.result()
+        return triage, research
+
     def _checkout(self):
         if self.work.exists():
             shutil.rmtree(self.work)
@@ -291,7 +310,7 @@ class Agent:
                     'supports; use [] if unsure. Output: {"advisories":[{"id":str,"symbols":[str]}]}',
                     json.dumps([{"id": k, "package": a["package"], "summary": byid[k]["summary"],
                                  "details": byid[k]["details"][:400]} for k, a in missing.items()]),
-                    "Infer vulnerable symbols", max_tokens=4000)
+                    "Infer vulnerable symbols", max_tokens=1500, reasoning="off")
                 for row in data.get("advisories") or []:
                     syms = [s for s in row.get("symbols") or [] if isinstance(s, str) and re.match(r"^[\w.]+$", s)]
                     if row.get("id") in missing and syms:
@@ -309,6 +328,14 @@ class Agent:
                 items.append({"package": f["package"], "id": v["id"], "cve": v["cve"], "summary": v["summary"],
                               "details": v["details"][:600], "fixed": v["fixed"],
                               "reachability": (self.reach.get(v["id"]) or {}).get("status", "unknown")})
+        if self.reach and all(i["reachability"] != "unknown" for i in items):
+            self.log("Triage from static reachability: every advisory has a conclusive label, Nano call skipped",
+                     "triage")
+            notes = {"reachable": "Vulnerable symbol is called from project code (static AST match).",
+                     "imported": "Package is imported but the vulnerable symbol is never called.",
+                     "not reachable": "Package is never imported by project code."}
+            return [{"id": i["id"], "cve": i["cve"], "affected": i["reachability"] == "reachable",
+                     "rationale": notes.get(i["reachability"], i["reachability"]), "source": "static"} for i in items]
         usage = {f["package"]: self._usage_snippets(f["package"], files) for f in findings}
         try:
             data = self.router.chat_json(
@@ -319,7 +346,7 @@ class Agent:
                 'Output: {"advisories":[{"id":str,"cve":str,"affected":bool,"rationale":str}]}',
                 json.dumps({"advisories": items, "code_usage": usage}),
                 "Triage advisories against code usage",
-                max_tokens=6000,
+                max_tokens=1500, reasoning="off",
             )
         except Exception as e:  # triage only annotates; the upgrade still covers every advisory
             self.log(f"Triage skipped: {e}", "triage")
@@ -337,7 +364,7 @@ class Agent:
                                      {"fixed_in": sorted({x for v in f["vulns"] for x in v["fixed"]})}
                                      for f in findings], "triage": triage}),
             "Plan target versions",
-            max_tokens=2048,
+            max_tokens=2048, reasoning="low",
         )
         valid = {f["package"].lower(): f for f in findings}
         ups = []
@@ -377,7 +404,21 @@ class Agent:
             "predicted_api_breaks": self.drift,
             "failing_test_output": test_output[-6000:], "source_files": files,
         })
-        return self.router.chat_json(tier, system, user, f"Fix attempt {attempt}", max_tokens=8192)
+        kw = {"reasoning": "low"} if attempt == 1 and tier == "super" else {}
+        try:
+            # hard per-call cap: a slow reply raises LLMError and the loop escalates to Ultra
+            text = self.router.chat(tier, system + "\nRespond with a single JSON object only. No prose.", user,
+                                    f"Fix attempt {attempt}", max_tokens=8192, json_mode=True,
+                                    timeout=config.FIX_TIMEOUT, **kw)
+            return parse_json(text)
+        except LLMError as first:
+            # content ran out or was not JSON: the JSON reply is sometimes sitting in the reasoning text
+            if "timed out" in str(first) or not self.router.last_reasoning:
+                raise
+            try:
+                return parse_json(self.router.last_reasoning)
+            except LLMError:
+                raise first
 
     # ---------- exploit proof ----------
     def _exploit_before(self, findings, files, research, sandbox):
@@ -392,6 +433,10 @@ class Agent:
                 f, v, (cve, code) = min(curated, key=lambda x: sev.get(x[1].get("severity"), 2))
                 source = "curated"
                 self.log(f"Using curated exploit proof for {cve}", "exploit")
+            elif config.DEMO:
+                self.log("Demo mode: no curated proof for these advisories, LLM exploit generation skipped", "exploit")
+                self.step("exploit", "failed")
+                return None
             else:
                 f, v = min(pairs, key=lambda fv: sev.get(fv[1].get("severity"), 2))
                 code, source = self._generate_exploit(f, v, files, research), "generated"
@@ -513,7 +558,9 @@ class Agent:
         """Variants of the proven attack: run on the vulnerable pins now, on the patched code after the fix."""
         self.step("redteam", "running", "Red-teaming: generating attack variants")
         code, source = exploits.mutations(ex["advisory"]), "curated"
-        if not code:
+        if not code and config.DEMO:
+            self.log("Demo mode: no curated variants, LLM variant generation skipped", "redteam")
+        elif not code:
             source = "generated"
             try:
                 text = self.router.chat(
@@ -687,6 +734,13 @@ class Agent:
         answer = [h for h in hits if not h.get("url")]
         if len(docs) <= 1:
             return hits
+        if all(isinstance(d.get("tavily_score"), (int, float)) for d in docs):
+            # Tavily already scores relevance (0-1): no model call needed. Shown on the same 0-10 scale.
+            for d in docs:
+                d["score"] = round(d["tavily_score"] * 10, 1)
+            docs.sort(key=lambda d: d["score"], reverse=True)
+            self.log(f"Ranked {len(docs)} results by Tavily relevance score (no model call)", "research")
+            return answer + docs[:keep]
         try:
             # a one-line format survives reasoning models far better than JSON
             text = self.router.chat(
@@ -696,7 +750,7 @@ class Agent:
                 "Do not explain. Reply with exactly one line in this format: SCORES: 0=7, 1=3, 2=9",
                 json.dumps({"query": query, "documents": [{"i": i, "title": d["title"], "text": d["content"][:500]}
                                                           for i, d in enumerate(docs)]}),
-                "Rerank research", max_tokens=6000)
+                "Rerank research", max_tokens=1500, reasoning="off")
             line = (re.findall(r"SCORES:([^\n]*)", text) or re.findall(r"SCORES:([^\n]*)", self.router.last_reasoning or "")
                     or [""])[-1]
             scores = {int(i): float(v) for i, v in re.findall(r"(\d+)\s*=\s*(\d+(?:\.\d+)?)", line)}

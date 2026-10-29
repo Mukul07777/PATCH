@@ -92,3 +92,8 @@
 - research-5.md: free nvidia/nemotron-3.5-content-safety guard on OpenRouter; embed models on NVIDIA catalog (need nvapi key); rerank endpoint 410 Gone; reward model poor fit.
 - Backlog: content-safety gate (backend, queued behind speed builder), per-tier chart (UI, queued behind UI builder), Embed rerank (needs owner key).
 - Launched researcher round 6 (angle: agent self-security, prompt injection via repo/advisory/web content).
+
+## 2026-10-29 ~14:45 — backend build: speed
+- Reasoning control per provider (+400 fallback), JSON mode, 90 s fix cap with escalation, triage ∥ research, Tavily-score rerank (no LLM), triage skipped when reachability conclusive, uv + background sandbox prep, PATCHPILOT_DEMO=1. 44 tests pass (verified).
+- Measured: uv venv+install 0.19-0.23 s vs 5.8-5.9 s with pip. End-to-end timing NOT measured: OpenRouter free daily limit (50 req) exhausted (429).
+- Next backend: NVIDIA content-safety gate (built with graceful skip; verified live when quota resets).

@@ -10,7 +10,12 @@ NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
 NEBIUS_BASE_URL = os.getenv("NEBIUS_BASE_URL", "https://api.tokenfactory.nebius.com/v1").rstrip("/")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
+# Demo fast path: fewer fix attempts, curated proofs/variants only (no LLM exploit or variant generation)
+DEMO = os.getenv("PATCHPILOT_DEMO", "") == "1"
 MAX_FIX_ATTEMPTS = int(os.getenv("MAX_FIX_ATTEMPTS", "4"))
+if DEMO:
+    MAX_FIX_ATTEMPTS = min(MAX_FIX_ATTEMPTS, 2)
+FIX_TIMEOUT = float(os.getenv("FIX_TIMEOUT", "90"))  # seconds per fix call before escalating to Ultra
 
 MODEL_OVERRIDES = {
     "nano": os.getenv("MODEL_NANO", ""),

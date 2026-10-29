@@ -1,7 +1,9 @@
 """Isolated test runner: a fresh virtualenv per run, so the agent's changes are verified for real."""
 import os
 import re
+import shutil
 import subprocess
+import threading
 import sys
 from pathlib import Path
 
@@ -9,6 +11,11 @@ from pathlib import Path
 def venv_python(venv):
     win = Path(venv) / "Scripts" / "python.exe"
     return str(win if win.exists() else Path(venv) / "bin" / "python")
+
+
+def uv_path():
+    """The `uv` binary when it is on PATH (10x faster venv + install), else None."""
+    return shutil.which("uv")
 
 
 def run(cmd, cwd, timeout=600):
@@ -23,19 +30,46 @@ class Sandbox:
         self.venv = self.repo.parent / (self.repo.name + "-venv")
         self.log = log
 
+        self.uv = uv_path()
+        self._prep = None
+        self._prep_result = None
+
     def ensure_venv(self):
         if not self.venv.exists():
-            self.log("Creating isolated virtualenv")
-            code, out = run([sys.executable, "-m", "venv", str(self.venv)], cwd=self.repo)
+            self.log("Creating isolated virtualenv" + (" (uv)" if self.uv else ""))
+            cmd = ([self.uv, "venv", "-q", "--python", sys.executable, str(self.venv)] if self.uv
+                   else [sys.executable, "-m", "venv", str(self.venv)])
+            code, out = run(cmd, cwd=self.repo)
             if code:
                 raise RuntimeError(out)
 
     def install(self):
         self.ensure_venv()
         self.log("Installing requirements.txt")
-        code, out = run([venv_python(self.venv), "-m", "pip", "install", "-q", "-r", "requirements.txt", "pytest"],
-                        cwd=self.repo)
+        if self.uv:
+            cmd = [self.uv, "pip", "install", "-q", "--python", venv_python(self.venv), "-r", "requirements.txt", "pytest"]
+        else:
+            cmd = [venv_python(self.venv), "-m", "pip", "install", "-q", "-r", "requirements.txt", "pytest"]
+        code, out = run(cmd, cwd=self.repo)
         return code == 0, out[-4000:]
+
+    def prepare(self):
+        """Create the venv and install the current pins in a background thread (off the critical path)."""
+        def work():
+            try:
+                self._prep_result = self.install()
+            except Exception as e:
+                self._prep_result = (False, f"{type(e).__name__}: {e}")
+        self._prep = threading.Thread(target=work, daemon=True)
+        self._prep.start()
+
+    def wait_ready(self):
+        """Join the background prep (or install now if none was started); (ok, output)."""
+        if self._prep is None:
+            return self.install()
+        self._prep.join()
+        self._prep = None
+        return self._prep_result
 
     def python(self, script, *args):
         """Run a script with the sandbox interpreter; (ok, stdout+stderr)."""

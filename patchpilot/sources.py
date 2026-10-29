@@ -90,7 +90,8 @@ def tavily_search(query, max_results=4):
     })
     r.raise_for_status()
     data = r.json()
-    results = [{"title": x.get("title"), "url": x.get("url"), "content": (x.get("content") or "")[:900]}
+    results = [{"title": x.get("title"), "url": x.get("url"), "content": (x.get("content") or "")[:900],
+                "tavily_score": x.get("score")}
                for x in data.get("results", [])]
     if data.get("answer"):
         results.insert(0, {"title": "Tavily answer", "url": "", "content": data["answer"]})

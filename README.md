@@ -107,6 +107,24 @@ pip install pytest
 `pytest.ini` limits collection to `tests/`; the bundled `cases/*/tests` suites need their own pinned venvs and
 are run by PatchPilot's sandbox instead.
 
+## Speed
+
+Recorded runs on free OpenRouter Nemotron endpoints showed that model calls take 97 to 98 % of wall time
+(authsvc: 709 of 723 s, mostly hidden reasoning tokens). The current pipeline makes these changes:
+
+- Reasoning control per call (`reasoning="off"|"low"`). It uses OpenRouter's `reasoning` object or NIM/vLLM's
+  `enable_thinking`. If the provider rejects the field, PatchPilot retries without it and stops sending it.
+  JSON mode is used where accepted. Fix calls have a 90 s cap, and a call that hits it escalates to Ultra.
+- Nano triage is capped at 1500 tokens with reasoning off. It is skipped when static reachability is conclusive.
+  Research is ranked by Tavily's own relevance score, with no model call.
+- Reachability and triage run alongside Tavily research (3 workers).
+- The sandbox is prepared in the background right after checkout, using `uv` when it is on PATH.
+  Measured locally for authsvc's pins: `uv` venv + install takes 0.2 to 0.3 s, against 5.8 to 5.9 s for
+  `venv` + pip.
+- `PATCHPILOT_DEMO=1`: at most 2 fix attempts, and curated exploit proofs and variants only.
+
+An end-to-end timing of the new pipeline has not been measured yet, because the free tier's daily quota was used up.
+
 ## Provider setup
 
 The LLM client is OpenAI-compatible and reads `NEBIUS_API_KEY` and `NEBIUS_BASE_URL`, so any compatible provider works.
