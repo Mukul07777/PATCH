@@ -125,3 +125,9 @@
 - UI: supply-chain trust card, OpenVEX download + counts, Guardrails card (+ "Sandbox env: API keys withheld"), per-tier SVG charts on Runs (88% of tokens below Ultra across newest 8 runs). trust/vex/guard panels verified only with injected example events.
 - Owner asked to pause until 03:00. No new agents until then. Guardrails builder and submission writer finish their current task and get pushed.
 - ~16:00 Submission drafts landed (docs/submission/: DEVPOST, VIDEO-SCRIPT, JUDGE-QA, PITCH-30S). Paused.
+
+## 2026-10-29 ~16:15 — pulled collaborator's work; paused until 03:00
+- Pulled 17 commits from Ashpreet Singh Saini (Phase 1 hardening, Nebius Token Factory benchmark 6/6 in demo-runs/, Phase 2 product rounds 1-5). PROGRESS.md handoff is now the source of truth.
+- After pull: 344 passed, 1 failed (tests/test_hardening.py::test_event_stream_is_not_gzipped) → first task at 03:00.
+- Our guardrails builder stopped on the Claude usage limit; its WIP is stashed (stash@{0}), likely redundant with the collaborator's supply-chain-safe repair.
+- .env: still OpenRouter free models (keys set). Resume scheduled 03:00 to reconcile backlog with PROGRESS.md.
