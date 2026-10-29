@@ -204,6 +204,7 @@ if ($("#demoBtn")) $("#demoBtn").onclick = (e) => {
 function reset() {
   state = { runId: null, trust: null, vex: null, guard: [], threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
+  renderTierbar(); $("#runSummary").hidden = true; $("#runSummary").innerHTML = "";
   $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${esc(t())}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
   ["adv", "tests", "att", "tok", "time"].forEach((k) => ($("#k-" + k).textContent = "–"));
@@ -333,7 +334,7 @@ function handle(ev) {
       state.research.push(ev); node("tavily", "active"); pulse("repo", "tavily", "var(--tavily)");
       term("tavily", `tavily › ${ev.query}`, ev.t);
       ev.results.forEach((r) => r.url && term("dim", `   ↳ ${r.title}`));
-      renderEvidence(); break;
+      renderEvidence(); renderTierbar("tavily", `Searching: ${ev.package}`); break;
     case "plan": state.plan = ev.plan; renderAdvisories(); pulse("nano", "super", "var(--super)"); pulse("tavily", "super", "var(--tavily)");
       ev.plan.upgrades.forEach((u) => term("super", `plan › ${u.package} ${u.from} → ${u.to}${u.breaking ? "  [breaking]" : ""}`, ev.t)); break;
     case "model_call": onModel(ev); break;
@@ -402,13 +403,47 @@ function onModel(ev) {
     if (ev.tier === "nano") pulse("osv", "nano", "var(--nano)");
     if (ev.tier === "ultra") pulse("sandbox", "ultra", "var(--ultra)");
     if (ev.tier === "super" && /Fix/.test(ev.purpose)) pulse("sandbox", "super", "var(--super)");
+    renderTierbar(ev.tier, ev.purpose);
     return term(ev.tier, `${ev.tier} › ${ev.purpose} …`, ev.t);
   }
   const u = state.usage[ev.tier];
   u.calls++; u.tok += ev.tokens_in + ev.tokens_out; u.s += ev.seconds; u.model = ev.model;
   term("dim", `   ✓ ${ev.tokens_in}→${ev.tokens_out} tok in ${ev.seconds}s`);
   bumpKpi("#k-tok", TIERS.reduce((n, t) => n + state.usage[t].tok, 0).toLocaleString());
-  renderRouting();
+  renderRouting(); renderTierbar();
+}
+
+// Live tier strip: which Nemotron tier (or Tavily) is working right now, with real call counts from the event stream.
+const TB_IDLE = { nano: "Triage and symbol inference", super: "Upgrade plan and first-pass fixes", ultra: "Escalation on hard failures", tavily: "Migration-guide research" };
+let tbTimer = null;
+function renderTierbar(active, text) {
+  document.querySelectorAll("#tierbar .tb-cell").forEach((c) => {
+    const t = c.dataset.t, on = t === active;
+    const n = t === "tavily" ? (state.research || []).length : state.usage[t].calls;
+    c.querySelector(".tb-n").textContent = t === "tavily" ? `${n} search${n === 1 ? "" : "es"}` : `${n} call${n === 1 ? "" : "s"}`;
+    if (active) { c.classList.toggle("on", on); c.querySelector(".tb-p").textContent = on ? text : (c.classList.contains("used") ? c.querySelector(".tb-p").textContent : TB_IDLE[t]); }
+    if (on) c.classList.add("used");
+    if (!active && !state.runId && !n) c.classList.remove("on", "used");
+  });
+  if (active) { clearTimeout(tbTimer); tbTimer = setTimeout(() => document.querySelectorAll("#tierbar .tb-cell.on").forEach((c) => c.classList.remove("on")), 2500); }
+}
+
+// End-of-run summary, computed only from events already received.
+function renderSummary(ev) {
+  const el = $("#runSummary");
+    const first = state.tests.find((t) => t.label !== "baseline") || state.tests[0], last = state.tests[state.tests.length - 1];
+  const tests = (t) => String(t.summary || "").replace(/ in [\d.]+s$/, "").replace(/, \d+ warnings?/, "");
+  const x = state.exploit || {};
+  const files = new Set((state.diff.match(/^\+\+\+ b\/.+$/gm) || []).map((l) => l.slice(6)));
+  const calls = TIERS.map((t) => `<span class="chip ${t}">${t} ${state.usage[t].calls}</span>`).join(" ") + ` <span class="chip tavily">tavily ${state.research.length}</span>`;
+  const cell = (k, v) => `<div><small>${k}</small><b>${v}</b></div>`;
+  el.innerHTML = `<h2>${ev.ok ? "Run summary: fixed and verified" : "Run summary: needs review"}</h2><div class="sum-grid">`
+    + cell("CVEs fixed", ev.ok ? `${state.total} of ${state.total}` : `0 of ${state.total}`)
+    + cell("Tests before → after", first && last ? `${esc(tests(first))} → ${esc(tests(last))}` : "–")
+    + cell("Exploit before → after", x.title ? `${x.vulnerable ? "Exploited" : "Not reproduced"} → ${x.after ? (x.closed ? "Blocked" : "Still open") : "not run"}` : "No exploit proof")
+    + cell("Files changed", files.size ? `${files.size}` : "–")
+    + `</div><p class="sum-calls">Model calls by tier ${calls}</p>`;
+  el.hidden = false;
 }
 
 function onTest(ev) {
@@ -431,7 +466,7 @@ function onDone(ev) {
   }
   if (ev.seconds) $("#k-time").textContent = fmtTime(ev.seconds);
   if (ev.clean) { phase("clean"); return banner("No known advisories. Nothing to patch.", true); }
-  state.done = ev; $("#speak").hidden = false;
+  state.done = ev; $("#speak").hidden = false; renderSummary(ev);
   if (ev.ok) {
     phase("secured ✓"); node("pr", "active"); pulse("sandbox", "pr", "var(--ok)");
     $("#exposure").classList.remove("hot"); $("#exposure").classList.add("safe"); countTo($("#expNum"), 0, 1300);

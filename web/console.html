@@ -59,6 +59,15 @@
     </div>
   </section>
 
+  <section class="tierbar card glass" id="tierbar" aria-label="Which model is working now">
+    <div class="tb-cell" data-t="nano"><span class="chip nano">Nano</span><b class="tb-n">0 calls</b><small class="tb-p">Triage and symbol inference</small></div>
+    <div class="tb-cell" data-t="super"><span class="chip super">Super</span><b class="tb-n">0 calls</b><small class="tb-p">Upgrade plan and first-pass fixes</small></div>
+    <div class="tb-cell" data-t="ultra"><span class="chip ultra">Ultra</span><b class="tb-n">0 calls</b><small class="tb-p">Escalation on hard failures</small></div>
+    <div class="tb-cell" data-t="tavily"><span class="chip tavily">Tavily</span><b class="tb-n">0 searches</b><small class="tb-p">Migration-guide research</small></div>
+  </section>
+
+  <section class="summary-card card glass" id="runSummary" aria-label="Run summary" hidden></section>
+
   <section class="graph card glass">
     <div class="graph-head"><h2>Agent graph</h2><div class="gh-right"><span class="replay-badge" id="replayBadge" hidden><i></i>LIVE REPLAY</span><button class="btn ghost sm" type="button" id="realBtn" hidden>Run it for real</button><span id="phase" class="phase" role="status" aria-live="polite">idle</span></div></div>
     <div class="graph-scroll" tabindex="0" role="region" aria-label="Agent graph, scroll sideways"><svg id="graph" viewBox="0 0 960 250" role="img" aria-label="Live agent graph"></svg></div>

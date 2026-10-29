@@ -4,87 +4,72 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PatchPilot</title>
-<meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
+<meta name="description" content="Dependency bots bump the version and the build breaks. PatchPilot rewrites your code, proves the exploit is dead, and opens the PR.">
 <meta property="og:title" content="PatchPilot">
-<meta property="og:description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
+<meta property="og:description" content="Dependency bots bump the version and the build breaks. PatchPilot rewrites your code, proves the exploit is dead, and opens the PR.">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary">
-<meta name="theme-color" content="#05070a">
+<meta name="theme-color" content="#f6f5f1">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/site.css">
 <link rel="stylesheet" href="/static/landing.css">
 </head>
-<body class="ink">
-<nav class="utility" aria-label="Quick links"><span>Find the CVE. Fix the code. Ship the PR.</span><span><a href="/projects">Projects</a><a href="/runs">Run log</a><a href="/how">Help</a></span></nav>
+<body>
 <header class="topbar"></header>
 
 <main id="main">
-<!-- HERO -->
-<section class="stage" id="stage">
-  <h1 class="word disp" id="word" aria-label="Patch"><span>P</span><span>A</span><span>T</span><span>C</span><span>H</span></h1>
-  <div class="headline"><h2>Security upgrades that pass your tests and <em>prove the exploit is closed.</em></h2>
-    <p>Add your Python project and PatchPilot checks every pinned dependency against OSV.dev, free and without running your code. Then the agent can upgrade the vulnerable pins, rewrite any code the upgrade breaks until your own pytest suite is green, attack the fix with exploit variants, and prepare a pull request. Powered by NVIDIA Nemotron.</p></div>
-  <div class="vignette"></div>
-
-  <div class="corner c-tl"><p>Vulnerable is common.<br>Patched is rare.<br>Verified is PatchPilot.</p><span class="rule"></span></div>
-  <div class="corner c-tr"><b>Scan, then fix</b><small>Scanning needs no API key</small></div>
-  <div class="corner c-bl">
-    <a class="btn-solid" href="/projects">Add your project <span aria-hidden="true">→</span></a>
-    <a class="btn-text" href="/console?demo=1"><span aria-hidden="true">▶</span> Replay a sample run</a>
-    <a class="btn-text" href="/runs">Run log</a>
+<section class="lp-hero">
+  <div class="hero-in">
+    <span class="eyebrow-pill">Coding and agentic engineering · Nebius x NVIDIA</span>
+    <h1>Dependency bots bump the version and <span class="u-red">the build breaks.</span><br>PatchPilot <span class="u-green">rewrites your code</span>, proves the exploit is dead, and opens the PR.</h1>
+    <p class="lede">It finds the CVE, upgrades the pin, fixes what the upgrade broke until your own tests pass, then re-runs a real exploit against the patched code.</p>
+    <div class="cta-row">
+      <a class="btn-primary" href="/console?demo=1"><span aria-hidden="true">▶</span> Watch a recorded run</a>
+      <a class="btn-quiet" href="/projects">Add your project <span aria-hidden="true">→</span></a>
+    </div>
+    <p class="fine">No sign-up to watch. Scanning needs no API key.</p>
   </div>
-  <div class="corner c-br">Autonomous<br>security · 2026<span class="rule"></span></div>
-  <div class="scroll-cue"></div>
+  <img class="hero-vis" src="/static/hero-pipeline.svg" alt="Find the CVE, fix the code until tests pass, prove the exploit is closed" width="960" height="230">
 </section>
 
-<!-- LIVE STATS: counted from this server's database -->
-<section class="stats" id="stats" hidden aria-label="Projects on this server"></section>
+<section class="stats" id="stats" hidden aria-label="Measured results"></section>
 
-<!-- FEATURE STRIP -->
-<section class="strip">
-  <div class="rv" data-css="--g:#ff5a3d"><span class="ic" aria-hidden="true">🛰️</span><h3>Scan the threat</h3><p>Every pinned dependency is checked against OSV.dev, and a threat clock shows how long each CVE has been public.</p><a href="/how">Explore pipeline <span aria-hidden="true">→</span></a></div>
-  <div class="rv" data-css="--g:#0369a1;--d:.08s"><span class="ic" aria-hidden="true">🔎</span><h3>Predict the break</h3><p>Drift radar diffs the old and new library APIs and predicts which of your lines will break. Tavily cites the migration guide.</p><a href="/how">See evidence <span aria-hidden="true">→</span></a></div>
-  <div class="rv" data-css="--g:#b98cff;--d:.16s"><span class="ic" aria-hidden="true">🛠️</span><h3>Fix, then attack</h3><p>Nemotron patches breaking call-sites, then a red team fires exploit variants at the fix.</p><a href="/console">Watch it work <span aria-hidden="true">→</span></a></div>
-  <div class="rv" data-css="--g:#047857;--d:.24s"><span class="ic" aria-hidden="true">🚀</span><h3>Ship with proof</h3><p>No PR leaves until your tests are green, and every claim it makes is in a signed proof certificate.</p><a href="/runs">View runs <span aria-hidden="true">→</span></a></div>
-</section>
-
-<!-- STORY -->
-<section class="story">
-  <div class="rv">
-    <span class="over">The loop</span>
-    <h2 class="disp"><span>Find.</span><span>Fix.</span><span>Ship.</span></h2>
-    <p>Security PRs rot because version bumps break builds. PatchPilot doesn't stop at the bump: it runs your tests, reads the failures, patches the code and escalates to a bigger model until everything passes.</p>
-    <a class="btn-text" href="/how">Inside the agent <span aria-hidden="true">→</span></a>
-  </div>
-  <div class="rv how-steps" data-css="--d:.1s">
-    <h3 class="sr-only">How it works</h3>
-    <ol>
-      <li><b>Add a project.</b> Paste a GitHub URL, or upload a requirements.txt, pyproject.toml, poetry.lock, uv.lock or Pipfile.lock.</li>
-      <li><b>Scan.</b> Every pinned version is checked on OSV.dev and ranked with EPSS and the CISA KEV list. No API key, no code execution.</li>
-      <li><b>Fix with the agent.</b> For GitHub projects with a test suite, PatchPilot upgrades the pins, repairs the code until tests pass and prepares a PR.</li>
-    </ol>
-    <a class="btn-solid" href="/projects">Go to projects <span aria-hidden="true">→</span></a>
+<section class="band" aria-labelledby="stackH">
+  <div class="lp-wrap">
+    <span class="over">The stack</span>
+    <h2 id="stackH">Each model has one job.</h2>
+    <p class="sub">Three NVIDIA Nemotron tiers on Nebius Token Factory, plus Tavily for live migration research. The cheap model goes first, and a bigger one steps in only when a fix fails.</p>
+    <div class="tiers">
+      <article class="lp-tier"><span class="chip nano">Nano</span><h3>Triage</h3><p>Reads the advisories, infers which symbols are vulnerable and checks whether your code reaches them.</p><code class="ed-model" data-tier="nano">model: loading</code></article>
+      <article class="lp-tier"><span class="chip super">Super</span><h3>Plan and fix</h3><p>Picks the least-change safe version, then rewrites the call-sites the upgrade broke.</p><code class="ed-model" data-tier="super">model: loading</code></article>
+      <article class="lp-tier"><span class="chip ultra">Ultra</span><h3>Escalate</h3><p>Takes over when the first patch fails the tests. Deep stack-trace reasoning for the hard cases.</p><code class="ed-model" data-tier="ultra">model: loading</code></article>
+      <article class="lp-tier"><span class="chip tavily">Tavily</span><h3>Research</h3><p>Finds the migration guide for the exact version jump, so the fix rests on sources, not guesses.</p><code>web search API</code></article>
+    </div>
   </div>
 </section>
 
-<!-- ICON ROW -->
-<section class="icons">
-  <div class="rv"><span class="ic" aria-hidden="true">⏱️</span><div><b>Threat clock</b><span>How long each CVE has been exploitable</span></div></div>
-  <div class="rv" data-css="--d:.05s"><span class="ic" aria-hidden="true">📡</span><div><b>Drift radar</b><span>Predicts which lines an upgrade breaks</span></div></div>
-  <div class="rv" data-css="--d:.1s"><span class="ic" aria-hidden="true">🗡️</span><div><b>Red team</b><span>Attack variants fired at every fix</span></div></div>
-  <div class="rv" data-css="--d:.15s"><span class="ic" aria-hidden="true">📜</span><div><b>Proof certificate</b><span>Every PR claim verified and hashed</span></div></div>
-  <div class="rv" data-css="--d:.2s"><span class="ic" aria-hidden="true">⏪</span><div><b>Full replay</b><span>Audit any run, event by event</span></div></div>
+<section class="lp-wrap how3" aria-labelledby="howH">
+  <span class="over">How it works</span>
+  <h2 id="howH">From advisory to verified PR.</h2>
+  <ol class="steps3">
+    <li><b>1. Add a project</b><p>Paste a GitHub URL or upload a requirements.txt, pyproject.toml or lock file.</p></li>
+    <li><b>2. Scan and rank</b><p>Every pin is checked on OSV.dev and ranked with EPSS and the CISA KEV list. No code is run.</p></li>
+    <li><b>3. Fix and prove</b><p>The agent upgrades, repairs the code until pytest is green, then re-runs the exploit. You review the PR.</p></li>
+  </ol>
+  <div class="cta-row"><a class="btn-primary" href="/console?demo=1"><span aria-hidden="true">▶</span> Watch a recorded run</a><a class="btn-quiet" href="/how">Inside the agent <span aria-hidden="true">→</span></a></div>
 </section>
 
-<!-- TIERS -->
-<section class="editions">
-  <div class="ed-head"><h2>Three model tiers</h2><span class="over">Fix mode routes each step to a tier</span></div>
-  <div class="ed-grid">
-    <div class="ed rv" data-css="--c1:#0369a1;--c2:#1d4ed8;--c3:#7dd3fc"><div class="art"><i></i></div><div class="body"><h3>Nano tier</h3><p class="ed-model" data-tier="nano">Model: auto-selected</p><ul><li>Advisory triage</li><li>Reachability checks</li><li>Fastest tier</li></ul><div class="row"><b>Triage</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" data-css="--c1:#b98cff;--c2:#ff5a8a;--c3:#6b4bff;--d:.08s"><div class="art"><span class="tag">Workhorse</span><i></i></div><div class="body"><h3>Super tier</h3><p class="ed-model" data-tier="super">Model: auto-selected</p><ul><li>Upgrade planning</li><li>First-pass patches</li><li>Repair loop</li></ul><div class="row"><b>Plan + fix</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" data-css="--c1:#ff7a2f;--c2:#ff2f6d;--c3:#ffd23f;--d:.16s"><div class="art"><i></i></div><div class="body"><h3>Ultra tier</h3><p class="ed-model" data-tier="ultra">Model: auto-selected</p><ul><li>Hard failures only</li><li>Deep stack-trace reasoning</li><li>Escalation tier</li></ul><div class="row"><b>Escalate</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" data-css="--c1:#047857;--c2:#10b981;--c3:#a7f3d0;--d:.24s"><div class="art"><span class="tag">Full pipeline</span><i></i></div><div class="body"><h3>All three, routed</h3><ul><li>Cheapest model per step</li><li>Auto-escalation</li><li>Verified PR</li></ul><div class="row"><b>PatchPilot</b><a href="/console">Launch</a></div></div></div>
+<section class="lp-wrap more" aria-labelledby="moreH">
+  <span class="over">Also included</span>
+  <h2 id="moreH">Built for teams, not just demos.</h2>
+  <div class="grid6">
+    <a href="/dashboard"><img src="/static/icons/chart.svg" alt="" width="24" height="24"><b>Dashboards</b><span>Open findings across every project.</span></a>
+    <a href="/settings"><img src="/static/icons/bell.svg" alt="" width="24" height="24"><b>Alerts</b><span>Notify Slack or a webhook on new CVEs.</span></a>
+    <a href="/projects"><img src="/static/icons/sarif.svg" alt="" width="24" height="24"><b>SARIF export</b><span>Findings in GitHub code scanning.</span></a>
+    <a href="/org"><img src="/static/icons/users.svg" alt="" width="24" height="24"><b>Org scan</b><span>Scan every public repo of an owner.</span></a>
+    <a href="/runs"><img src="/static/icons/replay.svg" alt="" width="24" height="24"><b>Full replay</b><span>Audit any run, event by event.</span></a>
+    <a href="/how"><img src="/static/icons/shield.svg" alt="" width="24" height="24"><b>Proof certificate</b><span>Every PR claim verified and hashed.</span></a>
   </div>
 </section>
 </main>

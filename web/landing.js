@@ -1,31 +1,24 @@
-// Landing page: parallax, live counts from this server's database, real model names, try-it form.
+// Landing page: measured results from this server's database, real model names, try-it form.
 (() => {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // ---------- parallax: letters drift on scroll ----------
-  const word = document.getElementById("word");
-  if (!reduced) addEventListener("scroll", () => {
-    const y = scrollY; if (y > innerHeight) return;
-    word.style.transform = `translateY(calc(-46% + ${y * .35}px)) scale(${1 + y / 4000})`;
-  }, { passive: true });
-
-  // ---------- live stats: projects, scans and open findings stored on this server ----------
-  // Ask who we are first: an anonymous visitor of a private server would only get a 401 (a console error).
-  fetch("/api/auth/state").then((r) => (r.ok ? r.json() : null)).catch(() => null)
-    .then((st) => (st && (st.user || st.public_demo) ? fetch("/api/stats").then((r) => (r.ok ? r.json() : null)) : null))
-    .catch(() => null).then((s) => {
-    if (!s) return;
-    const el = document.getElementById("stats");
-    if (!s.projects) {
-      el.innerHTML = '<div class="stats-note">No projects on this server yet, so there is nothing to count. <a href="/projects">Add the first one</a>.</div>';
-    } else {
-      const stats = [[s.projects, "project" + (s.projects === 1 ? "" : "s")], [s.scans, "completed scan" + (s.scans === 1 ? "" : "s")],
-        [s.open_findings, "open finding" + (s.open_findings === 1 ? "" : "s")]];
-      el.innerHTML = stats.map(([n, label]) => `<div><b>${n}</b><span>${label}</span></div>`).join("") +
-        '<div class="stats-note">Counted live from this server\'s database. Open findings come from each project\'s latest scan.</div>';
-      el.style.setProperty("--n", stats.length);
+  // ---------- measured results: recorded benchmark (/api/bench) plus live counts (/api/stats) ----------
+  const cell = (n, label) => `<div><b>${n}</b><span>${label}</span></div>`;
+  Promise.all([
+    fetch("/api/bench").then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    fetch("/api/auth/state").then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      .then((st) => (st && (st.user || st.public_demo) ? fetch("/api/stats").then((r) => (r.ok ? r.json() : null)) : null)).catch(() => null),
+  ]).then(([bench, s]) => {
+    const cells = [];
+    if (Array.isArray(bench) && bench.length) {
+      const fixed = bench.filter((r) => r.ok).length, proven = bench.filter((r) => r.proven).length;
+      cells.push(cell(`${fixed}/${bench.length}`, "recorded cases fixed with tests green"), cell(`${proven}/${bench.length}`, "with the exploit proven closed"));
     }
-    el.hidden = false;
+    if (s && s.projects) cells.push(cell(s.projects, "project" + (s.projects === 1 ? "" : "s") + " on this server"));
+    if (!cells.length) return;
+    const el = document.getElementById("stats");
+    el.innerHTML = cells.join("") + '<div class="stats-note">Counted from the recorded benchmark runs and the server database, not hardcoded.</div>';
+    el.style.setProperty("--n", cells.length); el.hidden = false;
   });
 
   // ---------- tier cards: the model each tier is configured with ----------
@@ -33,7 +26,7 @@
     const models = (h && h.models) || {};
     document.querySelectorAll(".ed-model[data-tier]").forEach((p) => {
       const id = models[p.dataset.tier];
-      p.textContent = id ? `Model: ${id}` : "Model: picked from the provider's catalog at run time";
+      p.textContent = id || "picked from the catalog at run time";
     });
   });
 

@@ -8,6 +8,10 @@ Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory
 - **Live demo:** TODO <!-- TODO(owner): public URL of the deployed app; leave as TODO until it exists -->
 - **Video:** TODO <!-- TODO(owner): link to the demo video -->
 
+
+<p align="center"><img src="docs/screenshots/landing-1440.png" alt="PatchPilot landing page" width="49%"> <img src="docs/screenshots/console-mid-1440.png" alt="Console: live tier strip during a replay" width="49%"></p>
+<p align="center"><img src="docs/screenshots/console-end-1440.png" alt="Console: end-of-run summary" width="49%"> <img src="docs/screenshots/projects-1440.png" alt="Projects page" width="49%"></p>
+
 ---
 
 ## Testing instructions for judges
