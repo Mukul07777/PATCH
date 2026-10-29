@@ -1,8 +1,8 @@
 """Release trust check against recorded deps.dev v3 responses (no network)."""
 import pytest
 
-from patchpilot import sources
-from patchpilot.agent import Agent
+from patchpilot.intel import sources
+from patchpilot.agent.pipeline import Agent
 
 # trimmed from real api.deps.dev responses (2026-10)
 OLD = {"publishedAt": "2018-12-07T13:40:06Z", "attestations": [], "slsaProvenances": [],

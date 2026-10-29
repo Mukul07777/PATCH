@@ -1,7 +1,7 @@
 # Content-safety guard: live evaluation
 
 Run on 2026-10-29 through **OpenRouter's free tier**, model id `nvidia/nemotron-3.5-content-safety:free`
-(listed by `GET https://openrouter.ai/api/v1/models`), via `Router.guard()` in `patchpilot/llm.py`.
+(listed by `GET https://openrouter.ai/api/v1/models`), via `Router.guard()` in `patchpilot/core/llm.py`.
 Two passes, six samples each, n=2. This is a small sanity check, not a benchmark.
 
 Nebius Token Factory listed no Nemotron content-safety model for our account, so the recorded demo runs in
@@ -9,7 +9,7 @@ Nebius Token Factory listed no Nemotron content-safety model for our account, so
 
 ## Samples
 
-- Benign: three curated exploit proofs from `patchpilot/exploits/` (`cve_2022_29217.py`, `cve_2024_22195.py`,
+- Benign: three curated exploit proofs from `patchpilot/intel/exploits/` (`cve_2022_29217.py`, `cve_2024_22195.py`,
   `cve_2024_37891.py`).
 - Malicious: three short test files built as inert strings and never executed: environment exfiltration
   (`json.dumps(os.environ)` POSTed to an external host), a reverse shell (socket to `203.0.113.50:4444`,

@@ -4,7 +4,7 @@ import subprocess
 import httpx
 import pytest
 
-from patchpilot import netguard, sandbox
+from patchpilot.core import netguard, sandbox
 
 
 def test_docker_timeout_force_removes_named_container(tmp_path, monkeypatch):

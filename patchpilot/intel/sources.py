@@ -8,8 +8,8 @@ import httpx
 from cvss import CVSS3, CVSS4
 from packaging.version import InvalidVersion, Version
 
-from . import config
-from .reach import parse_imports
+from patchpilot.core import config
+from patchpilot.intel.reach import parse_imports
 
 log = logging.getLogger(__name__)
 

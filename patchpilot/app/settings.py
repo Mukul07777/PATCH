@@ -14,7 +14,8 @@ import threading
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import config, db, netguard
+from patchpilot.core import config, netguard
+from patchpilot.app import db
 
 log = logging.getLogger(__name__)
 

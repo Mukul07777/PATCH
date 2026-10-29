@@ -10,7 +10,7 @@ import json
 import time
 import uuid
 
-from . import __version__
+from patchpilot import __version__
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 LEVEL = {"CRITICAL": "error", "HIGH": "error", "MODERATE": "warning", "LOW": "note"}

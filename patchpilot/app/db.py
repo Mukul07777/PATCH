@@ -8,7 +8,7 @@ import sqlite3
 import threading
 import time
 
-from . import config
+from patchpilot.core import config
 
 MIGRATIONS = [
     """

@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 from conftest import AUTH
 
-from patchpilot import config, server
+from patchpilot.core import config
+from patchpilot.app import server
 
 
 @pytest.fixture

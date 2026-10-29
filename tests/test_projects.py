@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 
 from conftest import AUTH, osv_from
 
-from patchpilot import config, db, scanner, server, sources
+from patchpilot.core import config
+from patchpilot.app import db, server
+from patchpilot.intel import scanner, sources
 
 OSV = "https://api.osv.dev/v1/querybatch"
 VULN = {"id": "GHSA-462w-v97r-4m45", "aliases": ["CVE-2019-10906"], "summary": "Jinja2 sandbox escape",

@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from patchpilot import agent_behaviour as ab, rescue
+from patchpilot.agent import behaviour as ab, rescue
 
 
 def test_extract_cases_picks_compilable_cases_block():
@@ -44,7 +44,7 @@ def test_parse_pr_and_bumps():
 
 
 def test_run_request_accepts_pull_urls():
-    from patchpilot.server import RunRequest
+    from patchpilot.app.server import RunRequest
     assert RunRequest(repo="https://github.com/o/r/pull/7").repo.endswith("/pull/7")
     with pytest.raises(ValueError):
         RunRequest(repo="https://github.com/o/r/pull/x")

@@ -1,5 +1,6 @@
-from patchpilot import config, exploits, sources
-from patchpilot.agent import Agent, extract_test_code
+from patchpilot.core import config
+from patchpilot.intel import exploits, sources
+from patchpilot.agent.pipeline import Agent, extract_test_code
 
 
 def test_extract_fenced_block():

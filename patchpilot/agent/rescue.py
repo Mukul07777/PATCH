@@ -5,9 +5,9 @@ import subprocess
 
 import httpx
 
-from . import config
-from .agent_common import PIN
-from .github_pr import _auth_header, _git, _scrub
+from patchpilot.core import config
+from patchpilot.agent.common import PIN
+from patchpilot.agent.github_pr import _auth_header, _git, _scrub
 
 PR_URL = re.compile(r"https://github\.com/([A-Za-z0-9-]{1,39})/([A-Za-z0-9_.-]{1,100})/pull/(\d{1,7})/?")
 

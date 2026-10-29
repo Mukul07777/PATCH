@@ -5,7 +5,7 @@ import subprocess
 
 import httpx
 
-from . import config
+from patchpilot.core import config
 
 REPO_URL = re.compile(r"https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 

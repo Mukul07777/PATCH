@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from patchpilot import deps
-from patchpilot.agent import Agent
+from patchpilot.intel import deps
+from patchpilot.agent.pipeline import Agent
 
 ERR = ("sanitizer/comments.py:3: in <module>\n    from bleach.css_sanitizer import CSSSanitizer\n"
        "E   ModuleNotFoundError: No module named 'tinycss2'\n")

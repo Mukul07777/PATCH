@@ -15,7 +15,10 @@ import respx
 from fastapi.testclient import TestClient
 
 from conftest import AUTH, osv_from
-from patchpilot import cli, config, db, manifests, netguard, notify, scanner, server, sources
+from patchpilot import cli
+from patchpilot.core import config, netguard
+from patchpilot.app import db, notify, server
+from patchpilot.intel import manifests, scanner, sources
 
 HOOK = "https://hooks.example.com/pp"
 CSRF = {"X-Requested-With": "patchpilot"}
@@ -287,7 +290,7 @@ def test_unparsable_lines_are_warnings_and_partial_coverage():
     deps, warns = manifests.parse_ex("requirements.txt", "six==1.16.0\nthis is not a requirement\n-r other.txt\njinja2==2.10\n")
     assert [d.name for d in deps] == ["six", "jinja2"]
     assert any("line 2: not a valid requirement" in w for w in warns)
-    import patchpilot.sources as s
+    import patchpilot.intel.sources as s
     orig = s.osv_batch
     try:
         s.osv_batch = lambda pairs: {}

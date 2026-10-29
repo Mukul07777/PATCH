@@ -1,6 +1,6 @@
 import pytest
 
-from patchpilot.llm import LLMError, parse_json, strip_thinking
+from patchpilot.core.llm import LLMError, parse_json, strip_thinking
 
 
 def test_parse_json_variants():
@@ -22,7 +22,7 @@ def test_strip_thinking():
 
 
 def test_discover_matches_nebius_ids(monkeypatch):
-    from patchpilot import config, llm
+    from patchpilot.core import config, llm
 
     class Resp:
         def raise_for_status(self):
@@ -41,7 +41,7 @@ def test_discover_matches_nebius_ids(monkeypatch):
 
 
 def test_discover_mini_hint(monkeypatch):
-    from patchpilot import config, llm
+    from patchpilot.core import config, llm
 
     class Resp:
         def raise_for_status(self):
@@ -58,7 +58,7 @@ def test_discover_mini_hint(monkeypatch):
 
 
 def test_token_factory_gets_thinking_switch():
-    from patchpilot.llm import reasoning_style
+    from patchpilot.core.llm import reasoning_style
     assert reasoning_style("https://api.tokenfactory.nebius.com/v1") == "nim"
     assert reasoning_style("https://openrouter.ai/api/v1") == "openrouter"
     assert reasoning_style("https://example.com/v1") is None

@@ -23,8 +23,10 @@ from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse, Re
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from . import auth, config, db, export, manifests, notify, sandbox, scanner, scheduler, sources
-from .agent import PIN, Agent
+from patchpilot.app import auth, db, notify, scheduler
+from patchpilot.core import config, sandbox
+from patchpilot.intel import export, manifests, scanner, sources
+from patchpilot.agent.pipeline import PIN, Agent
 
 
 class _GZipExceptSSE(GZipMiddleware):

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot import manifests
+from patchpilot.intel import manifests
 
 FIX = Path(__file__).parent / "fixtures" / "manifests"
 

@@ -10,7 +10,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import config
+from patchpilot.core import config
 
 
 def venv_python(venv):

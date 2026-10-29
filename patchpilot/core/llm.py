@@ -12,7 +12,7 @@ import time
 
 import httpx
 
-from . import config
+from patchpilot.core import config
 
 # id substrings per tier; Nebius names its Nano-class tier "Lightning", others use "mini"
 TIER_HINTS = {"nano": ("nano", "lightning", "mini"), "super": ("super",), "ultra": ("ultra",)}
@@ -144,7 +144,7 @@ class Router:
         Single attempt with a short timeout: any error (429, timeout, unparseable reply) raises LLMError and
         the caller falls back to the static screen.
         """
-        from .guard import guard_request, parse_guard
+        from patchpilot.core.guard import guard_request, parse_guard
         model = config.model_guard()
         if not model:
             raise LLMError("no guard model configured (MODEL_GUARD)")

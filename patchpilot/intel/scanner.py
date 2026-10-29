@@ -10,7 +10,9 @@ from urllib.parse import quote
 
 import httpx
 
-from . import config, db, manifests, sources
+from patchpilot.core import config
+from patchpilot.app import db
+from patchpilot.intel import manifests, sources
 
 log = logging.getLogger(__name__)
 GITHUB = re.compile(r"https://github\.com/([A-Za-z0-9-]{1,39})/([A-Za-z0-9_.-]{1,100}?)(?:\.git)?/?")

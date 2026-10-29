@@ -10,7 +10,7 @@ import re
 import sys
 from datetime import datetime, timezone
 
-from . import sources
+from patchpilot.intel import sources
 
 try:  # optional: precise PEP 440 / requires_python matching
     from packaging.specifiers import InvalidSpecifier, SpecifierSet

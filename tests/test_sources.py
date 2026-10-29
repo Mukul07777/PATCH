@@ -1,4 +1,4 @@
-from patchpilot import sources
+from patchpilot.intel import sources
 
 
 def test_vkey_and_version_gte():

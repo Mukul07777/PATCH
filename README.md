@@ -47,11 +47,26 @@ Recorded runs: new runs are written to `runs/*.jsonl` (git-ignored). The repo al
 
 **Judged deployment settings.** Set `PATCHPILOT_PUBLIC_DEMO=1` (read-only anonymous access to sample projects and the shipped `demo-runs/` replays, nothing else), set `PATCHPILOT_SECRET_KEY`, create the admin on `/setup` right after deploying, then create a **member** account for judges on `/settings`. Keep `ALLOW_REMOTE_REPOS=0` (only the sample projects can be fixed; any public GitHub repo can still be scanned, because scanning only downloads and parses manifest files and never runs repository code).
 
-**Local run.** `cp .env.example .env`, set `NEBIUS_API_KEY` (and `TAVILY_API_KEY` for research), then `pip install -r requirements.txt` and `uvicorn patchpilot.server:app --port 8000` (or `run.bat` on Windows); see [Quickstart](#quickstart). Tests: `pytest`.
+**Local run.** `cp .env.example .env`, set `NEBIUS_API_KEY` (and `TAVILY_API_KEY` for research), then `pip install -r requirements.txt` and `uvicorn patchpilot.app.server:app --port 8000` (or `run.bat` on Windows); see [Quickstart](#quickstart). Tests: `pytest`.
 
 ## The problem
 
 Dependency bots open a version-bump PR and stop there. When the fix needs a **major** version, the bump breaks the build, the PR goes red, and the known vulnerability stays in production until someone finds time to migrate the code. The bump is easy. The fix is the hard part.
+
+## Project layout
+
+```
+patchpilot/
+  core/    config, Nemotron router (llm), sandbox, safety guard, SSRF guard (netguard)
+  intel/   vulnerability intelligence: OSV/PyPI/EPSS/KEV/deps.dev sources, manifest parsing, scanner,
+           reachability, API drift radar, OpenVEX/SARIF/CycloneDX export, curated exploits/
+  agent/   the repair agent: pipeline, exploit proof + red team, behaviour lock, evidence ledger,
+           PR rescue, PR opening
+  app/     web product: FastAPI server, admin API, auth, settings, SQLite db, scheduler, notifications
+  cli.py   `python -m patchpilot scan|fix|serve`
+web/       static front end (no build step)
+cases/     sample vulnerable projects;  demo-runs/  recorded runs for replay;  tests/  pytest suite
+```
 
 ## How it works
 
@@ -104,7 +119,7 @@ flowchart LR
 
 ## How Tavily is used
 
-Tavily is called at runtime on every run that has advisories, when `TAVILY_API_KEY` is set (`patchpilot/sources.py: tavily_search`, called from `patchpilot/agent.py: _analyse`):
+Tavily is called at runtime on every run that has advisories, when `TAVILY_API_KEY` is set (`patchpilot/intel/sources.py: tavily_search`, called from `patchpilot/agent/pipeline.py: _analyse`):
 
 1. **Research query** per vulnerable package: `"<package> upgrade <current> to <latest> breaking changes migration guide"`, sent to `POST https://api.tavily.com/search` with `search_depth: "advanced"`, `include_answer: true`, `max_results: 8`. Up to 3 packages are researched in parallel, alongside triage.
 2. **Ranking**: results are sorted by Tavily's own relevance score (shown 0-10). If Tavily returns no scores, Nemotron Nano reranks them. The top 4 (plus Tavily's answer) are kept.
@@ -150,7 +165,7 @@ docker run -p 8000:8000 -v patchpilot-data:/data -e PATCHPILOT_SECRET_KEY="$(ope
 # or pip (Python 3.11+)
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m patchpilot serve --port 8000              # same as: uvicorn patchpilot.server:app --port 8000
+python -m patchpilot serve --port 8000              # same as: uvicorn patchpilot.app.server:app --port 8000
 ```
 
 No server needed for a one-off check: `python -m patchpilot scan path/to/repo` (see **CLI and CI** below).
@@ -351,8 +366,8 @@ Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PR
 
 ## Built on Nebius
 
-- **Token Factory is the default LLM host.** `patchpilot/config.py` defaults `NEBIUS_BASE_URL` to `https://api.tokenfactory.nebius.com/v1`, and `patchpilot/llm.py` sends every model call there with the `NEBIUS_API_KEY` bearer token. Models are discovered from Token Factory's `/models` list, or pinned with `MODEL_NANO` / `MODEL_SUPER` / `MODEL_ULTRA`.
-- **Nemotron roles** (router in `patchpilot/llm.py`):
+- **Token Factory is the default LLM host.** `patchpilot/core/config.py` defaults `NEBIUS_BASE_URL` to `https://api.tokenfactory.nebius.com/v1`, and `patchpilot/core/llm.py` sends every model call there with the `NEBIUS_API_KEY` bearer token. Models are discovered from Token Factory's `/models` list, or pinned with `MODEL_NANO` / `MODEL_SUPER` / `MODEL_ULTRA`.
+- **Nemotron roles** (router in `patchpilot/core/llm.py`):
   - **Nano** (`nano` / `lightning` / `mini` ids): fast, cheap triage and classification: advisory triage and symbol inference for reachability.
   - **Super**: planning and first-pass code changes: upgrade plan, exploit-proof test when no curated one exists, first repair attempt.
   - **Ultra**: deep reasoning on escalation: later repair attempts when Super's fix still fails tests, or when a fix call hits the `FIX_TIMEOUT` cap.
@@ -376,7 +391,7 @@ All six bundled cases were run end-to-end with `python -m patchpilot.cli` agains
 
 The round-3 sanitizer run (`20261029-154409-job`) was not green. Super wrote `bleach.css_sanitizer.CSSSanitizer` without importing the submodule, and Ultra then guessed the wrong import path. Its last two replies were also dropped as "not valid JSON". That was a PatchPilot bug: the reply quoted the Tavily-sourced bleach changelog line `pip install 'bleach[css]'` together with its Markdown code fence, and `parse_json` took that inner fence as the reply's own. The parser now tries the whole reply first and then one outer fence (`tests/test_llm.py::test_parse_json_fence_inside_string`). A sanitizer rerun with the fix could not be recorded in this session, so the table keeps the green round-2 sanitizer run.
 
-The sanitizer case first failed in 3 of 3 runs (e.g. `20261029-151849-job`): bleach 6 needs `tinycss2` for `CSSSanitizer`, and Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency, so `test_allowed_style_kept` failed and PatchPilot reported the run as not green. The repair loop now detects missing-module failures (`No module named X`, bleach's `NoCssSanitizerWarning`), tells the model that editing `requirements.txt` is preferred over removing features, and runs a deterministic dependency step before the next LLM call: a missing module that exists on PyPI is added pinned to its latest release, reinstalled and retested (reverted if the install fails), recorded as a `deps` event and evidence, and listed in the PR report (`patchpilot/deps.py`). In `20261029-153214-job`, Super's first patch moved to `css_sanitizer=CSSSanitizer(...)`, the test run hit `No module named 'tinycss2'`, the step added `tinycss2==1.5.1`, and all 5 tests passed. Round 2 (`20261029-151559-job` to `20261029-152206-job`, no Tavily) was also 6/6 green with these fixes: 389.6 s in total and 26 model calls.
+The sanitizer case first failed in 3 of 3 runs (e.g. `20261029-151849-job`): bleach 6 needs `tinycss2` for `CSSSanitizer`, and Nemotron chose an import fallback that drops `style` attributes instead of adding the dependency, so `test_allowed_style_kept` failed and PatchPilot reported the run as not green. The repair loop now detects missing-module failures (`No module named X`, bleach's `NoCssSanitizerWarning`), tells the model that editing `requirements.txt` is preferred over removing features, and runs a deterministic dependency step before the next LLM call: a missing module that exists on PyPI is added pinned to its latest release, reinstalled and retested (reverted if the install fails), recorded as a `deps` event and evidence, and listed in the PR report (`patchpilot/intel/deps.py`). In `20261029-153214-job`, Super's first patch moved to `css_sanitizer=CSSSanitizer(...)`, the test run hit `No module named 'tinycss2'`, the step added `tinycss2==1.5.1`, and all 5 tests passed. Round 2 (`20261029-151559-job` to `20261029-152206-job`, no Tavily) was also 6/6 green with these fixes: 389.6 s in total and 26 model calls.
 
 A first round on Token Factory (`20261029-150603-job` to `20261029-151314-job`, same 5/6 result) exposed a bug: `reasoning="off"` was not sent to Token Factory, so Nano spent its whole 1500-token budget thinking and symbol inference / triage were skipped. Token Factory honours vLLM's `chat_template_kwargs.enable_thinking` (verified), so it now gets that switch; in the round above Nano's output fell from 3,000 to 203-1,721 tokens per run.
 
@@ -420,7 +435,7 @@ The `Dockerfile` supports both Nebius serverless modes. These steps describe how
 
 ## Where Token Factory accelerated the workflow
 
-- **One endpoint, three model sizes.** Nano, Super and Ultra sit behind the same OpenAI-compatible base URL and key, so per-step routing is a model id switch in `patchpilot/llm.py`, not a second provider integration.
+- **One endpoint, three model sizes.** Nano, Super and Ultra sit behind the same OpenAI-compatible base URL and key, so per-step routing is a model id switch in `patchpilot/core/llm.py`, not a second provider integration.
 - **Escalation is cheap to try.** Because Ultra is a call away, the repair loop starts on Super and escalates only on failure: across the six recorded runs Ultra was called once (23 calls: Nano 10, Super 12, Ultra 1).
 - **Wall time.** The same authsvc case took 723 s on a free-tier endpoint and 110.7 s on Token Factory (after the speed work); all six cases finished in 528.6 s (README benchmark table, `demo-runs/batch-summary.json`).
 - **Reasoning control.** Token Factory honours vLLM's `chat_template_kwargs.enable_thinking`, which cut Nano's output from 3,000 to 203-1,721 tokens per run.

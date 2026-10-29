@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from patchpilot import config, exploits, guard, sources
-from patchpilot.agent import Agent
-from patchpilot.llm import LLMError
+from patchpilot.core import config, guard
+from patchpilot.intel import exploits, sources
+from patchpilot.agent.pipeline import Agent
+from patchpilot.core.llm import LLMError
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -65,7 +66,7 @@ def test_static_screen_allows(code):
 
 
 def test_repo_code_and_curated_exploits_pass_static_screen():
-    files = list((ROOT / "cases").rglob("*.py")) + list((ROOT / "patchpilot" / "exploits").glob("cve_*.py"))
+    files = list((ROOT / "cases").rglob("*.py")) + list((ROOT / "patchpilot" / "intel" / "exploits").glob("cve_*.py"))
     assert len(files) > 10
     for p in files:
         assert guard.static_screen(p.read_text(encoding="utf-8"), p.name) == [], p
@@ -182,7 +183,7 @@ def test_exploit_blocked_is_skipped(tmp_path, monkeypatch):
 
 def _guard_router(monkeypatch, base, reply, bodies):
     import httpx
-    from patchpilot import llm
+    from patchpilot.core import llm
 
     def handler(req):
         bodies.append(json.loads(req.content))

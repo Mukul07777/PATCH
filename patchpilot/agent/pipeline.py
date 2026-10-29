@@ -7,19 +7,21 @@ import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import config, deps, drift, reach, rescue, sources, vex
-from .llm import LLMError, Router, parse_json
-from .sandbox import Sandbox
-from .github_pr import open_pull_request
+from patchpilot.core import config
+from patchpilot.intel import deps, drift, reach, sources, vex
+from patchpilot.agent import rescue
+from patchpilot.core.llm import LLMError, Router, parse_json
+from patchpilot.core.sandbox import Sandbox
+from patchpilot.agent.github_pr import open_pull_request
 
 log = logging.getLogger(__name__)
 
-from .agent_common import PIN, TEXT_EXT, extract_test_code
+from patchpilot.agent.common import PIN, TEXT_EXT, extract_test_code
 
 __all__ = ["Agent", "PIN", "TEXT_EXT", "extract_test_code"]
-from .agent_behaviour import BehaviourMixin, describe as describe_behaviour
-from .agent_proof import ProofMixin
-from .agent_report import ReportMixin
+from patchpilot.agent.behaviour import BehaviourMixin, describe as describe_behaviour
+from patchpilot.agent.proof import ProofMixin
+from patchpilot.agent.report import ReportMixin
 
 
 class Agent(BehaviourMixin, ProofMixin, ReportMixin):

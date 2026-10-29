@@ -1,6 +1,6 @@
-from patchpilot import reach
-from patchpilot.agent import Agent
-from patchpilot.drift import usages
+from patchpilot.intel import reach
+from patchpilot.agent.pipeline import Agent
+from patchpilot.intel.drift import usages
 
 
 FILES = {

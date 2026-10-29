@@ -5,7 +5,9 @@ from fastapi.testclient import TestClient
 
 from conftest import AUTH
 
-from patchpilot import config, server, vex
+from patchpilot.core import config
+from patchpilot.app import server
+from patchpilot.intel import vex
 
 FINDINGS = [
     {"package": "Jinja2", "current": "3.1.2", "vulns": [{"id": "GHSA-h5c8-rqwp-cp95", "cve": "CVE-2024-22195"}]},

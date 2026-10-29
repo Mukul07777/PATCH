@@ -2,7 +2,7 @@ import json
 import subprocess
 import sys
 
-from patchpilot import drift
+from patchpilot.intel import drift
 
 SRC = """import requests as rq
 import jwt

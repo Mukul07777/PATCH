@@ -15,7 +15,7 @@ def main(argv=None):
         print(USAGE)
         return 0 if argv else 2
     cmd, rest = argv[0], argv[1:]
-    from . import cli
+    from patchpilot import cli
     if cmd == "scan":
         return cli.scan_main(rest)
     if cmd == "serve":

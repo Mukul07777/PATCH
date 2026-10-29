@@ -3,7 +3,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")
 
 NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
@@ -52,7 +52,7 @@ DEMO_RUNS_DIR = ROOT / "demo-runs"
 WORK_DIR = RUNS_DIR / "work"
 CASES_DIR = ROOT / "cases"
 # SQLite store for projects, scans, findings and the audit log (JSONL files stay the per-run event log)
-DB_PATH = Path(os.getenv("PATCHPILOT_DB", "") or RUNS_DIR / "patchpilot.db")
+DB_PATH = Path(os.getenv("PATCHPILOT_DB", "") or RUNS_DIR / "patchpilot.app.db")
 # Public deployments should keep this off: remote repos run arbitrary test code on the server.
 # It gates fix mode only; scan-only mode never executes repo code, so it may read remote manifests regardless.
 ALLOW_REMOTE_REPOS = os.getenv("ALLOW_REMOTE_REPOS", "0") == "1"
@@ -82,7 +82,7 @@ def _stored(key):
     if NO_DB:
         return None
     try:
-        from . import settings
+        from patchpilot.app import settings
         return settings.get(key)
     except Exception:  # unreadable DB or key: fall back to the environment
         return None

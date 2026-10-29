@@ -12,7 +12,8 @@ import threading
 import time
 import uuid
 
-from . import db, scanner
+from patchpilot.app import db
+from patchpilot.intel import scanner
 
 log = logging.getLogger(__name__)
 LEASE = "scheduler"

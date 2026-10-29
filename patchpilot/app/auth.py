@@ -9,7 +9,7 @@ import secrets
 import threading
 import time
 
-from . import db
+from patchpilot.app import db
 
 ROLES = ("admin", "member")
 SESSION_TTL = 7 * 86400

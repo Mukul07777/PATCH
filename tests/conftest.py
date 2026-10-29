@@ -9,14 +9,15 @@ import pytest  # noqa: E402
 @pytest.fixture(autouse=True)
 def _isolate_demo_runs(monkeypatch, tmp_path_factory):
     """Keep the shipped demo-runs/ folder out of tests unless a test opts in."""
-    from patchpilot import config
+    from patchpilot.core import config
     monkeypatch.setattr(config, "DEMO_RUNS_DIR", tmp_path_factory.mktemp("no-demo"))
 
 
 @pytest.fixture(autouse=True)
 def _isolate_db(monkeypatch, tmp_path):
     """Every test gets its own empty SQLite file instead of runs/patchpilot.db."""
-    from patchpilot import config, db
+    from patchpilot.core import config
+    from patchpilot.app import db
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "pp.db")
     yield
     db.close()
@@ -27,7 +28,8 @@ def _offline_dns_and_inline_notify(monkeypatch):
     """Destinations resolve to a public test address (IP literals and localhost to themselves) without DNS, and
     notification deliveries run inline unless a test opts into the background pool."""
     import ipaddress
-    from patchpilot import netguard, notify
+    from patchpilot.core import netguard
+    from patchpilot.app import notify
 
     def resolve(host, port):
         try:
@@ -54,7 +56,7 @@ def _legacy_token(monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_pypi_probe(monkeypatch):
     """Scans HEAD-check every package on PyPI; keep tests offline unless a test opts in."""
-    from patchpilot import sources
+    from patchpilot.intel import sources
     monkeypatch.setattr(sources, "pypi_missing", lambda names: set())
 
 

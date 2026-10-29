@@ -9,7 +9,7 @@ import json
 import re
 import time
 
-from . import config
+from patchpilot.core import config
 
 LOCK_CASES = ".patchpilot/behaviour_cases.py"
 LOCK_RUNNER = ".patchpilot/behaviour_runner.py"

@@ -12,7 +12,10 @@ from fastapi.testclient import TestClient
 
 from conftest import AUTH
 
-from patchpilot import cli, config, db, export, notify, sandbox, scanner, scheduler, server, settings, sources
+from patchpilot import cli
+from patchpilot.core import config, sandbox
+from patchpilot.app import db, notify, scheduler, server, settings
+from patchpilot.intel import export, scanner, sources
 
 OSV = "https://api.osv.dev/v1/querybatch"
 HOOK = "https://hooks.example.com/pp"
@@ -266,7 +269,7 @@ def test_send_test_email_via_mocked_smtp(client, monkeypatch):
 
 
 def test_channels_admin_only_and_member_view(client, monkeypatch):
-    from patchpilot import auth
+    from patchpilot.app import auth
     webhook(client)
     uid = auth.create_user("m@example.com", "M", "longpassword1", "member")
     _, key = auth.create_key(uid, "k", "member")

@@ -5,10 +5,11 @@ import json
 import logging
 import re
 
-from . import config, guard, reach, sources
+from patchpilot.core import config, guard
+from patchpilot.intel import reach, sources
 
 
-log = logging.getLogger("patchpilot.agent")
+log = logging.getLogger("patchpilot.agent.pipeline")
 
 
 class ReportMixin:

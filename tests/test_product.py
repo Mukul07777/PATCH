@@ -8,7 +8,9 @@ import respx
 from fastapi.testclient import TestClient
 
 from conftest import AUTH, osv_from
-from patchpilot import auth, config, db, scanner, server, settings, sources
+from patchpilot.app import auth, db, server, settings
+from patchpilot.core import config
+from patchpilot.intel import scanner, sources
 
 CSRF = {"X-Requested-With": "patchpilot"}
 PW = "correct horse battery"

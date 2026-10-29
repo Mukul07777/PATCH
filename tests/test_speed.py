@@ -5,8 +5,9 @@ import threading
 import httpx
 import pytest
 
-from patchpilot import config, llm, sandbox, sources
-from patchpilot.agent import Agent
+from patchpilot.core import config, llm, sandbox
+from patchpilot.intel import sources
+from patchpilot.agent.pipeline import Agent
 
 OK = {"choices": [{"message": {"content": '{"a": 1}'}}], "usage": {"prompt_tokens": 3, "completion_tokens": 2}}
 

@@ -2,9 +2,10 @@
 import json
 from datetime import datetime, timezone
 
-from . import config, drift, exploits, sources
+from patchpilot.core import config
+from patchpilot.intel import drift, exploits, sources
 
-from .agent_common import EXPLOIT_TEST, MUTATION_TEST, extract_test_code
+from patchpilot.agent.common import EXPLOIT_TEST, MUTATION_TEST, extract_test_code
 
 
 class ProofMixin:

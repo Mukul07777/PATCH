@@ -22,7 +22,7 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 Around the agent it is a small multi-user product: projects with scan history (scan-only mode needs no LLM key and never runs your code), a dashboard (open findings by severity, KEV, riskiest projects and packages, trend, mean time to remediate from new/fixed tracking between scans), per-project policy (severity threshold, ignore list with reason and expiry), local accounts with admin/member roles and API keys, an audit log, and a Settings page where admins set provider keys (encrypted at rest) and model ids without a restart, scheduled scans with Slack / webhook / email alerts (SSRF-guarded, DNS-pinned, with a circuit breaker), a `python -m patchpilot scan` CLI with SARIF / CycloneDX output and CI exit codes, and a GitHub Action.
 
 ## How we built it
-- **Pipeline**: the agent (`patchpilot/agent.py` plus `agent_proof.py` for exploits / mutations / drift and `agent_report.py` for the ledger, risk and report) streams every step as SSE (`server.py`; admin routes in `api_admin.py`) to a multipage web UI (`web/`): landing, live console with a graph, run history with replay, org scan, architecture.
+- **Pipeline**: the agent (`patchpilot/agent/pipeline.py` plus `agent_proof.py` for exploits / mutations / drift and `agent_report.py` for the ledger, risk and report) streams every step as SSE (`server.py`; admin routes in `api_admin.py`) to a multipage web UI (`web/`): landing, live console with a graph, run history with replay, org scan, architecture.
 - **Model routing**:
   - **Nano** (`nvidia/Nemotron-3_5-Lightning` on Token Factory) does cheap, high-volume work: triage, reachability inference, classification.
   - **Super** (`nvidia/nemotron-3-super-120b-a12b`) writes the first patch attempts.
@@ -34,7 +34,7 @@ Around the agent it is a small multi-user product: projects with scan history (s
 - **PyPI**: latest versions for upgrade targets and release metadata for the missing-dependency step.
 - **GitHub API**: opening the pull request (needs `GITHUB_TOKEN`), org scans, and cloning remote repos (only with `ALLOW_REMOTE_REPOS=1`).
 - **Sandbox**: one venv per run (`sandbox.py`), prepared with `uv` in the background, or `SANDBOX=docker`: a locked-down container per step (`--network none` for tests, read-only root, non-root user, no capabilities, memory/CPU/PID limits, named containers force-removed on timeout). The Docker mode is covered by unit tests on the exact `docker run` arguments; it has not been exercised against a real Docker daemon in this submission. The environment is an allow-list, so no API keys or tokens reach the scanned repo's `setup.py` or `conftest.py`.
-- **Exploits**: a curated, verified library in `patchpilot/exploits/` (6 CVEs, each with a proof and mutation variants). Nemotron writes the proof when the CVE isn't in the library.
+- **Exploits**: a curated, verified library in `patchpilot/intel/exploits/` (6 CVEs, each with a proof and mutation variants). Nemotron writes the proof when the CVE isn't in the library.
 - **Self-tests**: 348 offline tests pass (`pytest -q`), and `pyflakes` is clean.
 
 ## Challenges (honest)
@@ -63,14 +63,14 @@ Around the agent it is a small multi-user product: projects with scan history (s
 
 ## What's next
 - Per-tier cost table for the Token Factory benchmark (set `PRICE_*`).
-- Run the NVIDIA content-safety model on Token Factory as soon as it is listed for our account (the gate in `patchpilot/guard.py` already supports it; today the static AST screen runs).
+- Run the NVIDIA content-safety model on Token Factory as soon as it is listed for our account (the gate in `patchpilot/core/guard.py` already supports it; today the static AST screen runs).
 - npm and Go ecosystems; a Nebius Serverless Job that runs the nightly scan queue.
 - <!-- TODO(owner): one real PR on a public repo; add the PR link here once it exists, or delete this line. -->
 - npm support (feasibility done: jsonwebtoken 8.5.1 → 9.0.0, CVE-2022-23540).
 - Container sandbox. Today the venv is **not a security boundary**.
 
 ## Testing instructions
-Hosted demo: <!-- TODO(owner): hosted demo URL. --> runs with `PATCHPILOT_PUBLIC_DEMO=1`, so no login is needed to browse the sample projects and dashboard or watch a recorded run; adding projects, scanning and launching runs need the judge account. <!-- TODO(owner): judge account. --> Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment sets `PATCHPILOT_PUBLIC_DEMO=1` and `PATCHPILOT_SECRET_KEY`, and keeps `ALLOW_REMOTE_REPOS=0`. A fresh install asks for an admin account on `/setup` first. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.server:app --port 8000`. The repo ships six recorded Token Factory runs in `demo-runs/`, so a fresh clone or deployment can replay them without an API key.
+Hosted demo: <!-- TODO(owner): hosted demo URL. --> runs with `PATCHPILOT_PUBLIC_DEMO=1`, so no login is needed to browse the sample projects and dashboard or watch a recorded run; adding projects, scanning and launching runs need the judge account. <!-- TODO(owner): judge account. --> Open `/console` (a recorded run replays automatically, or pick one from "Replay a recorded run"), `/console?demo=1` for the captioned walkthrough, or `/runs` to replay any recording; failed runs show their reason. Launching a live run needs `NEBIUS_API_KEY` on the server; without it the console disables "Launch agent" and points to replay. The judged deployment sets `PATCHPILOT_PUBLIC_DEMO=1` and `PATCHPILOT_SECRET_KEY`, and keeps `ALLOW_REMOTE_REPOS=0`. A fresh install asks for an admin account on `/setup` first. Locally: copy `.env.example` to `.env`, set `NEBIUS_API_KEY` and `TAVILY_API_KEY`, `pip install -r requirements.txt`, `uvicorn patchpilot.app.server:app --port 8000`. The repo ships six recorded Token Factory runs in `demo-runs/`, so a fresh clone or deployment can replay them without an API key.
 
 ## Proof
 | Run id | Case | Result |
@@ -82,7 +82,7 @@ Hosted demo: <!-- TODO(owner): hosted demo URL. --> runs with `PATCHPILOT_PUBLIC
 
 Source: `runs/batch-summary.json`, raw events in `runs/<id>.jsonl`. n=1 per case.
 
-**Replay with no API key:** start the server (`uvicorn patchpilot.server:app --port 8000`, see README), then open
+**Replay with no API key:** start the server (`uvicorn patchpilot.app.server:app --port 8000`, see README), then open
 - `http://localhost:8000/console?replay=20261029-113639-job` to replay the full run event by event
 - `http://localhost:8000/console?demo=1` for the guided demo (Find → Prioritize → Predict → Fix → Attack → Prove → Ship)
 - `http://localhost:8000/runs` for history and replay

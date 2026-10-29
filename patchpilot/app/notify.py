@@ -23,7 +23,10 @@ from email.message import EmailMessage
 
 import httpx
 
-from . import __version__, config, db, netguard, scanner, settings
+from patchpilot import __version__
+from patchpilot.core import config, netguard
+from patchpilot.app import db, settings
+from patchpilot.intel import scanner
 
 log = logging.getLogger(__name__)
 

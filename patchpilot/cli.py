@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import config
+from patchpilot.core import config
 
 
 def run_one(repo):
@@ -38,7 +38,7 @@ def run_one(repo):
         elif ev["type"] == "ledger":
             result["trust"] = ev.get("trust")
 
-    from .agent import Agent  # imported lazily: scan mode never needs the LLM stack
+    from patchpilot.agent.pipeline import Agent  # imported lazily: scan mode never needs the LLM stack
 
     emit({"type": "start", "repo": repo, "t": 0})
     Agent(run_id, repo, emit).run()
@@ -97,7 +97,7 @@ def _rel(path):
 
 def _read_target(args):
     """(files, notes, skipped, info, prefix) for the CLI target."""
-    from . import manifests, scanner
+    from patchpilot.intel import manifests, scanner
     if args.repo:
         files, notes, skipped, info = scanner._fetch_github(args.repo, args.ref, args.subdir)
         return files, notes, skipped, info, ""
@@ -173,7 +173,7 @@ def scan_main(argv):
     2 wins over 1: an incomplete scan must never look like a pass or an ordinary finding."""
     args = scan_parser().parse_args(argv)
     config.NO_DB = True
-    from . import export, scanner
+    from patchpilot.intel import export, scanner
     try:
         files, notes, skipped, info, prefix = _read_target(args)
         findings, summary = scanner.scan_files(files, notes, skipped, info)
@@ -222,7 +222,7 @@ def serve_main(argv):
     p.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args = p.parse_args(argv)
     import uvicorn
-    uvicorn.run("patchpilot.server:app", host=args.host, port=args.port, proxy_headers=True,
+    uvicorn.run("patchpilot.app.server:app", host=args.host, port=args.port, proxy_headers=True,
                 forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))
     return 0
 

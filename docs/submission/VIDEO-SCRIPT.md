@@ -2,7 +2,7 @@
 
 One story, told in this order: **Dependency bots bump the version and the build breaks. PatchPilot rewrites your code, proves the exploit is dead, and opens the PR.**
 
-Record from replay so nothing stalls: `uvicorn patchpilot.server:app --port 8000`, default light theme, 1080p, browser zoom 110%.
+Record from replay so nothing stalls: `uvicorn patchpilot.app.server:app --port 8000`, default light theme, 1080p, browser zoom 110%.
 Base run: `20261029-153834-job` (authsvc, PyJWT, Nebius Token Factory, live Tavily research, Super then Ultra, green on attempt 2, exploit proven closed, trust 85, 110.7 s).
 **[OWNER]** = needs an owner action. Each one has a fallback.
 

@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 
 from conftest import AUTH
 
-from patchpilot import config, github_pr, server
+from patchpilot.core import config
+from patchpilot.agent import github_pr
+from patchpilot.app import server
 
 
 def test_config_bad_numbers_fall_back(monkeypatch):

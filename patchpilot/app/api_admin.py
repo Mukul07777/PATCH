@@ -7,9 +7,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from . import auth, config, db, notify, settings
-from . import server as S
-from .server import (CSRF_HEADER, CSRF_VALUE, _audit, _project_or_404, principal, _ip, _limit, _need, _public_demo, _rate_wait, _reader,
+from patchpilot.app import auth, db, notify, settings
+from patchpilot.core import config
+from patchpilot.app import server as S
+from patchpilot.app.server import (CSRF_HEADER, CSRF_VALUE, _audit, _project_or_404, principal, _ip, _limit, _need, _public_demo, _rate_wait, _reader,
                      _sample_ids, _visible)
 
 router = APIRouter()

@@ -1,6 +1,6 @@
 import sys
 
-from patchpilot import sandbox
+from patchpilot.core import sandbox
 
 
 def test_secrets_never_reach_sandbox(monkeypatch, tmp_path):

@@ -23,4 +23,4 @@ dependencies = [
 patchpilot = "patchpilot.__main__:main"
 
 [tool.setuptools]
-packages = ["patchpilot", "patchpilot.exploits"]
+packages = ["patchpilot", "patchpilot.core", "patchpilot.intel", "patchpilot.intel.exploits", "patchpilot.agent", "patchpilot.app"]

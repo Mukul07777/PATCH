@@ -22,5 +22,5 @@ if not exist ".env" (
 if "%PORT%"=="" set PORT=8000
 echo [PatchPilot] Starting on http://localhost:%PORT%
 start "" "http://localhost:%PORT%"
-".venv\Scripts\python.exe" -m uvicorn patchpilot.server:app --host 127.0.0.1 --port %PORT%
+".venv\Scripts\python.exe" -m uvicorn patchpilot.app.server:app --host 127.0.0.1 --port %PORT%
 pause
