@@ -36,9 +36,9 @@ class Sandbox:
                         cwd=self.repo)
         return code == 0, out[-4000:]
 
-    def test(self):
-        code, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short"],
-                        cwd=self.repo)
+    def test(self, target=None):
+        code, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",
+                         *([target] if target else [])], cwd=self.repo)
         summary = next((l for l in reversed(out.splitlines()) if "passed" in l or "failed" in l or "error" in l),
                        out.strip().splitlines()[-1] if out.strip() else "no output")
         return code == 0, summary.strip("= "), out[-8000:]

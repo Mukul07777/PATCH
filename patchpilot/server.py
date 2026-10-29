@@ -1,17 +1,20 @@
 """FastAPI server: start runs, stream events over SSE, replay recorded runs."""
 import asyncio
 import json
+import re
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config
-from .agent import Agent
+from . import config, sources
+from .agent import PIN, Agent
 
 app = FastAPI(title="PatchPilot")
 RUNS = {}  # run_id -> {"events": [...], "done": bool}
@@ -36,7 +39,10 @@ def _record(run_id):
 
 @app.get("/api/health")
 def health():
-    return {"nebius": bool(config.NEBIUS_API_KEY), "tavily": bool(config.TAVILY_API_KEY),
+    host = config.NEBIUS_BASE_URL.split("//")[-1].split("/")[0]
+    provider = {"openrouter.ai": "OpenRouter", "integrate.api.nvidia.com": "NVIDIA NIM",
+                "api.groq.com": "Groq"}.get(host, "Token Factory")
+    return {"nebius": bool(config.NEBIUS_API_KEY), "provider": provider, "tavily": bool(config.TAVILY_API_KEY),
             "github": bool(config.GITHUB_TOKEN), "base_url": config.NEBIUS_BASE_URL,
             "remote_repos": config.ALLOW_REMOTE_REPOS}
 
@@ -56,6 +62,49 @@ def cases():
 def bench():
     p = config.RUNS_DIR / "batch-summary.json"
     return json.loads(p.read_text()) if p.exists() else []
+
+
+@app.get("/api/org/{owner}")
+def org_scan(owner: str):
+    """Scan every public repo of a GitHub user/org: pinned requirements.txt -> OSV advisories."""
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", owner):
+        raise HTTPException(400, "Invalid GitHub owner")
+    gh = httpx.Client(timeout=20, headers={"Accept": "application/vnd.github+json",
+                                           **({"Authorization": f"Bearer {config.GITHUB_TOKEN}"} if config.GITHUB_TOKEN else {})})
+    r = gh.get(f"https://api.github.com/users/{owner}/repos", params={"per_page": 40, "sort": "pushed"})
+    if r.status_code == 404:
+        raise HTTPException(404, f"No GitHub user or org named '{owner}'")
+    if r.status_code == 403:
+        raise HTTPException(429, "GitHub rate limit hit. Set GITHUB_TOKEN in .env to raise it")
+    r.raise_for_status()
+    repos = [x for x in r.json() if not x.get("fork") and not x.get("archived") and x.get("language") in ("Python", None)]
+
+    def scan(repo):
+        raw = gh.get(f"https://raw.githubusercontent.com/{repo['full_name']}/{repo['default_branch']}/requirements.txt")
+        row = {"name": repo["name"], "url": repo["html_url"], "stars": repo.get("stargazers_count", 0),
+               "pins": 0, "packages": [], "critical": 0, "high": 0, "other": 0, "has_reqs": raw.status_code == 200}
+        if raw.status_code != 200:
+            return row
+        for line in raw.text.splitlines()[:60]:
+            m = PIN.match(line.split("#")[0])
+            if not m:
+                continue
+            row["pins"] += 1
+            try:
+                vulns = sources.osv_vulns(m.group(1), m.group(2))
+            except Exception:
+                continue
+            if vulns:
+                row["packages"].append({"package": m.group(1), "version": m.group(2), "count": len(vulns)})
+            for v in vulns:
+                key = {"CRITICAL": "critical", "HIGH": "high"}.get(v.get("severity"), "other")
+                row[key] += 1
+        return row
+
+    with ThreadPoolExecutor(8) as pool:
+        rows = list(pool.map(scan, repos))
+    rows.sort(key=lambda x: (x["critical"], x["high"], x["other"]), reverse=True)
+    return {"owner": owner, "scanned": len(rows), "repos": rows}
 
 
 @app.post("/api/runs")
@@ -111,6 +160,12 @@ async def events(run_id: str, replay: float = 0):
 app.mount("/static", StaticFiles(directory=config.ROOT / "web"), name="static")
 
 
-@app.get("/")
-def index():
-    return FileResponse(config.ROOT / "web" / "index.html")
+PAGES = {"": "landing", "console": "console", "app": "console", "runs": "runs", "how": "how", "org": "org"}
+
+
+@app.get("/{page}")
+@app.get("/", include_in_schema=False)
+def page(page: str = ""):
+    if page not in PAGES:
+        raise HTTPException(404)
+    return FileResponse(config.ROOT / "web" / f"{PAGES[page]}.html")

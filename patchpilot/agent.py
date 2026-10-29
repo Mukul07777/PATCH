@@ -14,6 +14,8 @@ from .github_pr import open_pull_request
 
 PIN = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+)\s*==\s*([A-Za-z0-9_.\-]+)\s*$")
 TEXT_EXT = {".py", ".txt", ".toml", ".cfg", ".ini", ".md"}
+# lives in a dot-dir: the normal pytest run skips it and the diff ignores it
+EXPLOIT_TEST = ".patchpilot/test_exploit.py"
 
 
 class Agent:
@@ -46,7 +48,7 @@ class Agent:
             self._emit({"type": "done", "ok": False, "usage": self.router.cost_report()})
 
     def _run(self):
-        self.step("models", "running", "Connecting to Nebius Token Factory")
+        self.step("models", "running", "Connecting to Nemotron")
         models = self.router.discover()
         self.step("models", "done", detail=models)
 
@@ -76,6 +78,8 @@ class Agent:
         self.step("triage", "running", "Triage with Nemotron Nano")
         triage = self._triage(findings, original)
         self._emit({"type": "triage", "triage": triage})
+        self._emit({"type": "reach", "packages": {f["package"]: self._usage_snippets(f["package"], original)
+                                                   for f in findings}})
         self.step("triage", "done")
 
         # 3. Tavily research: migration guides + breaking changes
@@ -103,6 +107,7 @@ class Agent:
         ok_install, out = sandbox.install()
         base_ok, base_summary, _ = sandbox.test() if ok_install else (False, "install failed", out)
         self._emit({"type": "test", "label": "baseline", "ok": base_ok, "summary": base_summary})
+        exploit = self._exploit_before(findings, original, research, sandbox) if ok_install else None
 
         self._apply_pins({u["package"]: u["to"] for u in plan["upgrades"]})
         self.log("Bumped: " + ", ".join(f"{u['package']} -> {u['to']}" for u in plan["upgrades"]), "test")
@@ -124,17 +129,21 @@ class Agent:
             self.evidence += [e for e in change.get("evidence", []) if isinstance(e, dict) and e.get("quote")]
             self._write_files(change.get("files", []))
             self._emit({"type": "patch", "attempt": attempts, "tier": tier,
-                        "explanation": change.get("explanation", ""), "evidence": change.get("evidence", [])[:4],
+                        "explanation": change.get("explanation", ""), "diagnosis": change.get("diagnosis", ""),
+                        "evidence": change.get("evidence", [])[:4],
                         "files": [f["path"] for f in change.get("files", [])]})
             ok, summary, output = sandbox.test()
             self._emit({"type": "test", "label": f"attempt {attempts}", "ok": ok, "summary": summary,
                         "output": output[-3000:]})
         self.step("fix", "done" if ok else "failed", detail={"attempts": attempts})
+        if exploit:
+            self._exploit_after(exploit, sandbox)
 
         # 7. diff + report + PR
         diff = self._diff(original)
         self._emit({"type": "diff", "diff": diff})
-        report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary)
+        self._emit({"type": "risk", **self._risk(diff, plan, attempts, ok, exploit)})
+        report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary, exploit)
         self._emit({"type": "report", "markdown": report})
         pr = None
         if ok and config.GITHUB_TOKEN and str(self.repo_src).startswith("https://github.com/"):
@@ -170,7 +179,8 @@ class Agent:
     def _snapshot(self):
         files = {}
         for p in self.work.rglob("*"):
-            if p.is_file() and p.suffix in TEXT_EXT and ".git" not in p.parts and p.stat().st_size < 60_000:
+            if (p.is_file() and p.suffix in TEXT_EXT and ".git" not in p.parts and ".patchpilot" not in p.parts
+                    and p.stat().st_size < 60_000):
                 files[p.relative_to(self.work).as_posix()] = p.read_text(encoding="utf-8", errors="replace")
         return files
 
@@ -214,14 +224,19 @@ class Agent:
                 items.append({"package": f["package"], "id": v["id"], "cve": v["cve"], "summary": v["summary"],
                               "details": v["details"][:600], "fixed": v["fixed"]})
         usage = {f["package"]: self._usage_snippets(f["package"], files) for f in findings}
-        data = self.router.chat_json(
-            "nano",
-            "You are a security triage engineer. For each advisory decide whether the project's code "
-            "actually exercises the vulnerable functionality. Be concise.",
-            json.dumps({"advisories": items, "code_usage": usage}),
-            "Triage advisories against code usage",
-            max_tokens=2048,
-        )
+        try:
+            data = self.router.chat_json(
+                "nano",
+                "You are a security triage engineer. For each advisory decide whether the project's code "
+                "actually exercises the vulnerable functionality. Be concise: one short sentence of rationale. "
+                'Output: {"advisories":[{"id":str,"cve":str,"affected":bool,"rationale":str}]}',
+                json.dumps({"advisories": items, "code_usage": usage}),
+                "Triage advisories against code usage",
+                max_tokens=6000,
+            )
+        except Exception as e:  # triage only annotates; the upgrade still covers every advisory
+            self.log(f"Triage skipped: {e}", "triage")
+            return {}
         return data.get("advisories") or data.get("results") or data
 
     def _plan(self, findings, triage):
@@ -264,14 +279,80 @@ class Agent:
             "The dependency versions are FIXED and must not be downgraded. Do not edit tests; make the source "
             "code compatible with the new library versions while preserving behaviour and security. "
             "Return the COMPLETE new content of every file you change. In evidence, quote the exact line(s) from "
-            "migration_research (with its url) that justify each change; use an empty list if research did not help. Output: "
-            '{"explanation":str,"evidence":[{"url":str,"quote":str}],"files":[{"path":str,"content":str}]}'
+            "migration_research (with its url) that justify each change; use an empty list if research did not help. "
+            "In diagnosis, state the root cause of the failing tests in one or two sentences. Output: "
+            '{"diagnosis":str,"explanation":str,"evidence":[{"url":str,"quote":str}],"files":[{"path":str,"content":str}]}'
         )
         user = json.dumps({
             "attempt": attempt, "upgrades": plan["upgrades"], "migration_research": notes,
             "failing_test_output": test_output[-6000:], "source_files": files,
         })
         return self.router.chat_json(tier, system, user, f"Fix attempt {attempt}", max_tokens=8192)
+
+    # ---------- exploit proof ----------
+    def _exploit_before(self, findings, files, research, sandbox):
+        """Super writes a pytest asserting the SAFE outcome of the attack; it should fail on the vulnerable pins."""
+        self.step("exploit", "running", "Writing exploit proof with Nemotron Super")
+        sev = {"CRITICAL": 0, "HIGH": 1}
+        f, v = min(((f, v) for f in findings for v in f["vulns"]), key=lambda fv: sev.get(fv[1].get("severity"), 2))
+        try:
+            text = self.router.chat(
+                "super",
+                "You are a security engineer writing a proof-of-exploit regression test. Write ONE self-contained "
+                "pytest file that attempts the attack described in the advisory against the library (and the "
+                "project code if relevant) and ASSERTS THE SAFE OUTCOME (attack rejected). It must FAIL on the "
+                "vulnerable version and PASS once patched. Import ONLY the library under test, pytest and the standard "
+                "library (cryptography and other extras are NOT installed); no network. It must run on both the old and new library versions, so guard API differences with "
+                "try/except or hasattr. Start the file with a one-line comment naming the attack. "
+                "Reply with the file in a single ```python code block and nothing else.",
+                json.dumps({"package": f["package"], "vulnerable_version": f["current"], "advisory": v,
+                            "project_usage": self._usage_snippets(f["package"], files),
+                            "research": [h["content"][:800] for h in research.get(f["package"], [])[:2]]}),
+                "Write exploit proof", max_tokens=16000)
+            m = re.search(r"```(?:python)?\s*\n(.*?)```", text, re.S)
+            code = (m.group(1) if m else text).strip()
+            if "def test" not in code:
+                raise ValueError("no pytest test function in reply")
+        except Exception as e:  # the proof is a bonus; never block the fix on it
+            self.log(f"Exploit proof skipped: {e}", "exploit")
+            self.step("exploit", "failed")
+            return None
+        title = code.splitlines()[0].lstrip("# ").strip() if code.startswith("#") else v["summary"]
+        path = self.work / EXPLOIT_TEST
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(code, encoding="utf-8")
+        ok, summary, _ = sandbox.test(EXPLOIT_TEST)
+        ex = {"title": title, "advisory": v["cve"] or v["id"], "package": f["package"], "code": code,
+              "before": summary, "vulnerable": not ok}
+        self._emit({"type": "exploit", "stage": "before", **ex})
+        self.step("exploit", "done")
+        return ex
+
+    def _exploit_after(self, ex, sandbox):
+        ok, summary, _ = sandbox.test(EXPLOIT_TEST)
+        ex["after"] = summary
+        ex["verdict"] = ("proven closed" if ex["vulnerable"] and ok else
+                         "inconclusive: old version passed the test too" if ok else "not proven")
+        self._emit({"type": "exploit", "stage": "after", "after": summary, "closed": ok, "verdict": ex["verdict"]})
+
+    # ---------- risk score ----------
+    def _risk(self, diff, plan, attempts, ok, exploit):
+        files = len(re.findall(r"^\+\+\+ ", diff, re.M))
+        added = len(re.findall(r"^\+(?!\+\+)", diff, re.M))
+        removed = len(re.findall(r"^-(?!--)", diff, re.M))
+        major = sum(1 for u in plan["upgrades"] if str(u["from"]).split(".")[0] != str(u["to"]).split(".")[0])
+        proven = bool(exploit) and exploit.get("verdict") == "proven closed"
+        factors = [
+            ("Code churn", min(30, (added + removed) // 3), f"+{added} / -{removed} lines"),
+            ("Files touched", min(15, files * 3), f"{files} file(s)"),
+            ("Major version jumps", min(25, major * 12), f"{major} major upgrade(s)"),
+            ("Repair attempts", min(15, max(0, attempts - 1) * 5), f"{attempts} attempt(s)"),
+            ("Test result", 0 if ok else 40, "all green" if ok else "failing"),
+            ("Exploit proof", -10 if proven else 0, exploit.get("verdict", "not run") if exploit else "skipped"),
+        ]
+        score = max(0, min(100, sum(p for _, p, _ in factors)))
+        return {"score": score, "level": "low" if score < 30 else "medium" if score < 60 else "high",
+                "factors": [{"name": n, "points": p, "detail": d} for n, p, d in factors]}
 
     def _write_files(self, changes):
         for c in changes:
@@ -292,7 +373,7 @@ class Agent:
                 chunks += difflib.unified_diff(a.splitlines(True), b.splitlines(True), f"a/{path}", f"b/{path}")
         return "".join(chunks)
 
-    def _report(self, findings, triage, plan, research, attempts, ok, base, final):
+    def _report(self, findings, triage, plan, research, attempts, ok, base, final, exploit=None):
         lines = ["## PatchPilot security upgrade", ""]
         lines.append("### Advisories resolved")
         for f in findings:
@@ -303,6 +384,10 @@ class Agent:
             lines.append(f"- `{u['package']}` {u['from']} -> **{u['to']}** - {u.get('reason', '')}")
         lines += ["", "### Verification", f"- Baseline (old pins): `{base}`", f"- Final: `{final}`",
                   f"- Fix attempts: {attempts}", f"- Status: {'all tests passing' if ok else 'needs human review'}"]
+        if exploit:
+            lines += ["", "### Exploit proof", f"- {exploit['title']} ({exploit['advisory']})",
+                      f"- Vulnerable pins: `{exploit['before']}` · Patched: `{exploit.get('after', 'not run')}`",
+                      f"- Verdict: **{exploit.get('verdict', 'not run')}**"]
         if self.evidence:
             lines += ["", "### Why these changes (evidence quoted by the agent)"]
             for e in self.evidence[:5]:
@@ -310,7 +395,7 @@ class Agent:
         refs = [h for hits in research.values() for h in hits if h.get("url")]
         if refs:
             lines += ["", "### Sources consulted (Tavily)"] + [f"- [{h['title']}]({h['url']})" for h in refs[:8]]
-        lines += ["", "### Models (NVIDIA Nemotron on Nebius Token Factory)"]
+        lines += ["", "### Models (NVIDIA Nemotron)"]
         for tier, u in self.router.usage.items():
             if u["calls"]:
                 lines.append(f"- {tier}: `{self.router.models[tier]}` - {u['calls']} calls, {u['in']}+{u['out']} tokens")

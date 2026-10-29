@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PatchPilot</title>
+<meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/site.css">
+<style>
+  /* Landing is always dark: editorial monochrome + one iridescent object. */
+  body { background: #050505; color: #f2f2f0; }
+  .bg-grid, .bg-glow { display: none; }
+  #theme { display: none; }
+  .ink { --line: rgba(255,255,255,.1); }
+  .disp { font-family: Archivo, Inter, sans-serif; font-weight: 900; letter-spacing: -.04em; text-transform: uppercase; }
+  .over { font: 700 11px var(--mono); letter-spacing: .2em; text-transform: uppercase; color: #8a8a86; }
+  .rule { display: block; width: 34px; height: 2px; background: #f2f2f0; margin-top: 14px; }
+
+  .utility { display: flex; justify-content: space-between; padding: 9px 28px; font: 700 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; background: #000; color: #a8a8a4; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .utility a { color: inherit; text-decoration: none; margin-left: 18px; } .utility a:hover { color: #fff; }
+
+  /* ---------- hero ---------- */
+  .stage { position: relative; height: calc(100vh - 100px); min-height: 640px; overflow: hidden; isolation: isolate; }
+  .stage .word { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-46%); text-align: center; font-size: 21vw; line-height: .8; z-index: 1; white-space: nowrap; color: #f2f2f0; }
+  .stage .word span { display: inline-block; animation: drop 1.1s cubic-bezier(.2,.9,.1,1) both; }
+  .stage .word span:nth-child(2) { animation-delay: .06s } .stage .word span:nth-child(3) { animation-delay: .12s }
+  .stage .word span:nth-child(4) { animation-delay: .18s } .stage .word span:nth-child(5) { animation-delay: .24s }
+  @keyframes drop { from { transform: translateY(40%); opacity: 0; filter: blur(12px); } }
+  .stage .vignette { position: absolute; inset: 0; z-index: 3; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 55%, #050505 100%); }
+  .corner { position: absolute; z-index: 4; animation: fade 1s .8s both; }
+  .c-tl { top: 40px; left: 28px; } .c-tl p { font: 700 13px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase; margin: 0; }
+  .c-tr { top: 40px; right: 28px; text-align: right; }
+  .c-tr b, .c-l b { display: block; font: 800 30px Archivo; letter-spacing: -.03em; }
+  .c-tr small, .c-l small { color: #8a8a86; font-size: 12px; }
+  .c-l { left: 28px; top: 52%; }
+  .c-bl { bottom: 40px; left: 28px; display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+  .c-br { bottom: 40px; right: 28px; text-align: right; font: 700 13px/1.6 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+  .c-br .rule { margin-left: auto; }
+  .btn-solid { display: inline-flex; align-items: center; gap: 10px; background: #f2f2f0; color: #050505; text-decoration: none; padding: 16px 26px; font: 800 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; transition: background .25s, transform .25s; }
+  .btn-solid:hover { background: var(--accent-2); transform: translateY(-2px); }
+  .btn-text { color: #f2f2f0; text-decoration: none; font: 700 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; border-bottom: 1px solid #f2f2f0; padding: 4px 0; display: inline-flex; gap: 10px; }
+  .btn-text:hover { color: var(--accent-2); border-color: var(--accent-2); }
+  .scroll-cue { position: absolute; bottom: 18px; left: 50%; z-index: 4; width: 1px; height: 44px; background: linear-gradient(#f2f2f0, transparent); animation: cue 2s infinite; }
+  @keyframes cue { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
+
+  /* ---------- feature strip ---------- */
+  .strip { display: grid; grid-template-columns: repeat(4, 1fr); background: #000; border-block: 1px solid rgba(255,255,255,.08); }
+  .strip > div { padding: 34px 28px 30px; border-right: 1px solid rgba(255,255,255,.08); position: relative; overflow: hidden; min-height: 250px; display: flex; flex-direction: column; }
+  .strip > div:last-child { border-right: 0; }
+  .strip > div::after { content: ""; position: absolute; left: -20%; right: -20%; bottom: -60%; height: 90%; background: radial-gradient(closest-side, var(--g), transparent); opacity: .25; transition: opacity .5s, transform .5s; }
+  .strip > div:hover::after { opacity: .6; transform: translateY(-14%); }
+  .strip .ic { font-size: 26px; margin-bottom: 18px; }
+  .strip h3 { font: 800 15px Archivo; letter-spacing: .04em; text-transform: uppercase; margin: 0 0 8px; }
+  .strip p { color: #9a9a96; margin: 0 0 18px; font-size: 14px; max-width: 30ch; }
+  .strip a { margin-top: auto; color: #f2f2f0; font: 700 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; text-decoration: none; position: relative; z-index: 1; }
+  .strip a:hover { color: var(--accent-2); }
+
+  /* ---------- story ---------- */
+  .story { display: grid; grid-template-columns: 1fr 1.1fr; min-height: 640px; background: linear-gradient(90deg, #0d0d0d, #1a1a19); align-items: center; gap: 40px; padding: 80px 28px 80px 7vw; overflow: hidden; }
+  .story h2 { font-size: clamp(48px, 7vw, 104px); line-height: .92; margin: 18px 0 26px; color: #f2f2f0; text-transform: uppercase; letter-spacing: -.04em; }
+  .story h2 span { display: block; } .story h2 span:nth-child(2) { color: transparent; -webkit-text-stroke: 1.5px #f2f2f0; }
+  .story p { color: #a8a8a4; max-width: 44ch; font-size: 15px; margin: 0 0 30px; }
+  .story .demo .win { transform: perspective(1400px) rotateY(-10deg) rotateX(3deg); box-shadow: 0 60px 120px -40px rgba(255,120,60,.35), 0 40px 80px -40px rgba(120,90,255,.4); }
+  .story .demo:hover .win { transform: none; }
+
+  /* ---------- icon row ---------- */
+  .icons { display: grid; grid-template-columns: repeat(5, 1fr); padding: 40px 28px; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .icons > div { display: flex; gap: 14px; align-items: flex-start; padding: 0 22px; border-right: 1px solid rgba(255,255,255,.08); }
+  .icons > div:last-child { border-right: 0; }
+  .icons .ic { font-size: 22px; line-height: 1; }
+  .icons b { display: block; font: 800 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
+  .icons span { color: #8a8a86; font-size: 12.5px; }
+
+  /* ---------- tiers as "editions" ---------- */
+  .editions { padding: 70px 28px 90px; max-width: 1440px; margin: 0 auto; }
+  .ed-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 26px; }
+  .ed-head h2 { font: 900 22px Archivo; letter-spacing: .02em; text-transform: uppercase; color: #f2f2f0; margin: 0; }
+  .ed-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .ed { background: #0e0e0e; border: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; transition: transform .4s cubic-bezier(.2,.8,.2,1), border-color .4s; }
+  .ed:hover { transform: translateY(-8px); border-color: rgba(255,255,255,.3); }
+  .ed .art { height: 210px; position: relative; overflow: hidden; background: #000; }
+  .ed .art i { position: absolute; inset: 18% 22%; border-radius: 50%; filter: blur(4px); background: conic-gradient(from var(--a, 0deg), var(--c1), var(--c2), var(--c3), var(--c1)); animation: spinA 8s linear infinite, morph 9s ease-in-out infinite; box-shadow: 0 0 80px -10px var(--c1); }
+  .ed .art i::after { content: ""; position: absolute; inset: 9%; border-radius: inherit; background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.14), #050505 60%); }
+  .ed .art .tag { position: absolute; top: 12px; left: 12px; z-index: 1; background: #f2f2f0; color: #050505; font: 800 9px var(--mono); letter-spacing: .14em; padding: 4px 8px; text-transform: uppercase; }
+  @property --a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+  @keyframes spinA { to { --a: 360deg; } }
+  @keyframes morph { 0%,100% { border-radius: 52% 48% 41% 59% / 46% 55% 45% 54%; } 33% { border-radius: 38% 62% 56% 44% / 59% 41% 59% 41%; } 66% { border-radius: 60% 40% 47% 53% / 40% 60% 40% 60%; } }
+  .ed .body { padding: 22px; display: flex; flex-direction: column; flex: 1; }
+  .ed h3 { font: 800 15px Archivo; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 10px; }
+  .ed ul { list-style: none; margin: 0 0 22px; padding: 0; color: #9a9a96; font-size: 13px; line-height: 1.8; }
+  .ed .row { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .ed .row b { font: 800 18px Archivo; }
+  .ed .row a { color: #f2f2f0; border: 1px solid rgba(255,255,255,.4); padding: 9px 14px; font: 700 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; text-decoration: none; transition: background .2s, color .2s; }
+  .ed .row a:hover { background: #f2f2f0; color: #050505; }
+
+  /* ---------- footer ---------- */
+  .bigfoot { background: #000; border-top: 1px solid rgba(255,255,255,.08); padding: 56px 28px 26px; display: grid; grid-template-columns: 1.4fr repeat(3, 1fr) 1.4fr; gap: 30px; }
+  .bigfoot .logo { font: 900 40px Archivo; letter-spacing: -.02em; line-height: .9; }
+  .bigfoot .logo small { display: block; font: 700 10px var(--mono); letter-spacing: .4em; margin-top: 6px; color: #8a8a86; }
+  .bigfoot p { color: #8a8a86; font-size: 13px; }
+  .bigfoot h4 { font: 800 11px var(--mono); letter-spacing: .16em; text-transform: uppercase; margin: 6px 0 14px; }
+  .bigfoot a { display: block; color: #8a8a86; text-decoration: none; font-size: 13px; margin-bottom: 8px; } .bigfoot a:hover { color: #fff; }
+  .bigfoot form { display: flex; border: 1px solid rgba(255,255,255,.15); }
+  .bigfoot input { background: transparent; border: 0; border-radius: 0; color: #fff; padding: 12px; }
+  .bigfoot button { background: #f2f2f0; border: 0; padding: 0 16px; cursor: pointer; font-weight: 800; }
+  .copy { grid-column: 1 / -1; text-align: center; color: #5a5a56; font-size: 11px; border-top: 1px solid rgba(255,255,255,.06); padding-top: 22px; margin-top: 10px; }
+
+  @media (max-width: 1000px) {
+    .strip, .ed-grid { grid-template-columns: repeat(2, 1fr); }
+    .strip > div:nth-child(2) { border-right: 0; }
+    .story { grid-template-columns: 1fr; padding: 70px 20px; }
+    .icons { grid-template-columns: repeat(2, 1fr); gap: 24px 0; }
+    .icons > div:nth-child(2n) { border-right: 0; }
+    .bigfoot { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 640px) {
+    .utility span:first-child { display: none; }
+    .utility { justify-content: center; padding-inline: 16px; } .utility a:first-child { margin-left: 0; }
+    .stage { height: 86vh; min-height: 560px; }
+    .stage .word { font-size: 25vw; }
+    .c-tl, .c-l { left: 16px; } .c-tr { right: 16px; } .c-l { display: none; }
+    .c-bl { left: 16px; right: 16px; bottom: 30px; } .c-br { display: none; }
+    .c-tr b { font-size: 22px; }
+    .strip, .ed-grid, .icons, .bigfoot { grid-template-columns: 1fr; }
+    .strip > div, .icons > div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .icons > div { padding: 16px 0; }
+    .editions { padding-inline: 16px; }
+    .ed-head { flex-direction: column; gap: 6px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stage .word span, .corner, .ed .art i, .scroll-cue { animation: none !important; }
+  }
+</style>
+</head>
+<body class="ink">
+<div class="utility"><span>Find the CVE. Fix the code. Ship the PR.</span><span><a href="/console">Launch agent</a><a href="/runs">Run log</a><a href="/how">Help</a></span></div>
+<header class="topbar"></header>
+
+<!-- HERO -->
+<section class="stage" id="stage">
+  <h1 class="word disp" id="word" aria-label="Patch"><span>P</span><span>A</span><span>T</span><span>C</span><span>H</span></h1>
+  <div class="vignette"></div>
+
+  <div class="corner c-tl"><p>Vulnerable is common.<br>Patched is rare.<br>Verified is PatchPilot.</p><span class="rule"></span></div>
+  <div class="corner c-tr"><b>3 models</b><small>Nemotron Nano · Super · Ultra</small></div>
+  <div class="corner c-bl">
+    <a class="btn-solid" href="/console">Launch agent →</a>
+    <a class="btn-text" href="/runs">Watch a replay ▶</a>
+  </div>
+  <div class="corner c-br">Autonomous<br>security · 2026<span class="rule"></span></div>
+  <div class="scroll-cue"></div>
+</section>
+
+<!-- FEATURE STRIP -->
+<section class="strip">
+  <div class="rv" style="--g:#ff5a3d"><span class="ic">🛰️</span><h3>Scan the threat</h3><p>Every pinned dependency is checked against OSV.dev for real CVEs.</p><a href="/how">Explore pipeline →</a></div>
+  <div class="rv" style="--g:#4cc2ff;--d:.08s"><span class="ic">🔎</span><h3>Research the fix</h3><p>Tavily pulls changelogs and migration guides. Every step is cited.</p><a href="/how">See evidence →</a></div>
+  <div class="rv" style="--g:#b98cff;--d:.16s"><span class="ic">🛠️</span><h3>Rewrite the code</h3><p>Nemotron patches breaking call-sites, not just version numbers.</p><a href="/console">Watch it work →</a></div>
+  <div class="rv" style="--g:#76b900;--d:.24s"><span class="ic">🚀</span><h3>Ship verified</h3><p>No PR leaves until your own pytest suite is fully green.</p><a href="/runs">View runs →</a></div>
+</section>
+
+<!-- STORY -->
+<section class="story">
+  <div class="rv">
+    <span class="over">The loop</span>
+    <h2 class="disp"><span>Find.</span><span>Fix.</span><span>Ship.</span></h2>
+    <p>Security PRs rot because version bumps break builds. PatchPilot doesn't stop at the bump: it runs your tests, reads the failures, patches the code and escalates to a bigger model until everything passes.</p>
+    <a class="btn-solid" href="/how">Discover the agent</a>
+  </div>
+  <div class="demo rv" style="--d:.1s">
+    <div class="win">
+      <div class="win-bar"><i></i><i></i><i></i><span>patchpilot run case:authsvc · demo</span></div>
+      <pre id="typed"></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ICON ROW -->
+<section class="icons">
+  <div class="rv"><span class="ic">⚡</span><div><b>Live stream</b><span>Every step streamed as it happens</span></div></div>
+  <div class="rv" style="--d:.05s"><span class="ic">📎</span><div><b>Cited sources</b><span>The exact lines it relied on</span></div></div>
+  <div class="rv" style="--d:.1s"><span class="ic">🧪</span><div><b>Sandboxed tests</b><span>Isolated venv for every attempt</span></div></div>
+  <div class="rv" style="--d:.15s"><span class="ic">⏪</span><div><b>Full replay</b><span>Audit any run, event by event</span></div></div>
+  <div class="rv" style="--d:.2s"><span class="ic">🔐</span><div><b>Real advisories</b><span>Straight from OSV.dev</span></div></div>
+</section>
+
+<!-- TIERS -->
+<section class="editions">
+  <div class="ed-head"><h2>Choose your model</h2><span class="over">Routed automatically per job</span></div>
+  <div class="ed-grid">
+    <div class="ed rv" style="--c1:#4cc2ff;--c2:#1e5bff;--c3:#9be8ff"><div class="art"><i></i></div><div class="body"><h3>Nemotron Nano</h3><ul><li>Advisory triage</li><li>Reachability checks</li><li>Fastest tier</li></ul><div class="row"><b>Triage</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" style="--c1:#b98cff;--c2:#ff5a8a;--c3:#6b4bff;--d:.08s"><div class="art"><span class="tag">Workhorse</span><i></i></div><div class="body"><h3>Nemotron Super</h3><ul><li>Upgrade planning</li><li>First-pass patches</li><li>Repair loop</li></ul><div class="row"><b>Plan + fix</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" style="--c1:#ff7a2f;--c2:#ff2f6d;--c3:#ffd23f;--d:.16s"><div class="art"><i></i></div><div class="body"><h3>Nemotron Ultra</h3><ul><li>Hard failures only</li><li>Deep stack-trace reasoning</li><li>Escalation tier</li></ul><div class="row"><b>Escalate</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" style="--c1:#76b900;--c2:#3ce39b;--c3:#d4ff3a;--d:.24s"><div class="art"><span class="tag">Full pipeline</span><i></i></div><div class="body"><h3>All three, routed</h3><ul><li>Cheapest model per step</li><li>Auto-escalation</li><li>Verified PR</li></ul><div class="row"><b>PatchPilot</b><a href="/console">Launch</a></div></div></div>
+  </div>
+</section>
+
+<footer class="bigfoot">
+  <div><div class="logo">PATCHPILOT<small>Autonomous security</small></div><p>An agentic DevSecOps tool for software supply chain security. Find the CVE, fix the code, ship the PR.</p></div>
+  <div><h4>Product</h4><a href="/console">Console</a><a href="/runs">Runs</a><a href="/how">How it works</a></div>
+  <div><h4>Stack</h4><a href="https://osv.dev" target="_blank" rel="noopener">OSV.dev</a><a href="https://tavily.com" target="_blank" rel="noopener">Tavily</a><a href="https://build.nvidia.com" target="_blank" rel="noopener">NVIDIA Nemotron</a></div>
+  <div><h4>Project</h4><a href="/how">FAQ</a><a href="/runs">Benchmarks</a></div>
+  <div><h4>Try it</h4><p>Paste a public repo with pinned requirements.txt and a pytest suite.</p><form onsubmit="event.preventDefault();location.href='/console'"><input placeholder="github.com/you/repo" aria-label="Repository URL"><button aria-label="Go">→</button></form></div>
+  <div class="copy">© 2026 PatchPilot · MIT licensed</div>
+</footer>
+
+<script src="/static/site.js"></script>
+<script>
+(() => {
+  document.documentElement.dataset.theme = "dark";
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- parallax: letters drift on scroll ----------
+  const word = document.getElementById("word");
+  if (!reduced) addEventListener("scroll", () => {
+    const y = scrollY; if (y > innerHeight) return;
+    word.style.transform = `translateY(calc(-46% + ${y * .35}px)) scale(${1 + y / 4000})`;
+  }, { passive: true });
+
+  // ---------- scripted terminal demo (illustrative, not live data) ----------
+  const L = [
+    ['<span class="d">$</span> <span class="k">patchpilot</span> run case:authsvc', 0],
+    ['<span class="d">▸</span> scan · OSV.dev', 500],
+    ['  <span class="b">HIGH</span>     CVE-2022-29217  PyJWT 1.7.1', 250],
+    ['  <span class="b">MODERATE</span> CVE-2023-32681  requests 2.25.1', 200],
+    ['<span class="n">nano</span>  › triage advisories … <span class="g">✓</span>', 600],
+    ['<span class="t">tavily</span> › "PyJWT 2.0 migration guide"', 500],
+    ['<span class="s">super</span> › plan PyJWT 1.7.1 → 2.x <span class="t">[breaking]</span>', 600],
+    ['<span class="d">pytest</span> › upgrade: <span class="b">FAIL</span>', 700],
+    ['<span class="s">super</span> › patch #1: add algorithms=[…] to decode()', 600],
+    ['<span class="d">pytest</span> › attempt 1: <span class="b">FAIL</span>', 700],
+    ['<span class="u">ultra</span> › escalate: bytes/str token handling', 600],
+    ['<span class="d">pytest</span> › attempt 2: <span class="g">PASS</span>', 700],
+    ['<span class="g">✔ secured</span> · PR ready', 400],
+  ];
+  const pre = document.getElementById("typed");
+  let started = false;
+  new IntersectionObserver(([e]) => { if (e.isIntersecting && !started) { started = true; play(); } }, { threshold: .3 }).observe(pre);
+  async function play() {
+    for (;;) {
+      pre.innerHTML = "";
+      for (const [html, wait] of L) { await new Promise((r) => setTimeout(r, reduced ? 0 : wait)); pre.insertAdjacentHTML("beforeend", html + "\n"); }
+      pre.insertAdjacentHTML("beforeend", '<span style="display:inline-block;width:8px;height:14px;background:#9be22d"></span>');
+      if (reduced) return;
+      await new Promise((r) => setTimeout(r, 4500));
+    }
+  }
+})();
+</script>
+</body>
+</html>

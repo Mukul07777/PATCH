@@ -3,31 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PatchPilot</title>
+<title>PatchPilot Console</title>
 <meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron on Nebius Token Factory">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/site.css">
 </head>
 <body>
 <div class="bg-grid" aria-hidden="true"></div>
 <div class="bg-glow" aria-hidden="true"></div>
 <canvas id="confetti" aria-hidden="true"></canvas>
 
-<header class="topbar">
-  <div class="brand">
-    <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z" fill="var(--accent)"/><path d="m11 16 3.5 3.5L21.5 12" stroke="var(--bg)" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <div><b>Patch<span class="g">Pilot</span></b><small>autonomous security upgrades</small></div>
-  </div>
-  <div class="pills" id="pills"></div>
-  <button class="icon-btn" id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button>
-</header>
+<header class="topbar"></header>
 
 <main>
   <section class="hero">
     <div class="hero-copy">
-      <div class="eyebrow"><span class="live-dot"></span>NVIDIA Nemotron · Nebius Token Factory · Tavily</div>
+      <div class="eyebrow"><span class="live-dot"></span>Mission control · NVIDIA Nemotron · Tavily</div>
       <h1>The CVE fix that <span class="grad">actually ships.</span></h1>
       <p>Version bumps break builds, so security PRs rot. PatchPilot finds real advisories, researches the migration, upgrades the dependency and <b>rewrites your code until every test passes</b>. Then it hands you a verified pull request.</p>
     </div>
@@ -77,6 +71,9 @@
         <button class="tab active" data-tab="advisories">Advisories</button>
         <button class="tab" data-tab="terminal">Live terminal</button>
         <button class="tab" data-tab="evidence">Evidence</button>
+        <button class="tab" data-tab="proof">Proof &amp; risk</button>
+        <button class="tab" data-tab="reach">Reachability</button>
+        <button class="tab" data-tab="debate">Debate</button>
         <button class="tab" data-tab="diff">Diff</button>
         <button class="tab" data-tab="report">PR report</button>
         <button class="tab" data-tab="bench">Benchmarks</button>
@@ -84,6 +81,9 @@
       <div class="panel active" id="tab-advisories"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div>
       <div class="panel" id="tab-terminal"><pre class="term" id="term"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>
       <div class="panel" id="tab-evidence"><div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div></div>
+      <div class="panel" id="tab-proof"><div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div></div>
+      <div class="panel" id="tab-reach"><div class="empty">Where your code calls each vulnerable package.</div></div>
+      <div class="panel" id="tab-debate"><div class="empty">When a fix fails, each model's diagnosis appears here side by side.</div></div>
       <div class="panel" id="tab-diff"><div class="empty">The verified patch appears here.</div></div>
       <div class="panel" id="tab-report"><div class="empty">The pull-request description appears here.</div></div>
       <div class="panel" id="tab-bench"><div class="empty">Run <code>python -m patchpilot.cli</code> to benchmark every case.</div></div>
@@ -94,6 +94,7 @@
         <h2>Model routing</h2>
         <div id="routing" class="routing"></div>
         <p class="hint" id="costNote"></p>
+        <button class="btn ghost" id="speak" type="button" hidden style="margin-top:12px;width:100%">🔊 Brief me</button>
       </div>
       <div class="card glass">
         <h2>Test timeline</h2>
@@ -103,7 +104,8 @@
   </div>
   <div id="banner" class="banner" hidden></div>
 </main>
-<footer>Built with NVIDIA Nemotron on Nebius Token Factory · Advisories from OSV.dev · Research by Tavily · MIT licensed</footer>
+<footer>Built with NVIDIA Nemotron · Advisories from OSV.dev · Research by Tavily · MIT licensed</footer>
+<script src="/static/site.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

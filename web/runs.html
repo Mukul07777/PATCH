@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PatchPilot Runs</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-glow" aria-hidden="true"></div>
+<header class="topbar"></header>
+
+<div class="page-head rv"><span class="kicker">Mission log</span><h1>Every run, recorded.</h1><p>Replay any agent run event by event, or compare results across the benchmark cases.</p></div>
+
+<div class="wrap">
+  <div class="summary">
+    <div class="kpi"><span>Total runs</span><b id="s-total">–</b></div>
+    <div class="kpi"><span>Secured</span><b id="s-ok" style="color:var(--ok)">–</b></div>
+    <div class="kpi"><span>Needs review</span><b id="s-bad" style="color:var(--bad)">–</b></div>
+    <div class="kpi"><span>Success rate</span><b id="s-rate">–</b></div>
+  </div>
+
+  <div class="filters"><h2>Recorded runs</h2>
+    <button class="chipbtn on" data-f="all">All</button><button class="chipbtn" data-f="ok">Secured</button><button class="chipbtn" data-f="bad">Needs review</button>
+  </div>
+  <div class="runs-grid" id="runs"><div class="empty" style="grid-column:1/-1">Loading…</div></div>
+
+  <div class="filters"><h2>Benchmarks</h2></div>
+  <div class="card glass" id="bench"><div class="empty">No benchmark yet. Run <code>python -m patchpilot.cli</code> to benchmark every case.</div></div>
+</div>
+
+<footer class="foot"><span>PatchPilot · NVIDIA Nemotron · OSV.dev · Tavily</span><span><a href="/">Home</a><a href="/console">Console</a><a href="/how">How it works</a></span></footer>
+<script src="/static/site.js"></script>
+<script>
+(() => {
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const when = (id) => { const m = /^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)/.exec(id); return m ? new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}`).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : id; };
+  const fmt = (s) => { s = Math.round(s); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`; };
+  let runs = [], filter = "all";
+
+  function render() {
+    const list = runs.filter((r) => filter === "all" || (filter === "ok" ? r.ok === true : r.ok !== true));
+    document.getElementById("runs").innerHTML = list.length ? list.map((r, i) => {
+      const st = r.ok === true ? ["ok", "secured"] : r.ok === false ? ["bad", "review"] : ["na", "incomplete"];
+      return `<a class="run spot rv" style="--d:${Math.min(i, 8) * .04}s" href="/console?replay=${encodeURIComponent(r.id)}">
+        <div class="top"><span class="status ${st[0]}">${st[1]}</span><span class="go">Replay ▶</span></div>
+        <code>${esc(r.repo)}</code><span class="id">${esc(when(r.id))} · ${esc(r.id.slice(-4))}</span></a>`;
+    }).join("") : '<div class="empty" style="grid-column:1/-1">No runs yet. <a href="/console">Launch the agent</a> to record one.</div>';
+    window.ppReveal();
+  }
+  document.querySelectorAll(".chipbtn").forEach((b) => (b.onclick = () => {
+    filter = b.dataset.f; document.querySelectorAll(".chipbtn").forEach((x) => x.classList.toggle("on", x === b)); render();
+  }));
+
+  fetch("/api/runs").then((r) => r.json()).catch(() => []).then((r) => {
+    runs = r;
+    const ok = r.filter((x) => x.ok === true).length, bad = r.filter((x) => x.ok === false).length;
+    document.getElementById("s-total").textContent = r.length;
+    document.getElementById("s-ok").textContent = ok;
+    document.getElementById("s-bad").textContent = bad;
+    document.getElementById("s-rate").textContent = ok + bad ? Math.round((ok / (ok + bad)) * 100) + "%" : "–";
+    render();
+  });
+
+  fetch("/api/bench").then((r) => r.json()).catch(() => []).then((rows) => {
+    if (!rows.length) return;
+    const sum = (r, k) => Object.values(r.usage?.tiers || {}).reduce((n, t) => n + (t[k] || 0), 0);
+    document.getElementById("bench").innerHTML = `<table class="bench"><thead><tr><th>Case</th><th>Result</th><th>Attempts</th><th>Time</th><th>Tokens</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td><code>${esc(r.repo)}</code></td><td>${r.ok ? '<span class="status ok">green</span>' : '<span class="status bad">review</span>'}</td>
+      <td class="num">${r.attempts ?? "–"}</td><td class="num">${r.seconds ? fmt(r.seconds) : "–"}</td>
+      <td class="num">${(sum(r, "in") + sum(r, "out")).toLocaleString()}</td>
+      <td><a class="btn ghost" href="/console?replay=${encodeURIComponent(r.run)}" style="text-decoration:none">Replay</a></td></tr>`).join("")}</tbody></table>`;
+  });
+})();
+</script>
+</body>
+</html>

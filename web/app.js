@@ -5,20 +5,11 @@ const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const STEPS = [
   ["models", "Connect · Token Factory"], ["checkout", "Check out repo"], ["scan", "Scan · OSV.dev"],
   ["triage", "Triage · Nemotron Nano"], ["research", "Research · Tavily"], ["plan", "Plan · Nemotron Super"],
-  ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
+  ["exploit", "Exploit proof · Super"], ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
 ];
 const TIERS = ["nano", "super", "ultra"];
 const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
 let state, source, selectedCase = "";
-
-// ---------- theme ----------
-try { const t = localStorage.getItem("pp-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
-$("#theme").onclick = () => {
-  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
-  const next = cur === "light" ? "dark" : "light";
-  document.documentElement.dataset.theme = next;
-  try { localStorage.setItem("pp-theme", next); } catch {}
-};
 
 // ---------- tabs ----------
 document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
@@ -94,12 +85,10 @@ function phase(t) { $("#phase").textContent = t; }
 async function boot() {
   buildGraph();
   const [h, cases, runs] = await Promise.all([
-    fetch("/api/health").then((r) => r.json()).catch(() => ({})),
+    window.ppHealth,
     fetch("/api/cases").then((r) => r.json()).catch(() => []),
     fetch("/api/runs").then((r) => r.json()).catch(() => []),
   ]);
-  $("#pills").innerHTML = [["Token Factory", h.nebius], ["Tavily", h.tavily], ["GitHub PRs", h.github]]
-    .map(([n, on]) => `<span class="pill ${on ? "on" : ""}"><i></i>${n}</span>`).join("");
   if (h.remote_repos === false) { $("#repo").disabled = true; $("#repo").placeholder = "Remote repos are disabled on this public demo. Pick a case above."; }
   $("#cases").innerHTML = cases.map((c, i) => `<button type="button" class="case ${i === 0 ? "active" : ""}" data-id="${esc(c.id)}" role="radio">
     <b>case:${esc(c.id)}</b><small>${c.pins.map(esc).join(" · ")}</small></button>`).join("");
@@ -111,10 +100,13 @@ async function boot() {
   $("#history").innerHTML = '<option value="">▶ Replay a recorded run…</option>' +
     runs.map((r) => `<option value="${r.id}">${r.ok === true ? "✓" : r.ok === false ? "✗" : "·"} ${esc(r.repo)} · ${r.id}</option>`).join("");
   reset();
+  const qs = new URLSearchParams(location.search), replay = qs.get("replay");
+  if (qs.get("repo")) $("#repo").value = qs.get("repo");
+  if (replay) listen(replay, 4);
 }
 
 function reset() {
-  state = { findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
+  state = { exploit: null, risk: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
   $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${t}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
@@ -123,6 +115,10 @@ function reset() {
   $("#tab-advisories").innerHTML = '<div class="empty">Scanning…</div>';
   $("#tab-evidence").innerHTML = '<div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div>';
   $("#tab-diff").innerHTML = '<div class="empty">The verified patch appears here.</div>';
+  $("#tab-proof").innerHTML = '<div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div>';
+  $("#tab-reach").innerHTML = '<div class="empty">Where your code calls each vulnerable package.</div>';
+  $("#tab-debate").innerHTML = '<div class="empty">When a fix fails, each model’s diagnosis appears here side by side.</div>';
+  $("#speak").hidden = true; speechSynthesis?.cancel();
   $("#tab-report").innerHTML = '<div class="empty">The pull-request description appears here.</div>';
   $("#costNote").textContent = "";
   $("#banner").hidden = true;
@@ -176,8 +172,12 @@ function handle(ev) {
       bumpKpi("#k-att", ev.attempt);
       term(ev.tier, `${ev.tier} › patch #${ev.attempt}: ${ev.explanation}`, ev.t);
       ev.files.forEach((f) => term("dim", `   ✎ ${f}`));
+      state.patches.push(ev); renderDebate();
       (ev.evidence || []).forEach((e) => state.evidence.push({ ...e, attempt: ev.attempt, tier: ev.tier }));
       pulse(ev.tier, "sandbox", `var(--${ev.tier})`); renderEvidence(); break;
+    case "reach": state.reach = ev.packages; renderReach(); break;
+    case "exploit": onExploit(ev); break;
+    case "risk": state.risk = ev; renderProof(); break;
     case "diff": state.diff = ev.diff; renderDiff(); break;
     case "report": state.report = ev.markdown; renderReport(); break;
     case "error": term("bad", `error › ${ev.msg}`, ev.t); banner(esc(ev.msg), false); phase("error"); break;
@@ -246,10 +246,11 @@ function onDone(ev) {
     renderRouting();
     $("#costNote").innerHTML = ev.usage.priced
       ? `Run cost <b>$${ev.usage.total.toFixed(4)}</b> vs $${ev.usage.all_ultra.toFixed(4)} if every call used Ultra: <b>${Math.round((1 - ev.usage.total / ev.usage.all_ultra) * 100)}% saved</b> by routing.`
-      : "Set PRICE_* in .env to show per-run cost and routing savings.";
+      : savingsByTokens();
   }
   if (ev.seconds) $("#k-time").textContent = fmtTime(ev.seconds);
   if (ev.clean) { phase("clean"); return banner("No known advisories. Nothing to patch.", true); }
+  state.done = ev; $("#speak").hidden = false;
   if (ev.ok) {
     phase("secured ✓"); node("pr", "active"); pulse("sandbox", "pr", "var(--ok)");
     $("#exposure").classList.remove("hot"); $("#exposure").classList.add("safe"); countTo($("#expNum"), 0, 1300);
@@ -262,6 +263,73 @@ function onDone(ev) {
   } else if (ev.attempts != null) { phase("needs review"); banner("Could not reach green tests. Patch needs human review.", false); }
   $("#term").insertAdjacentHTML("beforeend", '<span class="cursor"></span>');
 }
+
+// ---------- exploit proof, risk, reachability, debate ----------
+function onExploit(ev) {
+  if (ev.stage === "before") {
+    state.exploit = ev;
+    term(ev.vulnerable ? "bad" : "dim", `exploit › ${ev.title}: ${ev.vulnerable ? "VULNERABLE (attack works on old pins)" : "old pins not exploitable by this test"}`, ev.t);
+  } else {
+    Object.assign(state.exploit || (state.exploit = {}), ev);
+    term(ev.closed ? "ok" : "bad", `exploit › after fix: ${ev.verdict}`, ev.t);
+  }
+  renderProof();
+}
+
+function renderProof() {
+  const x = state.exploit, r = state.risk;
+  if (!x && !r) return;
+  const stage = (label, cls, val) => `<div class="pf-stage ${cls}"><small>${label}</small><b>${esc(val)}</b></div>`;
+  const ex = x ? `<div class="pf card glass">
+      <div class="pf-head"><span class="chip super">exploit proof</span><b>${esc(x.title)}</b><span class="muted">${esc(x.advisory || "")}</span></div>
+      <div class="pf-flow">
+        ${stage("Old version", x.vulnerable ? "bad" : "na", x.vulnerable ? "Exploited ✗" : "Not reproduced")}
+        <span class="pf-arrow">→</span>
+        ${stage("Patched", x.closed ? "ok" : x.after ? "bad" : "na", x.after ? (x.closed ? "Blocked ✓" : "Still open") : "Running…")}
+        <span class="pf-arrow">→</span>
+        ${stage("Verdict", x.verdict === "proven closed" ? "ok" : "na", x.verdict || "pending")}
+      </div>
+      <details><summary>Show exploit test</summary><pre class="diff">${esc(x.code || "")}</pre></details></div>` : "";
+  const rk = r ? `<div class="card glass risk ${r.level}">
+      <div class="gauge" style="--v:${r.score}"><b>${r.score}</b><small>${r.level} risk</small></div>
+      <div class="factors">${r.factors.map((f) => `<div><span>${esc(f.name)}</span><span class="muted">${esc(f.detail)}</span><b>${f.points > 0 ? "+" : ""}${f.points}</b></div>`).join("")}</div></div>` : "";
+  $("#tab-proof").innerHTML = ex + rk;
+}
+
+function renderReach() {
+  const entries = Object.entries(state.reach);
+  if (!entries.length) return;
+  $("#tab-reach").innerHTML = entries.map(([pkg, hits]) => {
+    const files = {};
+    hits.forEach((h) => { const m = /^(.+?):(\d+): (.*)$/.exec(h); if (m) (files[m[1]] ||= []).push([m[2], m[3]]); });
+    const fk = Object.keys(files);
+    return `<div class="reach"><div class="r-pkg"><span class="sev HIGH">vuln</span><b>${esc(pkg)}</b><small>${hits.length} call-site(s)</small></div>
+      <div class="r-files">${fk.length ? fk.map((f) => `<div class="r-file"><div class="r-name">📄 ${esc(f)}</div>
+        ${files[f].map(([ln, code]) => `<div class="r-line"><span>${ln}</span><code>${esc(code)}</code></div>`).join("")}</div>`).join("")
+        : '<div class="muted r-none">Not imported directly. Likely a transitive dependency.</div>'}</div></div>`;
+  }).join("");
+}
+
+function renderDebate() {
+  $("#tab-debate").innerHTML = `<div class="debate">${state.patches.map((p) => `<div class="db card glass" style="--c:var(--${p.tier})">
+    <div class="db-head"><span class="chip ${p.tier}">${p.tier}</span><b>Attempt #${p.attempt}</b></div>
+    <small>Diagnosis</small><p>${esc(p.diagnosis || "—")}</p><small>Fix</small><p>${esc(p.explanation)}</p>
+    <div class="muted">${p.files.map((f) => "✎ " + esc(f)).join("<br>")}</div></div>`).join("")}</div>`;
+}
+
+$("#speak").onclick = () => {
+  if (!("speechSynthesis" in window)) return banner("Voice is not supported in this browser", false);
+  const d = state.done || {}, x = state.exploit, r = state.risk;
+  const parts = [d.clean ? "No known vulnerabilities. Nothing to patch." :
+    `PatchPilot found ${state.total} advisories across ${state.findings.length} packages.`];
+  state.plan?.upgrades.forEach((u) => parts.push(`${u.package} upgraded from ${u.from} to ${u.to}.`));
+  if (d.ok) parts.push(`All tests pass after ${d.attempts} repair attempts.`);
+  else if (!d.clean) parts.push("The patch needs human review.");
+  if (x?.verdict) parts.push(`Exploit proof: ${x.verdict}.`);
+  if (r) parts.push(`Risk score ${r.score}, ${r.level}.`);
+  speechSynthesis.cancel();
+  speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(parts.join(" ")), { rate: 1.05 }));
+};
 
 // ---------- renderers ----------
 function term(kind, text, t) {
@@ -306,6 +374,13 @@ function renderEvidence() {
     (quotes ? `<div class="ev-section">Lines the agent relied on</div>${quotes}` : "") +
     (srcs ? `<div class="ev-section">Sources found by Tavily</div><ul class="src-list">${srcs}</ul>` : "") ||
     '<div class="empty">No research yet (is TAVILY_API_KEY set?).</div>';
+}
+
+function savingsByTokens() {
+  const tot = TIERS.reduce((n, t) => n + state.usage[t].tok, 0);
+  if (!tot) return "";
+  const off = Math.round((1 - state.usage.ultra.tok / tot) * 100);
+  return `<b>${off}%</b> of tokens ran on Nano/Super instead of Ultra. Set PRICE_* in .env to see it in dollars.`;
 }
 
 function renderRouting() {

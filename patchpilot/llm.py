@@ -129,7 +129,13 @@ def parse_json(text):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end > start:
-            return json.loads(text[start:end + 1])
-        raise LLMError("Model did not return valid JSON: " + text[:300])
+        pass
+    # first complete JSON object in the text, ignoring any prose or a second object after it
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch == "{":
+            try:
+                return dec.raw_decode(text, i)[0]
+            except json.JSONDecodeError:
+                continue
+    raise LLMError("Model did not return valid JSON: " + text[:300])
