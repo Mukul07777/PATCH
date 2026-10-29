@@ -75,3 +75,10 @@
 ## 2026-10-29 ~14:10 — research round 3 (real public repos, read-only)
 - research-3.md: 8 qualifying repos; shortlist greyli/bluelog, todoism, sayhello, hack4impact/flask-base. Running them needs owner approval → docs/team/OWNER-DECISIONS.md.
 - Launched scorer round 2 (builds since round 1: self-tests, reachability, trust check, OpenVEX, 7 curated proofs).
+
+## 2026-10-29 ~14:15 — manager cycle (cron)
+- Running: speed builder (agent.py/llm.py/sandbox.py, uv + background prep visible in sandbox.py), UI builder (web/), scorer round 2.
+- No researcher was running → launched researcher round 5 (angle: deeper NVIDIA tech: guard/reward/embedding/rerank models, NeMo Guardrails, NAT profiler).
+- UI/UX researcher skipped this cycle (UI builder still implementing round-1 research).
+- Current score: 70/100 (round 1); round 2 pending.
+- Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video, [3] real repos, [4] speed, [5] NVIDIA depth.
