@@ -55,3 +55,10 @@
 - Provenance, OpenSSF Scorecard, new transitive deps per upgrade; risk factor + ledger claim. 25 tests pass (verified).
 - Finding: least-change targets (PyJWT 2.4.0, urllib3 1.26.19/2.2.2, Jinja2 3.1.3) have NO PyPI attestation; latest releases (PyJWT 2.15.1, urllib3 2.8.0, Jinja2 3.1.6) do. Data-backed reason to jump to latest.
 - Next backend: OpenVEX export + Nebius model id pinning (no LLM). UI for trust event pending UI builder.
+
+## 2026-10-29 ~13:40 — exploit curator round 2
+- bleach CVE-2021-23980 (mutation XSS): old 9 failed → new 9 passed (proof + 8 variants).
+- sqlparse CVE-2024-4340 (RecursionError DoS): old 6 failed (74s) → new 8 passed (1.2s); 2 non-discriminating variants dropped.
+- All 6 benchmark cases now have curated, verified exploit proofs.
+- Launched researcher round 4 (angle: speed/latency for a live demo).
+- Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video, [3] real public repos (read-only), [4] speed.
