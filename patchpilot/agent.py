@@ -48,6 +48,7 @@ class Agent:
         self.started = time.time()
         self.evidence = []
         self.drift = []
+        self.trust = {}
         self.reach = {}
 
     # ---------- event helpers ----------
@@ -129,6 +130,7 @@ class Agent:
         plan = self._plan(findings, triage)
         self._emit({"type": "plan", "plan": plan})
         self.step("plan", "done")
+        self._emit({"type": "trust", "packages": self._trust(plan)})
 
         # 5. baseline + apply upgrade
         sandbox = Sandbox(self.work, lambda m: self.log(m, "test"))
@@ -611,6 +613,21 @@ class Agent:
             add("Predicted API breaks all repaired", "verified" if ok else "partial",
                 f"{len(self.drift)} break(s) predicted by the drift radar before testing; suite now "
                 + ("green" if ok else "still failing"))
+        tr = getattr(self, "trust", None) or {}
+        known = {k: v for k, v in tr.items() if v.get("provenance") is not None}
+        if not known:
+            add("Fix release provenance checked", "unverified", "deps.dev data unavailable for the target release(s)")
+        else:
+            ok_prov = [k for k, v in known.items() if v["provenance"]]
+            missing = [k for k, v in known.items() if not v["provenance"]]
+            status = "verified" if len(ok_prov) == len(tr) else "partial"
+            add("Fix release provenance checked", status,
+                "deps.dev: " + "; ".join(
+                    f"{k} {v['to']['version']} " + ("has verified PyPI attestation" if v["provenance"]
+                                                     else "has NO verified provenance")
+                    + (f", scorecard {v['scorecard']}" if v.get("scorecard") is not None else "")
+                    for k, v in known.items())
+                + (f"; unknown: {', '.join(k for k in tr if k not in known)}" if len(known) < len(tr) else ""))
         cited = len(self.evidence)
         add("Code changes cite migration sources", "verified" if cited else "partial",
             f"{cited} quoted line(s) from researched sources" if cited else "no quotes returned by the model")
@@ -619,6 +636,41 @@ class Agent:
         return {"claims": claims, "certificate": "pp-" + hashlib.sha256(body).hexdigest()[:16],
                 "sha256": hashlib.sha256(body).hexdigest(),
                 "trust": round(100 * sum(score[c["status"]] for c in claims) / len(claims))}
+
+    # ---------- release trust (deps.dev) ----------
+    def _trust(self, plan):
+        """Compare old vs target release on deps.dev: provenance, scorecard, publish date, new transitive deps."""
+        out = {}
+        try:
+            for u in plan.get("upgrades", []):
+                try:
+                    old = sources.release_trust(u["package"], u["from"])
+                    new = sources.release_trust(u["package"], u["to"])
+                    added = (sorted(set(new["deps"]) - set(old["deps"]))
+                             if new["deps"] is not None and old["deps"] is not None else None)
+                    out[u["package"]] = {"from": old, "to": new, "new_deps": added,
+                                         "provenance": new["provenance"], "had_provenance": old["provenance"],
+                                         "scorecard": new["scorecard"], "checks": new["checks"],
+                                         "source_repo": new["source_repo"] or old["source_repo"]}
+                except Exception as e:
+                    out[u["package"]] = {"error": f"{type(e).__name__}: {e}", "provenance": None, "scorecard": None,
+                                         "new_deps": None}
+        except Exception:
+            pass
+        self.trust = out
+        return out
+
+    def _trust_points(self):
+        """(points, detail) for the risk score; 0 when deps.dev returned nothing."""
+        t = [v for v in (getattr(self, "trust", None) or {}).values() if v.get("provenance") is not None]
+        if not t:
+            return 0, "unknown (deps.dev unavailable)"
+        noprov = sum(1 for v in t if v["provenance"] is False)
+        low = sum(1 for v in t if v.get("scorecard") is not None and v["scorecard"] < 5)
+        newdeps = sum(len(v.get("new_deps") or []) for v in t)
+        pts = min(20, noprov * 8 + low * 5 + min(8, newdeps * 2))
+        return pts, (f"{len(t) - noprov}/{len(t)} target(s) with verified provenance, {low} low scorecard, "
+                     f"{newdeps} new transitive dep(s)")
 
     # ---------- research rerank ----------
     def _rerank(self, query, hits, keep=4):
@@ -664,6 +716,7 @@ class Agent:
             ("Repair attempts", min(15, max(0, attempts - 1) * 5), f"{attempts} attempt(s)"),
             ("Test result", 0 if ok else 40, "all green" if ok else "failing"),
             ("Exploit proof", -10 if proven else 0, exploit.get("verdict", "not run") if exploit else "skipped"),
+            ("Supply-chain trust", *self._trust_points()),
         ]
         c = reach.counts(self.reach) if getattr(self, "reach", None) else {}
         score = max(0, min(100, sum(p for _, p, _ in factors)))

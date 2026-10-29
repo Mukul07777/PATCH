@@ -50,3 +50,8 @@
 - reach.py: advisories labelled reachable / imported / not reachable / unknown, re-export matching, Jinja template filter check. 21 tests pass (verified).
 - Reality check: live OSV returns NO ecosystem_specific symbol data for any advisory in our 6 cases (0/88 raw records). Research-1's premise doesn't hold for these packages today; symbols are Nano-inferred and labelled "llm-inferred", ledger marks them partial. Honest, not oversold.
 - web/app.js + style.css reachability UI held back until the UI builder finishes (same files).
+
+## 2026-10-29 ~13:30 — backend build: release trust check (deps.dev)
+- Provenance, OpenSSF Scorecard, new transitive deps per upgrade; risk factor + ledger claim. 25 tests pass (verified).
+- Finding: least-change targets (PyJWT 2.4.0, urllib3 1.26.19/2.2.2, Jinja2 3.1.3) have NO PyPI attestation; latest releases (PyJWT 2.15.1, urllib3 2.8.0, Jinja2 3.1.6) do. Data-backed reason to jump to latest.
+- Next backend: OpenVEX export + Nebius model id pinning (no LLM). UI for trust event pending UI builder.

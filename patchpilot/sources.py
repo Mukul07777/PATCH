@@ -106,3 +106,78 @@ def _vkey(v):
 
 def version_gte(a, b):
     return _vkey(a) >= _vkey(b)
+
+
+# ---------- deps.dev (release trust) ----------
+_DEPSDEV = "https://api.deps.dev/v3"
+_dd_cache = {}
+
+
+def _depsdev_get(path):
+    """GET a deps.dev v3 path; None on 404, timeout or any error. Cached per process."""
+    if path in _dd_cache:
+        return _dd_cache[path]
+    try:
+        r = _http.get(_DEPSDEV + path, timeout=10)
+        data = r.json() if r.status_code == 200 else None
+    except Exception:
+        data = None
+    _dd_cache[path] = data
+    return data
+
+
+def _q(s):
+    from urllib.parse import quote
+    return quote(str(s), safe="")
+
+
+def depsdev_version(name, version):
+    """Raw deps.dev version record (publishedAt, attestations, slsaProvenances, links, relatedProjects...)."""
+    return _depsdev_get(f"/systems/pypi/packages/{_q(name.lower())}/versions/{_q(version)}")
+
+
+def depsdev_dependencies(name, version):
+    """Names of the resolved transitive dependencies (excluding the package itself), or None if unknown."""
+    d = _depsdev_get(f"/systems/pypi/packages/{_q(name.lower())}/versions/{_q(version)}:dependencies")
+    if not d or "nodes" not in d:
+        return None
+    return sorted({n["versionKey"]["name"].lower() for n in d["nodes"] if n.get("relation") != "SELF"})
+
+
+def depsdev_project(project_id):
+    return _depsdev_get(f"/projects/{_q(project_id)}")
+
+
+KEY_CHECKS = ("Code-Review", "Maintained", "Signed-Releases", "Dangerous-Workflow")
+
+
+def release_trust(name, version):
+    """Summarise one release: publish date, provenance, source repo, OpenSSF Scorecard, deps. Never raises."""
+    out = {"version": version, "found": False, "published": None, "provenance": None,
+           "source_repo": None, "scorecard": None, "checks": {}, "deps": None}
+    try:
+        v = depsdev_version(name, version)
+        if not v:
+            return out
+        out["found"] = True
+        out["published"] = v.get("publishedAt")
+        att = [a for a in v.get("attestations") or [] if a.get("verified")]
+        slsa = [s for s in v.get("slsaProvenances") or [] if s.get("verified")]
+        out["provenance"] = bool(att or slsa)
+        if att or slsa:
+            out["provenance_repo"] = (att or slsa)[0].get("sourceRepository")
+            out["provenance_commit"] = (att or slsa)[0].get("commit")
+        repo = next((p["projectKey"]["id"] for p in v.get("relatedProjects") or []
+                     if p.get("relationType") == "SOURCE_REPO"), None)
+        out["source_repo"] = repo or next((l["url"] for l in v.get("links") or []
+                                           if l.get("label") == "SOURCE_REPO"), None)
+        if repo:
+            sc = (depsdev_project(repo) or {}).get("scorecard") or {}
+            if "overallScore" in sc:
+                out["scorecard"] = sc["overallScore"]
+                out["scorecard_date"] = sc.get("date")
+                out["checks"] = {c["name"]: c.get("score") for c in sc.get("checks") or [] if c.get("name") in KEY_CHECKS}
+        out["deps"] = depsdev_dependencies(name, version)
+    except Exception:
+        pass
+    return out
