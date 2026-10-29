@@ -21,7 +21,8 @@ function setModelNames(models) {
   STEPS.forEach(([k, label]) => { const d = document.querySelector(`#s-${k} > div`); if (d && d.firstChild) d.firstChild.nodeValue = label(); });
   TIERS.forEach((t) => { const tx = document.querySelector(`#n-${t} text:not(.sub)`); if (tx) tx.textContent = graphLabel(t); });
 }
-const graphLabel = (t) => (modelNames[t].length > 19 ? modelNames[t].slice(0, 18) + "…" : modelNames[t]);
+// Graph nodes name the tier (full model ids are in the Model routing panel), so no id is ever cut off
+const graphLabel = (t) => "Nemotron " + t[0].toUpperCase() + t.slice(1);
 
 // ---------- tabs ----------
 const TAB_BTNS = [...document.querySelectorAll(".tab[data-tab]")];
