@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 400" width="320" height="400">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbfbfa"/>
+      <stop offset=".45" stop-color="#d9dadc"/>
+      <stop offset="1" stop-color="#8d9096"/>
+    </linearGradient>
+    <linearGradient id="shellDark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c9cbce"/>
+      <stop offset="1" stop-color="#5d6168"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset=".35" stop-color="#a78bfa"/>
+      <stop offset=".7" stop-color="#f472b6"/>
+      <stop offset="1" stop-color="#34d399"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="160" cy="388" rx="92" ry="9" fill="#0b0b0c" opacity=".18"/>
+  <ellipse cx="160" cy="140" rx="150" ry="120" fill="url(#glow)">
+    <animate attributeName="opacity" values=".7;1;.7" dur="4s" repeatCount="indefinite"/>
+  </ellipse>
+  <!-- antenna -->
+  <rect x="155" y="18" width="10" height="34" rx="5" fill="url(#shellDark)"/>
+  <circle cx="160" cy="16" r="9" fill="#34d399">
+    <animate attributeName="fill" values="#34d399;#38bdf8;#a78bfa;#34d399" dur="6s" repeatCount="indefinite"/>
+  </circle>
+  <!-- ears -->
+  <rect x="34" y="104" width="26" height="70" rx="10" fill="url(#shellDark)"/>
+  <rect x="260" y="104" width="26" height="70" rx="10" fill="url(#shellDark)"/>
+  <!-- head -->
+  <rect x="52" y="48" width="216" height="180" rx="54" fill="url(#shell)"/>
+  <path d="M90 60 H230 a40 40 0 0 1 26 12 C200 66 120 66 64 80 a40 40 0 0 1 26 -20 Z" fill="url(#gloss)" opacity=".8"/>
+  <!-- visor -->
+  <rect x="74" y="84" width="172" height="118" rx="36" fill="url(#rim)"/>
+  <rect x="80" y="90" width="160" height="106" rx="31" fill="#0b0d12"/>
+  <rect x="80" y="90" width="160" height="40" rx="31" fill="#fff" opacity=".05"/>
+  <!-- eyes -->
+  <g fill="#f5f7fa">
+    <rect x="122" y="124" width="22" height="34" rx="11">
+      <animate attributeName="height" values="34;34;3;34;34" keyTimes="0;.9;.93;.96;1" dur="5s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="124;124;140;124;124" keyTimes="0;.9;.93;.96;1" dur="5s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="176" y="124" width="22" height="34" rx="11">
+      <animate attributeName="height" values="34;34;3;34;34" keyTimes="0;.9;.93;.96;1" dur="5s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="124;124;140;124;124" keyTimes="0;.9;.93;.96;1" dur="5s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+  <!-- neck + body -->
+  <rect x="134" y="224" width="52" height="22" rx="8" fill="url(#shellDark)"/>
+  <path d="M86 268 a40 40 0 0 1 40 -26 h68 a40 40 0 0 1 40 26 l10 74 a26 26 0 0 1 -26 30 H102 a26 26 0 0 1 -26 -30 Z" fill="url(#shell)"/>
+  <path d="M110 252 h100 a30 30 0 0 1 20 10 C190 256 130 256 92 266 a30 30 0 0 1 18 -14 Z" fill="url(#gloss)" opacity=".7"/>
+  <!-- chest badge: shield with check -->
+  <path d="M160 280 l30 11 v22 c0 20 -14 33 -30 40 c-16 -7 -30 -20 -30 -40 v-22 Z" fill="#0b0d12"/>
+  <path d="M160 280 l30 11 v22 c0 20 -14 33 -30 40 c-16 -7 -30 -20 -30 -40 v-22 Z" fill="none" stroke="url(#rim)" stroke-width="3"/>
+  <path d="M148 314 l9 9 l17 -18" fill="none" stroke="#34d399" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- arms -->
+  <rect x="44" y="262" width="34" height="86" rx="17" fill="url(#shellDark)" transform="rotate(10 61 262)"/>
+  <rect x="242" y="262" width="34" height="86" rx="17" fill="url(#shellDark)" transform="rotate(-10 259 262)"/>
+</svg>

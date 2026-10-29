@@ -140,3 +140,33 @@ body.lp { --ink: #0b0b0c; --paper: #efede8; --paper-2: #e4e1da; --fog: #8a8f98; 
   .wordmark .emblem { width: min(11.5vw, 190px); }
   .cx-hero { min-height: min(84vh, 780px); }
 }
+
+/* Robot mascot + control-panel frame (brackets, guide lines, wired status cards) */
+.wordmark .emblem.bot { width: min(13vw, 220px); margin: -.62em 0 -.5em; filter: drop-shadow(0 26px 30px rgba(0,0,0,.28)); }
+.cx-hero { background-image: linear-gradient(rgba(0,0,0,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.05) 1px, transparent 1px), radial-gradient(900px 420px at 50% 60%, rgba(167,139,250,.10), transparent 70%);
+  background-size: 96px 96px, 96px 96px, auto; background-position: center; }
+.hud { position: absolute; inset: 22px; pointer-events: none; z-index: 2; }
+.hud .br { position: absolute; width: 22px; height: 22px; border: 0 solid var(--ink); }
+.hud .tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; } .hud .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
+.hud .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; } .hud .brr { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+.hud-card { position: absolute; background: rgba(255,255,255,.82); backdrop-filter: blur(8px); border: 1px solid rgba(0,0,0,.14); padding: 10px 14px; min-width: 150px; box-shadow: 0 14px 30px -20px rgba(0,0,0,.5); animation: rise .8s both; }
+.hud-card small { display: block; font: 700 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--fog); }
+.hud-card b { display: block; font: 800 14px Inter; margin: 2px 0 4px; }
+.hud-card code { font-size: 11px; color: var(--accent); }
+.hud-card::after { content: ""; position: absolute; top: 50%; width: 70px; border-top: 1px dashed rgba(0,0,0,.35); }
+.hud-card::before { content: ""; position: absolute; top: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--glow); }
+.hud-card.c1 { left: 6%; top: 22%; animation-delay: .2s; } .hud-card.c1::after { left: 100%; } .hud-card.c1::before { left: calc(100% + 70px); }
+.hud-card.c2 { right: 6%; top: 18%; animation-delay: .5s; } .hud-card.c2::after { right: 100%; } .hud-card.c2::before { right: calc(100% + 70px); }
+.hud-card.c3 { right: 10%; bottom: 24%; animation-delay: .8s; } .hud-card.c3::after { right: 100%; } .hud-card.c3::before { right: calc(100% + 70px); }
+.hud-card.c3 code { color: var(--super); }
+.hud-label { position: absolute; font: 700 10px var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--fog); }
+.hud-label.l1 { left: 34px; bottom: 50%; transform: rotate(-90deg); transform-origin: left bottom; }
+.hud-label.l2 { right: 34px; top: 50%; transform: rotate(90deg); transform-origin: right top; }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+.cx-hero-tag { margin-left: 34px; } .cx-hero-foot { padding: 0 34px; }
+@media (max-width: 1100px) { .hud-card, .hud-label { display: none; } }
+@media (max-width: 720px) {
+  .wordmark .emblem.bot { width: 46vw; margin: 2vw auto; }
+  .hud { inset: 10px; } .cx-hero-tag { margin-left: 14px; } .cx-hero-foot { padding: 0 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .hud-card { animation: none; } }
