@@ -22,6 +22,23 @@ def _isolate_db(monkeypatch, tmp_path):
     db.close()
 
 
+@pytest.fixture(autouse=True)
+def _offline_dns_and_inline_notify(monkeypatch):
+    """Destinations resolve to a public test address (IP literals and localhost to themselves) without DNS, and
+    notification deliveries run inline unless a test opts into the background pool."""
+    import ipaddress
+    from patchpilot import netguard, notify
+
+    def resolve(host, port):
+        try:
+            return [str(ipaddress.ip_address(host))]
+        except ValueError:
+            return ["127.0.0.1"] if host == "localhost" else ["93.184.216.34"]
+    monkeypatch.setattr(netguard, "_resolve", resolve)
+    monkeypatch.setattr(notify, "_submit", notify.process)
+    monkeypatch.delenv("PATCHPILOT_ALLOW_PRIVATE_WEBHOOKS", raising=False)
+
+
 TEST_TOKEN = "test-token"
 AUTH = {"Authorization": f"Bearer {TEST_TOKEN}"}
 

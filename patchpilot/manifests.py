@@ -26,16 +26,23 @@ DECL = re.compile(r"""^\s*(?:name\s*=\s*["']([A-Za-z0-9][A-Za-z0-9._-]*)["']|"([
 POETRY_EXACT = re.compile(r"^=?=?\s*(\d[A-Za-z0-9._+!-]*)$")
 
 
+INVALID_MARK = " [not checked]"  # suffix of an unparsable-line warning: counted as an unchecked dependency
+
+
 class ManifestError(ValueError):
     pass
 
 
 def kind_of(filename):
-    """Parser kind for a file name, or None if unsupported. Any *.txt is read as a requirements file."""
-    base = filename.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    """Parser kind for a file name, or None if unsupported. Requirements files are recognised by name only:
+    requirements*.txt, constraints*.txt, *.in (pip-tools) or any .txt inside a requirements/ folder; an arbitrary
+    notes.txt is not a manifest."""
+    parts = filename.replace("\\", "/").lower().split("/")
+    base = parts[-1]
     if base in ("pyproject.toml", "poetry.lock", "uv.lock", "pipfile.lock"):
         return base
-    if base.endswith(".txt") or base.endswith(".in"):
+    if base.endswith(".in") or (base.endswith(".txt") and (base.startswith(("requirements", "constraints"))
+                                                          or (len(parts) > 1 and parts[-2] == "requirements"))):
         return "requirements"
     return None
 
@@ -175,6 +182,9 @@ def requirements_ex(text, source_file="requirements.txt"):
         line = re.split(r"\s--?\w", line, 1)[0]  # trailing per-line options such as --hash
         if "://" in line or re.match(r"^[\w.-]+\s*(\[[^\]]*\])?\s*@", line):
             warnings.append(f"{source_file}: '{line[:80]}' is a URL / VCS requirement; not checked against OSV")
+            continue
+        if not _requirement_ok(line):
+            warnings.append(f"{source_file}: line {lineno}: not a valid requirement ('{line[:60]}'){INVALID_MARK}")
             continue
         dep = pep508(line, source_file)
         if dep:

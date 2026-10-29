@@ -81,6 +81,10 @@ def scan_parser():
     p.add_argument("--ignore", action="append", default=[], metavar="ID",
                    help="advisory id or alias to ignore (repeatable)")
     p.add_argument("--output", "-o", help="write the report to this file instead of stdout")
+    p.add_argument("--allow-unverified", action="store_true",
+                   help="exit 0/1 even when a manifest failed to parse or nothing could be checked (default: exit 2)")
+    p.add_argument("--fail-on-partial", action="store_true",
+                   help="exit 2 when only part of the dependencies could be checked (default: warn)")
     return p
 
 
@@ -100,8 +104,9 @@ def _read_target(args):
     target = Path(args.target)
     if target.is_file():
         if manifests.kind_of(target.name) is None:
-            raise CliError(f"{target} is not a supported manifest (requirements*.txt, pyproject.toml, poetry.lock, "
-                           "uv.lock, Pipfile.lock)")
+            raise CliError(f"{target} is not a recognised manifest name: use requirements*.txt, constraints*.txt, "
+                           "*.in, pyproject.toml, poetry.lock, uv.lock or Pipfile.lock (rename the file if it is a "
+                           "requirements file)")
         if target.stat().st_size > manifests.size_limit(target.name):
             raise CliError(f"{target} is larger than {manifests.size_limit(target.name) // 1_000_000} MB")
         return [(_rel(target), target.read_text(encoding="utf-8", errors="replace"))], [], [], None, ""
@@ -163,7 +168,9 @@ def table(findings, summary):
 
 
 def scan_main(argv):
-    """Exit 0: nothing at or above --fail-on. 1: findings at or above it. 2: the scan could not be completed."""
+    """Exit 0: nothing at or above --fail-on. 1: findings at or above it. 2: the scan could not be completed:
+    a manifest error, nothing checked (unless --allow-unverified) or, with --fail-on-partial, partial coverage.
+    2 wins over 1: an incomplete scan must never look like a pass or an ordinary finding."""
     args = scan_parser().parse_args(argv)
     config.NO_DB = True
     from . import export, scanner
@@ -192,8 +199,21 @@ def scan_main(argv):
     bad = failing(findings, args.fail_on)
     if bad:
         print(f"patchpilot: {len(bad)} finding(s) at or above '{args.fail_on}'", file=sys.stderr)
-        return 1
-    return 0
+    cov = summary["coverage"]
+    if summary["errors"] or cov["state"] == "unverified":
+        why = f"{len(summary['errors'])} manifest error(s)" if summary["errors"] else "no dependency could be checked"
+        if not args.allow_unverified:
+            print(f"patchpilot: error: scan incomplete ({why}); a clean result would prove nothing "
+                  "(pass --allow-unverified to accept it)", file=sys.stderr)
+            return 2
+        print(f"patchpilot: warning: scan incomplete ({why}); accepted because of --allow-unverified", file=sys.stderr)
+    elif cov["state"] == "partial":
+        msg = f"only {cov['checked']} of {cov['total']} dependencies were checked (unpinned or unparsable lines)"
+        if args.fail_on_partial:
+            print(f"patchpilot: error: {msg} (--fail-on-partial)", file=sys.stderr)
+            return 2
+        print(f"patchpilot: warning: {msg}; pin exact versions or use a lock file for full coverage", file=sys.stderr)
+    return 1 if bad else 0
 
 
 def serve_main(argv):
@@ -202,7 +222,8 @@ def serve_main(argv):
     p.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args = p.parse_args(argv)
     import uvicorn
-    uvicorn.run("patchpilot.server:app", host=args.host, port=args.port, proxy_headers=True)
+    uvicorn.run("patchpilot.server:app", host=args.host, port=args.port, proxy_headers=True,
+                forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))
     return 0
 
 

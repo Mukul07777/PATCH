@@ -32,6 +32,18 @@ scan replayed after a restart never notifies twice. **Retries**: network errors,
 log (`GET /api/deliveries`) with its status (`ok` / `failed`), last response code, attempts and error.
 **Send test** posts a sample `new_findings` payload with `"test": true` (one attempt, no dedupe).
 
+**Delivery is asynchronous**: the scan worker only stores the payload (`status: pending`) and returns; a pool of
+4 background workers sends it (one send per channel at a time), so a slow or dead endpoint never delays scans.
+Pending deliveries are kept in SQLite and resumed after a restart. **Circuit breaker**: after 3 deliveries in a
+row fail, the channel is shown as **failing** (`health.state` in `GET /api/channels`) and its deliveries wait
+(`next_at`): 1 minute, doubling per further failure up to 1 hour. A successful delivery or **Send test** closes it.
+
+**Destinations (SSRF guard)**: webhook / Slack URLs and the SMTP host must resolve only to public unicast
+addresses (no loopback, private, link-local / metadata, CGNAT, reserved, multicast or unspecified addresses, IPv4
+or IPv6, including IPv4-mapped). They are checked on save and again at connect time, the connection goes to the
+address that passed the check (no DNS rebinding), and redirects are not followed. Blocked or unreachable targets
+are logged as a generic `Could not connect (endpoint unreachable)`. On-prem receivers: `PATCHPILOT_ALLOW_PRIVATE_WEBHOOKS=1`.
+
 Links use the **Public URL** setting (`public_url`, or `PATCHPILOT_PUBLIC_URL`); without it the `url` fields are `null`.
 
 ## Webhook request

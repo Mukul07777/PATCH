@@ -99,7 +99,7 @@
     const cfg = (c) => c.type === "email" ? (c.config.to || []).join(", ") : (c.config.url || "") + (c.type === "webhook" && c.config.secret_last4 ? ` (secret …${c.config.secret_last4})` : "");
     $("#channels").innerHTML = chans.length ? `<table class="bench"><caption class="sr-only">Notification channels</caption>
       <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Target</th><th scope="col">Events</th><th scope="col">Min severity</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
-      <tbody>${chans.map((c) => `<tr><td>${esc(c.name)}${c.enabled ? "" : ' <span class="status na">disabled</span>'}${c.readable ? "" : ' <span class="status bad">unreadable</span>'}</td><td><span class="tag">${esc(c.type)}</span></td>
+      <tbody>${chans.map((c) => `<tr><td>${esc(c.name)}${c.enabled ? "" : ' <span class="status na">disabled</span>'}${c.readable ? "" : ' <span class="status bad">unreadable</span>'}${c.health && c.health.state === "failing" ? ` <span class="status bad" title="${esc(c.health.failures + " deliveries in a row failed" + (c.health.retry_at ? "; next try " + when(c.health.retry_at) : ""))}">failing</span>` : ""}</td><td><span class="tag">${esc(c.type)}</span></td>
         <td class="pj-sum"><code>${esc(cfg(c))}</code></td><td>${c.events.map((e) => esc(EVENT_LABEL[e] || e)).join(", ")}</td><td>${esc(c.min_severity)}</td>
         <td><button type="button" class="btn ghost sm" data-ctest="${c.id}">Send test<span class="sr-only"> to ${esc(c.name)}</span></button>
           <button type="button" class="btn ghost sm" data-cedit="${c.id}">Edit<span class="sr-only"> ${esc(c.name)}</span></button>

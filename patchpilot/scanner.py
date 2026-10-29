@@ -238,6 +238,7 @@ def scan_files(files, notes=(), skipped=(), info=None):
                         "Pipfile.lock, up to 3 folders deep)")
     deps, errors, warn, where, lines = collect(files)
     warnings += warn
+    invalid = sum(1 for w in warn if w.endswith(manifests.INVALID_MARK))  # unparsable lines: total, never checked
     pinned = [d for d in deps if d.version]
     if len(pinned) > MAX_DEPS:
         warnings.append(f"{len(pinned)} pinned dependencies; only the first {MAX_DEPS} were checked")
@@ -300,7 +301,7 @@ def scan_files(files, notes=(), skipped=(), info=None):
     summary = {"files": [n for n, _ in files], "skipped_files": skipped, "dependencies": len(deps),
                "pinned": len(pinned), "unpinned": unpinned, "vulnerable_packages": packages, "errors": errors,
                "warnings": warnings, "not_on_pypi": missing,
-               "coverage": coverage(len(deps), len(pinned), checked, unpinned),
+               "coverage": coverage(len(deps) + invalid, len(pinned), checked, unpinned) | ({"invalid": invalid} if invalid else {}),
                "epss": "ok" if epss_ok else "unavailable",
                # every dependency (for SBOM export): [name, version or None, first file, line]
                "deps": [[d.name, d.version, (where.get((manifests.normalize(d.name), d.version)) or [d.source_file])[0],

@@ -4,6 +4,7 @@ import collections
 import contextlib
 import json
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -39,7 +40,9 @@ class _GZipExceptSSE(GZipMiddleware):
 async def _lifespan(_app):
     _resume_queue()
     scheduler.start(lambda fn: _spawn(fn))  # PATCHPILOT_SCHEDULER=0 turns it off
+    notify.start()  # resumes notification deliveries left pending by the last process
     yield
+    notify.stop()
     scheduler.stop()
 
 
@@ -63,10 +66,11 @@ REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,99}")
 MAX_UPLOAD = manifests.MAX_LOCK  # bytes of manifest text per uploaded project (lock files; others 1 MB)
 MAX_BODY = MAX_UPLOAD + 1_000_000  # request bodies above this are refused with 413 before they are parsed
 SUBDIR = re.compile(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+){0,4}")
-CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+CSP = ("default-src 'self'; style-src 'self'; font-src 'self'; "
        "img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
                     "Referrer-Policy": "strict-origin-when-cross-origin"}
+mimetypes.add_type("font/woff2", ".woff2")  # self-hosted fonts (Windows registries often lack it)
 log = logging.getLogger(__name__)
 config.RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1020,15 +1024,40 @@ def auth_setup(req: SetupRequest, request: Request):
     return _signed_in(request, uid)
 
 
+LOGIN_FAILS_PER_ACCOUNT = 5  # failed sign-ins a minute per (IP, email)
+LOGIN_FAILS_PER_IP = 20  # failed sign-ins a minute per IP, any email (password spraying)
+
+
+def _blocked_for(key, limit, now=None):
+    """Seconds until `key` is under `limit` hits in the window (0 = allowed); records nothing."""
+    now = time.monotonic() if now is None else now
+    with _lock:
+        q = _hits[key]
+        while q and now - q[0] > RATE_WINDOW:
+            q.popleft()
+        return max(1, int(RATE_WINDOW - (now - q[0])) + 1) if len(q) >= limit else 0
+
+
 @app.post("/api/auth/login")
 def auth_login(req: LoginRequest, request: Request):
+    """Only failed attempts count: per (IP, email) and, looser, per IP. A successful sign-in clears its
+    (IP, email) counter, so a user who mistyped once is not locked out by the people sharing their NAT."""
     _csrf(request)
-    _limit("login:" + _ip(request), "Too many sign-in attempts; try again in a minute")
+    ip, email = _ip(request), req.email.strip().lower()[:200]
+    acct, per_ip = f"loginfail:{ip}:{email}", f"loginfail:{ip}"
+    wait = max(_blocked_for(acct, LOGIN_FAILS_PER_ACCOUNT), _blocked_for(per_ip, LOGIN_FAILS_PER_IP))
+    if wait:
+        raise HTTPException(429, "Too many failed sign-in attempts; try again in a minute",
+                            headers={"Retry-After": str(wait)})
     user = auth.authenticate(req.email, req.password)
     if user is None:
-        db.audit(req.email.strip()[:200], "auth.login_failed", {"ip": _ip(request)})
+        _rate_wait(acct, limit=LOGIN_FAILS_PER_ACCOUNT + 1)
+        _rate_wait(per_ip, limit=LOGIN_FAILS_PER_IP + 1)
+        db.audit(req.email.strip()[:200], "auth.login_failed", {"ip": ip})
         raise HTTPException(401, "Wrong email or password")
-    db.audit(user["email"], "auth.login", {"ip": _ip(request)})
+    with _lock:
+        _hits.pop(acct, None)
+    db.audit(user["email"], "auth.login", {"ip": ip})
     return _signed_in(request, user["id"])
 
 

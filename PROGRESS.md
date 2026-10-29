@@ -33,7 +33,7 @@ This section is the living task list. Anyone picking this up should read it firs
 - [x] Live NVIDIA guard model evaluation (`docs/guard-eval.md`) plus 3 guard fixes.
 
 ### Phase 2: from hardcoded demo to real product
-Practicality score history: **58** (after round 1) → **78** (after round 4) → round 5 in progress.
+Practicality score history: **58** (after round 1) → **78** (after round 4) → round 5 done, re-test running.
 
 - [x] **Round 1 (`f198b95`).**
   - Projects (GitHub URL or uploaded manifest) with SQLite history.
@@ -58,14 +58,14 @@ Practicality score history: **58** (after round 1) → **78** (after round 4) �
   - Slack, webhook (HMAC-signed) and email alerts.
   - CLI scan with table/json/SARIF/CycloneDX output and exit codes; GitHub Action; pre-commit hook.
   - Exports, auto-fix, Docker sandbox and docker-compose.
-- [ ] **Round 5 (in progress, engineer running).** Fixes from the 78/100 test:
-  - [ ] Notifications sent off the scan worker (a dead webhook stalled the queue), with a circuit breaker.
-  - [ ] CLI exits 2 on unverified or errored scans (no false CI pass); single-file scans accept only requirements-like names.
-  - [ ] SSRF protection for webhook, Slack and SMTP targets (block private, loopback and metadata IPs; pin DNS; no redirects).
-  - [ ] Login rate limit counts failures per (IP, email), so an attacker can't lock out the admin; document `--proxy-headers`.
-  - [ ] Invalid requirement lines become warnings and count against coverage.
-  - [ ] Fonts self-hosted, so the CSP is `'self'` only with zero console noise.
-  - [ ] Tests for email channel e2e, the auto-fix enqueue path and CycloneDX schema fields.
+- [x] **Round 5 (see git log).** Fixes from the 78/100 test:
+  - [x] Notifications sent off the scan worker (a dead webhook stalled the queue), with a circuit breaker.
+  - [x] CLI exits 2 on unverified or errored scans (no false CI pass); single-file scans accept only requirements-like names.
+  - [x] SSRF protection for webhook, Slack and SMTP targets (block private, loopback and metadata IPs; pin DNS; no redirects).
+  - [x] Login rate limit counts failures per (IP, email), so an attacker can't lock out the admin; document `--proxy-headers`.
+  - [x] Invalid requirement lines become warnings and count against coverage.
+  - [x] Fonts self-hosted, so the CSP is `'self'` only with zero console noise.
+  - [x] Tests for email channel e2e, the auto-fix enqueue path and CycloneDX schema fields.
 - [ ] **Next.** Re-run the full practicality test (three personas: security lead, CI developer, attacker). Feed defects into round 6 and repeat until the product is adoptable (target 95+).
 
 ### Planned after the practicality target is met

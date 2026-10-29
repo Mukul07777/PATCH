@@ -29,13 +29,21 @@ inputs:
     description: Upload the report to GitHub code scanning (needs format sarif and permissions security-events write).
     required: false
     default: "true"
+  allow-unverified:
+    description: Accept a scan that had manifest errors or checked nothing (default false; such scans exit 2).
+    required: false
+    default: "false"
+  fail-on-partial:
+    description: Exit 2 when only part of the dependencies could be checked (unpinned or unparsable lines).
+    required: false
+    default: "false"
   python-version:
     description: Python used to run the scanner.
     required: false
     default: "3.12"
 outputs:
   exit-code:
-    description: 0 clean, 1 findings at or above fail-on, 2 scan error.
+    description: 0 clean, 1 findings at or above fail-on, 2 scan incomplete (manifest error, nothing checked, or partial coverage with fail-on-partial).
     value: ${{ steps.scan.outputs.exit-code }}
   report:
     description: Path of the report file.
@@ -58,9 +66,13 @@ runs:
         PP_FORMAT: ${{ inputs.format }}
         PP_OUTPUT: ${{ inputs.output }}
         PP_IGNORE: ${{ inputs.ignore }}
+        PP_ALLOW_UNVERIFIED: ${{ inputs.allow-unverified }}
+        PP_FAIL_ON_PARTIAL: ${{ inputs.fail-on-partial }}
       run: |
         args=()
         for id in ${PP_IGNORE//,/ }; do args+=(--ignore "$id"); done
+        if [ "$PP_ALLOW_UNVERIFIED" = "true" ]; then args+=(--allow-unverified); fi
+        if [ "$PP_FAIL_ON_PARTIAL" = "true" ]; then args+=(--fail-on-partial); fi
         set +e
         # one scan: the report is written even when findings fail the threshold (exit 1)
         python -m patchpilot scan "$PP_PATH" --format "$PP_FORMAT" --output "$PP_OUTPUT" --fail-on "$PP_FAIL_ON" "${args[@]}"
@@ -77,5 +89,5 @@ runs:
       if: ${{ steps.scan.outputs.exit-code != '0' }}
       shell: bash
       run: |
-        echo "PatchPilot exit code ${{ steps.scan.outputs.exit-code }} (1 = findings at or above '${{ inputs.fail-on }}', 2 = scan error)"
+        echo "PatchPilot exit code ${{ steps.scan.outputs.exit-code }} (1 = findings at or above '${{ inputs.fail-on }}', 2 = scan incomplete: see the log)"
         exit ${{ steps.scan.outputs.exit-code }}

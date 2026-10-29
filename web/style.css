@@ -1,3 +1,8 @@
+/* Self-hosted variable fonts (latin subset, SIL Open Font License 1.1: see /static/fonts/*-OFL.txt).
+   No third-party font CDN, so the CSP stays 'self' only. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("/static/fonts/inter-latin-wght.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800; font-display: swap; src: url("/static/fonts/jetbrains-mono-latin-wght.woff2") format("woff2"); }
+@font-face { font-family: "Archivo"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("/static/fonts/archivo-latin-wght.woff2") format("woff2"); }
 :root {
   --bg: #05070a; --surface: rgba(18, 23, 30, .72); --surface-2: rgba(255,255,255,.04); --line: rgba(255,255,255,.08);
   --text: #eef3f7; --muted: #8592a0; --accent: #76b900; --accent-2: #b4ff3a; --accent-ink: #05070a;

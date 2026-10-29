@@ -3,9 +3,12 @@
 Only findings a scan saw for the first time (finding_status first_seen_scan == that scan) trigger a message, and
 each (channel, scan) or (channel, fix run) is delivered at most once: the deliveries table has a unique
 (channel_id, dedupe_key) row that is claimed before anything is sent. Failed sends are retried with backoff
-(3 attempts) and every attempt's outcome is kept in the delivery log. Channel configs (webhook URLs, signing
+(3 attempts) on a background worker pool, never on the scan worker, and every outcome is kept in the delivery
+log; pending deliveries survive restarts and a per-channel circuit breaker pauses a failing endpoint.
+Destinations are SSRF-checked (netguard). Channel configs (webhook URLs, signing
 secrets) are encrypted at rest with the settings key. Payload schema: docs/notifications.md.
 """
+import concurrent.futures
 import hashlib
 import hmac
 import json
@@ -14,12 +17,13 @@ import re
 import secrets
 import smtplib
 import ssl
+import threading
 import time
 from email.message import EmailMessage
 
 import httpx
 
-from . import __version__, config, db, scanner, settings
+from . import __version__, config, db, netguard, scanner, settings
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +89,7 @@ def save(cid, type_, name, cfg, events, min_severity="low", enabled=True):
             raise LookupError("Unknown channel")
         old = config_of(row) if row["type"] == type_ else None
     clean = _clean_config(type_, cfg, old)
+    _check_destination(type_, clean)
     return db.save_channel(cid, type_, name, settings.encrypt(json.dumps(clean)), events, min_severity, enabled)
 
 
@@ -113,6 +118,7 @@ def public(row):
     else:
         out["config"] = {"to": cfg.get("to") or []}
     out["readable"] = bool(cfg)
+    out["health"] = health(row)
     return out
 
 
@@ -225,6 +231,34 @@ def email_message(p, to):
 
 
 # ---------- sending ----------
+# Delivery is asynchronous: deliver() stores the payload in the deliveries row (status 'pending') and hands the
+# id to a small bounded worker pool, so a slow or dead endpoint never holds up a scan worker. Pending rows
+# survive a restart (start() requeues and resumes them). Each channel has a circuit breaker: after
+# BREAKER_THRESHOLD deliveries in a row fail, the channel is "failing" and its deliveries wait (exponential
+# backoff, BREAKER_BASE doubling up to BREAKER_CAP seconds) instead of hammering the endpoint; one success closes it.
+WORKERS = 4
+MAX_QUEUED = 500  # ids handed to the pool at once; the rest stay pending in SQLite and the sweeper picks them up
+SWEEP_INTERVAL = 5.0
+BREAKER_THRESHOLD = 3
+BREAKER_BASE, BREAKER_CAP = 60.0, 3600.0
+UNREACHABLE = "Could not connect (endpoint unreachable)"  # deliberately generic: no error class / blocked reason
+_pool = None
+_pool_lock = threading.Lock()
+_queued = set()
+_busy_channels = set()
+_stop = threading.Event()
+_sweeper = None
+
+
+def _check_destination(type_, cfg):
+    """SSRF guard at save time (and again at connect time, see netguard)."""
+    if type_ in ("slack", "webhook"):
+        try:
+            netguard.check_url(cfg["url"])
+        except netguard.Blocked as e:
+            raise ChannelError(f"Destination not allowed: {e}") from None
+
+
 def _send(row, payload, delivery_id):
     """One attempt: (ok, status code or None, error or None, retryable)."""
     cfg = config_of(row)
@@ -235,18 +269,20 @@ def _send(row, payload, delivery_id):
         if not s["host"] or not s["from"]:
             return False, None, "SMTP is not configured (Settings: SMTP host and from address)", False
         try:
-            cls = smtplib.SMTP_SSL if s["port"] == 465 else smtplib.SMTP
+            cls = netguard.smtp_class(smtplib.SMTP_SSL if s["port"] == 465 else smtplib.SMTP)
             with cls(s["host"], s["port"], timeout=20) as smtp:
-                if cls is smtplib.SMTP and s["starttls"]:
+                if s["port"] != 465 and s["starttls"]:
                     smtp.starttls(context=ssl.create_default_context())
                 if s["user"]:
                     smtp.login(s["user"], s["password"])
                 smtp.send_message(email_message(payload, cfg["to"]))
             return True, 250, None, False
+        except netguard.Blocked:
+            return False, None, UNREACHABLE, False
         except smtplib.SMTPResponseException as e:
             return False, e.smtp_code, f"SMTP {e.smtp_code}", 400 <= e.smtp_code < 500
-        except (smtplib.SMTPException, OSError) as e:
-            return False, None, f"SMTP error ({type(e).__name__})", True
+        except (smtplib.SMTPException, OSError):
+            return False, None, "SMTP server unreachable", True
     if row["type"] == "slack":
         body, headers = json.dumps(slack_body(payload)).encode(), {}
     else:
@@ -255,21 +291,19 @@ def _send(row, payload, delivery_id):
         headers = {"X-PatchPilot-Event": payload["event"], "X-PatchPilot-Delivery": str(delivery_id),
                    "X-PatchPilot-Timestamp": ts, "X-PatchPilot-Signature": sign(cfg["secret"], ts, body)}
     try:
-        with httpx.Client(timeout=15, follow_redirects=False) as http:
+        with netguard.client(15) as http:
             r = http.post(cfg["url"], content=body, headers={"Content-Type": "application/json",
                                                              "User-Agent": f"PatchPilot/{__version__}", **headers})
-    except httpx.HTTPError as e:
-        return False, None, f"Could not connect ({type(e).__name__})", True
+    except netguard.Blocked:
+        return False, None, UNREACHABLE, False
+    except httpx.HTTPError:
+        return False, None, UNREACHABLE, True
     if 200 <= r.status_code < 300:
         return True, r.status_code, None, False
     return False, r.status_code, f"HTTP {r.status_code}", r.status_code >= 500 or r.status_code == 429
 
 
-def deliver(row, event, payload, dedupe_key, project_id=None, attempts=ATTEMPTS):
-    """Send once per (channel, dedupe_key), retrying with backoff; returns the final delivery status."""
-    did = db.start_delivery(row["id"], event, dedupe_key, project_id)
-    if did is None:
-        return "duplicate"
+def _attempts(row, payload, did, attempts):
     ok, code, err, tries = False, None, None, 0
     for i in range(attempts):
         if i:
@@ -282,9 +316,127 @@ def deliver(row, event, payload, dedupe_key, project_id=None, attempts=ATTEMPTS)
             ok, code, err, retry = False, None, f"{type(e).__name__}", False
         if ok or not retry:
             break
-    status = "ok" if ok else "failed"
-    db.finish_delivery(did, status, code, tries, err)
-    return status
+    return ok, code, err, tries
+
+
+def process(did):
+    """Send one pending delivery (worker body); returns its status afterwards."""
+    try:
+        d = db.get_delivery(did)
+        if d is None or d["status"] != "pending" or not db.claim_delivery(did):
+            return d["status"] if d else "gone"
+        row = db.get_channel(d["channel_id"])
+        if row is None:
+            db.finish_delivery(did, "failed", None, 0, "channel deleted")
+            return "failed"
+        now = time.time()
+        if row.get("open_until") and row["open_until"] > now:  # breaker open: wait instead of sending
+            db.defer_delivery(did, row["open_until"])
+            return "pending"
+        with _pool_lock:
+            busy = row["id"] in _busy_channels  # one send per channel at a time: a dead endpoint ties up one worker
+            if not busy:
+                _busy_channels.add(row["id"])
+        if busy:
+            db.defer_delivery(did, now + 1.0)
+            return "pending"
+        try:
+            ok, code, err, tries = _attempts(row, json.loads(d["payload"]), did, d["max_attempts"] or ATTEMPTS)
+        finally:
+            with _pool_lock:
+                _busy_channels.discard(row["id"])
+        status = "ok" if ok else "failed"
+        db.finish_delivery(did, status, code, tries, err)
+        if ok:
+            db.channel_ok(row["id"])
+        else:
+            until = db.channel_failed(row["id"], BREAKER_THRESHOLD, time.time(), BREAKER_BASE, BREAKER_CAP)
+            if until:
+                log.warning("notification channel %s is failing; deliveries paused until %s", row["id"], until)
+        return status
+    finally:
+        with _pool_lock:
+            _queued.discard(did)
+
+
+def _executor():
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            _pool = concurrent.futures.ThreadPoolExecutor(WORKERS, thread_name_prefix="pp-notify")
+        return _pool
+
+
+def _pool_submit(did):
+    """Hand a delivery id to the worker pool (tests replace _submit with process to run inline); None when the
+    id is already queued or the pool is full (the row stays pending and the sweeper submits it later)."""
+    with _pool_lock:
+        if did in _queued or len(_queued) >= MAX_QUEUED:
+            return None
+        _queued.add(did)
+    try:
+        return _executor().submit(process, did)
+    except RuntimeError:  # pool shut down
+        with _pool_lock:
+            _queued.discard(did)
+        return None
+
+
+_submit = _pool_submit
+
+
+def deliver(row, event, payload, dedupe_key, project_id=None, attempts=ATTEMPTS):
+    """Queue a message once per (channel, dedupe_key). Returns 'duplicate', 'queued', or (when _submit runs
+    inline, as in tests) the final status."""
+    did = db.start_delivery(row["id"], event, dedupe_key, project_id, json.dumps(payload), attempts)
+    if did is None:
+        return "duplicate"
+    res = _submit(did)
+    return res if isinstance(res, str) else "queued"
+
+
+def sweep(now=None):
+    """Submit every pending delivery that is due (after a restart, a full pool, or an open breaker)."""
+    n = 0
+    for did in db.due_deliveries(time.time() if now is None else now):
+        if _submit(did) is not None:
+            n += 1
+    return n
+
+
+def _loop(interval):
+    while not _stop.wait(interval):
+        try:
+            sweep()
+        except Exception:
+            log.exception("notification sweep failed")
+
+
+def start(interval=SWEEP_INTERVAL):
+    """Resume deliveries left pending by the last process and keep sweeping (server lifespan)."""
+    global _sweeper
+    if _sweeper and _sweeper.is_alive():
+        return
+    _stop.clear()
+    try:
+        db.requeue_deliveries()
+        sweep()
+    except Exception:
+        log.exception("could not resume pending notifications")
+    _sweeper = threading.Thread(target=_loop, args=(interval,), daemon=True, name="pp-notify-sweeper")
+    _sweeper.start()
+
+
+def stop():
+    _stop.set()
+
+
+def health(row):
+    """Circuit-breaker state for the UI: ok, or failing (with when deliveries resume)."""
+    failures = row.get("failures") or 0
+    if failures >= BREAKER_THRESHOLD:
+        return {"state": "failing", "failures": failures, "retry_at": row.get("open_until")}
+    return {"state": "ok", "failures": failures, "retry_at": None}
 
 
 def _channels_for(project_id, event):
@@ -343,14 +495,21 @@ def fix_completed(project_id, run_id, ok, error=None):
 
 
 def send_test(row):
-    """A sample new_findings message to one channel (one attempt, not deduplicated)."""
+    """A sample new_findings message to one channel: one attempt, sent right away (the admin is waiting), logged
+    but not deduplicated. A success closes the channel's circuit breaker."""
     project = {"id": 0, "name": "PatchPilot test", "source_type": "upload"}
     sample = {"package": "jinja2", "version": "2.10", "vuln_id": "GHSA-462w-v97r-4m45", "aliases": ["CVE-2019-10906"],
               "severity": "HIGH", "cvss_score": 8.6, "epss": 0.01, "kev": False, "fixed_in": "2.10.1",
               "summary": "Jinja2 sandbox escape via str.format_map", "source_file": "requirements.txt"}
     p = build_payload("new_findings", project, findings=[sample], test=True)
     p["project"]["url"] = _link("/projects")
-    return deliver(row, "test", p, f"test:{secrets.token_hex(8)}", None, attempts=1)
+    did = db.start_delivery(row["id"], "test", f"test:{secrets.token_hex(8)}", None)
+    db.claim_delivery(did)
+    ok, code, err, tries = _attempts(row, p, did, 1)
+    db.finish_delivery(did, "ok" if ok else "failed", code, tries, err)
+    if ok:
+        db.channel_ok(row["id"])
+    return "ok" if ok else "failed"
 
 
 if after_scan not in scanner.AFTER_SCAN:

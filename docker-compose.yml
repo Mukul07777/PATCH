@@ -19,6 +19,13 @@ services:
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # local | docker (docker needs the socket mount below)
       SANDBOX: ${SANDBOX:-local}
+      # Reverse proxy addresses whose X-Forwarded-For is trusted (rate limits and audit log use the client IP).
+      # Set to your proxy's IP / CIDR; the default trusts nobody but localhost. Never "*" if 8000 is reachable directly.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      # Allow notification webhooks / SMTP on private or loopback addresses (on-prem receivers): 1 to enable
+      PATCHPILOT_ALLOW_PRIVATE_WEBHOOKS: ${PATCHPILOT_ALLOW_PRIVATE_WEBHOOKS:-0}
+    # uvicorn runs with --proxy-headers; FORWARDED_ALLOW_IPS above decides which proxies are believed
+    command: ["python", "-m", "patchpilot", "serve", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
       - patchpilot-data:/data
       # SECURITY WARNING: mounting the Docker socket lets this container start containers on the host, which is

@@ -14,7 +14,7 @@ import threading
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import config, db
+from . import config, db, netguard
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +132,11 @@ def _clean(key, value):
     if key in ("smtp_host", "smtp_user"):
         if not isinstance(value, str) or len(value) > 200 or any(c.isspace() for c in value):
             raise SettingsError(f"{key} must be a host name / user name without spaces")
+        if key == "smtp_host" and value:
+            try:
+                netguard.check_host(value, 25)
+            except netguard.Blocked as e:
+                raise SettingsError(f"smtp_host not allowed: {e}") from None
         return value
     if key == "smtp_port":
         try:

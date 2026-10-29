@@ -10,7 +10,10 @@
   }, { passive: true });
 
   // ---------- live stats: projects, scans and open findings stored on this server ----------
-  fetch("/api/stats").then((r) => (r.ok ? r.json() : null)).catch(() => null).then((s) => {
+  // Ask who we are first: an anonymous visitor of a private server would only get a 401 (a console error).
+  fetch("/api/auth/state").then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    .then((st) => (st && (st.user || st.public_demo) ? fetch("/api/stats").then((r) => (r.ok ? r.json() : null)) : null))
+    .catch(() => null).then((s) => {
     if (!s) return;
     const el = document.getElementById("stats");
     if (!s.projects) {

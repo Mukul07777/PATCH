@@ -175,6 +175,16 @@ MIGRATIONS = [
         fetched_at REAL NOT NULL
     )
     """,
+    # 5: asynchronous notification delivery (the payload is kept so a restart resumes pending deliveries) and a
+    # per-channel circuit breaker (consecutive failures; deliveries wait until open_until while it is open)
+    """
+    ALTER TABLE deliveries ADD COLUMN payload TEXT;
+    ALTER TABLE deliveries ADD COLUMN max_attempts INTEGER;
+    ALTER TABLE deliveries ADD COLUMN next_at REAL;
+    ALTER TABLE channels ADD COLUMN failures INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE channels ADD COLUMN open_until REAL;
+    CREATE INDEX deliveries_pending ON deliveries(status, next_at)
+    """,
 ]
 
 _lock = threading.RLock()
@@ -640,13 +650,61 @@ def delete_channel(cid):
         return _connect().execute("DELETE FROM channels WHERE id = ?", (cid,)).rowcount > 0
 
 
-def start_delivery(channel_id, event, dedupe_key, project_id):
+def start_delivery(channel_id, event, dedupe_key, project_id, payload=None, max_attempts=None):
     """Claim a delivery; None when this (channel, dedupe_key) was already sent or is in flight (dedupe)."""
     with _lock:
         cur = _connect().execute(
-            "INSERT OR IGNORE INTO deliveries (channel_id, event, dedupe_key, project_id, status, created_at) "
-            "VALUES (?, ?, ?, ?, 'pending', ?)", (channel_id, event, dedupe_key, project_id, time.time()))
+            "INSERT OR IGNORE INTO deliveries (channel_id, event, dedupe_key, project_id, status, created_at, payload, "
+            "max_attempts) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
+            (channel_id, event, dedupe_key, project_id, time.time(), payload, max_attempts))
         return cur.lastrowid if cur.rowcount else None
+
+
+def get_delivery(did):
+    rows = _q("SELECT * FROM deliveries WHERE id = ?", (did,))
+    return rows[0] if rows else None
+
+
+def claim_delivery(did):
+    """pending -> sending; False if another worker (or process) already has it."""
+    with _lock:
+        return _connect().execute("UPDATE deliveries SET status = 'sending' WHERE id = ? AND status = 'pending'",
+                                  (did,)).rowcount > 0
+
+
+def defer_delivery(did, until):
+    _x("UPDATE deliveries SET status = 'pending', next_at = ? WHERE id = ?", (until, did))
+
+
+def due_deliveries(now, limit=200):
+    """Pending deliveries whose wait is over, or whose channel's breaker has closed since they were deferred."""
+    return [r["id"] for r in _q(
+        "SELECT d.id FROM deliveries d JOIN channels c ON c.id = d.channel_id WHERE d.status = 'pending' "
+        "AND d.payload IS NOT NULL AND (d.next_at IS NULL OR d.next_at <= ? OR c.open_until IS NULL OR c.open_until <= ?) "
+        "ORDER BY d.id LIMIT ?", (now, now, limit))]
+
+
+def requeue_deliveries():
+    """Deliveries that were being sent when the process stopped go back to pending."""
+    with _lock:
+        return _connect().execute("UPDATE deliveries SET status = 'pending' WHERE status = 'sending'").rowcount
+
+
+def channel_failed(cid, threshold, now, base, cap):
+    """Count one more consecutive failure; opens the breaker (returns open_until) at `threshold`."""
+    with _lock:
+        c = _connect()
+        c.execute("UPDATE channels SET failures = failures + 1 WHERE id = ?", (cid,))
+        row = c.execute("SELECT failures FROM channels WHERE id = ?", (cid,)).fetchone()
+        if row is None or row[0] < threshold:
+            return None
+        until = now + min(cap, base * 2 ** (row[0] - threshold))
+        c.execute("UPDATE channels SET open_until = ? WHERE id = ?", (until, cid))
+        return until
+
+
+def channel_ok(cid):
+    _x("UPDATE channels SET failures = 0, open_until = NULL WHERE id = ?", (cid,))
 
 
 def finish_delivery(did, status, code, attempts, error=None):
@@ -656,7 +714,9 @@ def finish_delivery(did, status, code, attempts, error=None):
 
 def list_deliveries(channel_id=None, limit=50):
     where, args = ("WHERE d.channel_id = ? ", (channel_id, limit)) if channel_id else ("", (limit,))
-    return _q("SELECT d.*, c.name AS channel FROM deliveries d LEFT JOIN channels c ON c.id = d.channel_id "
+    return _q("SELECT d.id, d.channel_id, d.event, d.dedupe_key, d.project_id, d.status, d.response_code, d.attempts, "
+              "d.error, d.created_at, d.finished_at, d.next_at, c.name AS channel "
+              "FROM deliveries d LEFT JOIN channels c ON c.id = d.channel_id "
               f"{where}ORDER BY d.id DESC LIMIT ?", args)
 
 
