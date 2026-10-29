@@ -71,7 +71,7 @@ function buildGraph() {
   const g = $("#graph");
   const edges = EDGES.map(([a, b, bend]) => `<path class="edge" id="e-${a}-${b}" d="${edgePath(a, b, bend || 0)}"/>`).join("");
   const nodes = Object.entries(NODES).map(([k, n]) => `
-    <g class="node" id="n-${k}" style="--c:var(${n.c})" transform="translate(${n.x - NW / 2},${n.y - NH / 2})">
+    <g class="node" id="n-${k}" data-css="--c:var(${n.c})" transform="translate(${n.x - NW / 2},${n.y - NH / 2})">
       <rect class="halo" width="${NW}" height="${NH}" rx="12"/>
       <rect width="${NW}" height="${NH}" rx="12"/>
       <text x="${NW / 2}" y="20">${n.label}</text>
@@ -183,7 +183,7 @@ const CHAPTERS = [
 const CHAPTER_OF = { findings: 0, triage: 1, threat: 1, drift: 2, plan: 2, patch: 3, test: 3, redteam: 4, ledger: 5, diff: 6, report: 6, done: 6 };
 function startDemo() {
   demo = { at: -1 };
-  $("#sbSteps").innerHTML = CHAPTERS.map(([t], i) => `<li id="sb-${i}"><i>${i + 1}.</i> <span>${t}</span></li>`).join("");
+  $("#sbSteps").innerHTML = CHAPTERS.map(([t], i) => `<li id="sb-${i}"><i>${i + 1}.</i> <span>${esc(t)}</span></li>`).join("");
   $("#storyBar").hidden = false; document.body.classList.add("demo"); $("#sbTitle").textContent = "Starting…"; $("#sbCap").textContent = "Replaying a recorded run. Sit back: the console will walk you through it.";
 }
 function stopDemo() { demo = null; $("#storyBar").hidden = true; document.body.classList.remove("demo"); }
@@ -210,7 +210,7 @@ if ($("#demoBtn")) $("#demoBtn").onclick = (e) => {
 function reset() {
   state = { runId: null, trust: null, vex: null, guard: [], threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
-  $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${t}<small></small></div></li>`).join("");
+  $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${esc(t)}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
   ["adv", "tests", "att", "tok", "time"].forEach((k) => ($("#k-" + k).textContent = "–"));
   $("#term").innerHTML = "";
@@ -427,7 +427,7 @@ function renderProof() {
       </div>
       <details><summary>Show exploit test</summary><pre class="diff">${esc(x.code || "")}</pre></details></div>` : "";
   const rk = r ? `<div class="card glass risk ${r.level}">
-      <div class="gauge" style="--v:${r.score}"><b>${r.score}</b><small>${r.level} risk</small></div>
+      <div class="gauge" data-css="--v:${r.score}"><b>${r.score}</b><small>${r.level} risk</small></div>
       <div class="factors">${r.factors.map((f) => `<div><span>${esc(f.name)}</span><span class="muted">${esc(f.detail)}</span><b>${f.points > 0 ? "+" : ""}${f.points}</b></div>`).join("")}</div></div>` : "";
   $("#tab-proof").innerHTML = renderGuard() + ex + renderRedteam() + renderTrust() + rk;
 }
@@ -530,7 +530,7 @@ function renderLedger() {
   const icon = { verified: "✓", partial: "◐", unverified: "✗" };
   $("#tab-ledger").innerHTML = `<div class="cert card glass">
     <div class="cert-head"><div><small>PatchPilot proof certificate</small><b>${esc(L.certificate)}</b></div>
-      <div class="cert-trust" style="--v:${L.trust}"><b>${L.trust}</b><small>trust</small></div></div>
+      <div class="cert-trust" data-css="--v:${L.trust}"><b>${L.trust}</b><small>trust</small></div></div>
     <div class="claims">${L.claims.map((c) => `<div class="claim ${c.status}"><span class="ci">${icon[c.status]}</span>
       <div><b>${esc(c.claim)}</b><small>${esc(c.evidence)}</small></div><span class="cs">${c.status}</span></div>`).join("")}</div>
     <div class="cert-foot"><code title="sha256 of claims + diff">sha256 ${esc(L.sha256.slice(0, 32))}…</code>
@@ -571,10 +571,13 @@ function renderReach() {
 }
 
 function renderDebate() {
-  $("#tab-debate").innerHTML = `<div class="debate">${state.patches.map((p) => `<div class="db card glass" style="--c:var(--${p.tier})">
-    <div class="db-head"><span class="chip ${p.tier}">${p.tier}</span><b>Attempt #${p.attempt}</b></div>
+  $("#tab-debate").innerHTML = `<div class="debate">${state.patches.map((p) => {
+    const tier = TIERS.includes(p.tier) ? p.tier : "super";  // allow-list: tier lands in a class name and a CSS var
+    return `<div class="db card glass" data-css="--c:var(--${tier})">
+    <div class="db-head"><span class="chip ${tier}">${esc(tier)}</span><b>Attempt #${esc(String(p.attempt))}</b></div>
     <small>Diagnosis</small><p>${esc(p.diagnosis || "—")}</p><small>Fix</small><p>${esc(p.explanation)}</p>
-    <div class="muted">${p.files.map((f) => "<span aria-hidden=\"true\">✎</span> " + esc(f)).join("<br>")}</div></div>`).join("")}</div>`;
+    <div class="muted">${(p.files || []).map((f) => "<span aria-hidden=\"true\">✎</span> " + esc(f)).join("<br>")}</div></div>`;
+  }).join("")}</div>`;
 }
 
 $("#speak").onclick = () => {
@@ -661,7 +664,7 @@ function renderRouting() {
     const u = state.usage[t];
     return `<div class="tier"><div class="top"><span class="chip ${t}">${t}</span><span class="nums">${u.calls}× · ${u.tok.toLocaleString()} tok · ${u.s.toFixed(1)}s</span></div>
       <div class="model" title="${esc(u.model)}">${esc(u.model || "—")}</div>
-      <div class="bar"><i class="t-${t}" style="width:${(u.tok / max) * 100}%"></i></div></div>`;
+      <div class="bar"><i class="t-${t}" data-css="width:${(u.tok / max) * 100}%"></i></div></div>`;
   }).join("");
 }
 

@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
@@ -34,7 +34,7 @@ _runs_lock = threading.RLock()
 _org_cache = {}  # owner.lower() -> (monotonic time, result)
 RUN_ID = re.compile(r"[\w.-]+")
 REPO = re.compile(r"https://github\.com/[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}?(?:\.git)?/?")
-CSP = ("default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
+CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
        "img-src 'self' data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
 SECURITY_HEADERS = {"Content-Security-Policy": CSP, "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
                     "Referrer-Policy": "strict-origin-when-cross-origin"}
@@ -143,7 +143,7 @@ def _run_agent(run_id, repo, emit):
             emit({"type": "done", "ok": False, "error": err})
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     return {"nebius": bool(config.NEBIUS_API_KEY), "provider": config.provider_name(), "tavily": bool(config.TAVILY_API_KEY),
             "github": bool(config.GITHUB_TOKEN), "remote_repos": config.ALLOW_REMOTE_REPOS}
@@ -210,7 +210,7 @@ def _org_scan(gh, owner):
     r = gh.get(f"https://api.github.com/users/{owner}/repos", params={"per_page": 40, "sort": "pushed"})
     if r.status_code == 404:
         raise HTTPException(404, f"No GitHub user or org named '{owner}'")
-    if r.status_code == 403 and r.headers.get("X-RateLimit-Remaining") == "0":
+    if r.status_code in (403, 429) and r.headers.get("X-RateLimit-Remaining") == "0":
         raise HTTPException(429, "GitHub rate limit hit. Set GITHUB_TOKEN in .env to raise it")
     if not 200 <= r.status_code < 300:
         raise HTTPException(502, f"GitHub returned HTTP {r.status_code}")
@@ -258,7 +258,23 @@ def _org_scan(gh, owner):
     with ThreadPoolExecutor(8) as pool:
         rows = list(pool.map(scan, repos))
     rows.sort(key=lambda x: (x["critical"], x["high"], x["other"]), reverse=True)
-    return {"owner": owner, "scanned": len(rows), "repos": rows, "osv_capped": budget[0] <= 0}
+    return {"owner": owner, "scanned": len(rows), "repos": rows, "osv_capped": budget[0] <= 0,
+            "reason": _org_reason(rows, budget[0] <= 0)}
+
+
+def _org_reason(rows, capped):
+    """Short human explanation of why an org scan shows little or nothing (None when there is nothing to explain)."""
+    if not rows:
+        return "no public python repos"
+    if not any(r["has_reqs"] for r in rows):
+        return "no requirements.txt found"
+    if not any(r["pins"] for r in rows):
+        return "no pinned requirements (pkg==x.y.z)"
+    if capped:
+        return "osv lookup limit reached; results partial"
+    if any(r.get("error") for r in rows):
+        return "some repos could not be fetched"
+    return None
 
 
 @app.post("/api/runs")
@@ -281,7 +297,7 @@ def start_run(req: RunRequest, request: Request):
     return {"id": run_id}
 
 
-@app.get("/api/runs")
+@app.api_route("/api/runs", methods=["GET", "HEAD"])
 def list_runs():
     out = []
     for p in sorted(config.RUNS_DIR.glob("*.jsonl"), reverse=True):
@@ -346,6 +362,11 @@ def run_vex(run_id: str):
     if doc is None:
         raise HTTPException(404, "no OpenVEX document for this run")
     return doc
+
+
+@app.api_route("/robots.txt", methods=["GET", "HEAD"], include_in_schema=False)
+def robots():
+    return PlainTextResponse("User-agent: *\nAllow: /\n", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)

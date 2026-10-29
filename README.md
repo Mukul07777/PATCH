@@ -2,7 +2,10 @@
 
 **An agentic DevSecOps tool for software supply chain security: it finds CVEs, upgrades dependencies, rewrites code until the tests pass, and proves the exploit is closed.**
 
-Built on NVIDIA Nemotron (Nano / Super / Ultra) through any OpenAI-compatible endpoint (Nebius Token Factory, NVIDIA NIM, OpenRouter), with Tavily, OSV.dev and PyPI.
+Built on NVIDIA Nemotron (Nano / Super / Ultra) served by **Nebius Token Factory** (the default provider), with Tavily, OSV.dev and PyPI. Any other OpenAI-compatible endpoint (NVIDIA NIM, or OpenRouter as a fallback) also works.
+
+- **Live demo:** TODO <!-- TODO(owner): public URL of the deployed app; leave as TODO until it exists -->
+- **Video:** TODO <!-- TODO(owner): link to the demo video -->
 
 ---
 
@@ -44,7 +47,7 @@ flowchart LR
 - **Threat clock**: each advisory gets its live EPSS exploit probability (FIRST.org), CISA Known Exploited status and how many days it has been public, so you fix what attackers actually use first.
 - **API drift radar**: before any test runs, PatchPilot walks your code's AST, then probes the *installed* old and new library versions in the sandbox to predict exactly which lines break (removed symbols, dropped keyword arguments), and hands that list to the repair model. Behaviour changes are left to the tests.
 - **Least-change upgrade**: the smallest release that clears every advisory is computed from OSV fix ranges and shown next to the latest version.
-- **Content-safety gate**: every AI-written exploit proof, red-team variant and patch file is screened before it runs or is written: a deterministic AST scan (shell/subprocess calls, eval/exec, environment reads, network calls to non-local hosts, deletes and opens outside the repo, reverse-shell and miner strings, non-PyPI requirement sources) plus NVIDIA's `nemotron-3.5-content-safety` guard model in custom-policy mode (default on OpenRouter; `MODEL_GUARD`, `GUARD=0` to disable). Blocked proofs are skipped and blocked patch files are rejected, with the reason fed to the next repair attempt. If the guard model errors (e.g. 429), only the static scan runs and the ledger claim drops to partial. Curated proofs get the static scan only. Not yet exercised against the live guard model.
+- **Content-safety gate**: every AI-written exploit proof, red-team variant and patch file is screened before it runs or is written: a deterministic AST scan (shell/subprocess calls, eval/exec, environment reads, network calls to non-local hosts, deletes and opens outside the repo, reverse-shell and miner strings, non-PyPI requirement sources) plus NVIDIA's `nemotron-3.5-content-safety` guard model in custom-policy mode (`MODEL_GUARD` selects it; it is filled in automatically only on OpenRouter, so on Nebius Token Factory set `MODEL_GUARD` to the content-safety model id your account lists; `GUARD=0` disables the gate). Blocked proofs are skipped and blocked patch files are rejected, with the reason fed to the next repair attempt. If the guard model errors (e.g. 429), only the static scan runs and the ledger claim drops to partial. Curated proofs get the static scan only.
 - **Red-team variants**: after the fix, 5-8 variants of the attack (other algorithms, key types, encodings) run against the patched code; each is reported as closed by fix, already blocked, or still open.
 - **Proof certificate (evidence ledger)**: every claim the PR makes, each checked independently, including a fresh OSV re-scan of the new pins, a trust score, and a SHA-256 over claims + diff.
 - **OpenVEX export**: each run emits an [OpenVEX v0.2.0](https://github.com/openvex/spec) document (`runs/work/<run>/openvex.json`, also `GET /api/runs/{id}/vex`) with one statement per advisory on `pkg:pypi/<name>@<old version>`: `fixed` only when the OSV re-scan cleared it and tests are green, `not_affected` only when static analysis shows the package is never imported (never from LLM-inferred data), otherwise `affected`. Notes cite the proof certificate id and exploit verdict.
@@ -92,8 +95,14 @@ uvicorn patchpilot.server:app --port 8000
 CLI / batch mode: `python -m patchpilot.cli`. Container: see `Dockerfile`.
 
 - Pages: `/` landing, `/console` run the agent, `/runs` history and replay, `/org` org scan, `/how` architecture.
-- API: `/api/health`, `/api/cases`, `/api/runs`, `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`.
-- Demo cases in `cases/`: `authsvc` (PyJWT 1.x + requests) and `webhooks` (Werkzeug 2 to 3).
+- API: `/api/health` (GET/HEAD), `/api/cases`, `/api/runs`, `/api/runs/{id}/events`, `/api/org/{owner}`, `/api/bench`.
+- Demo cases in `cases/` (pins from each `requirements.txt`):
+  - `authsvc`: PyJWT 1.7.1 + requests 2.25.1
+  - `fetcher`: urllib3 1.26.17
+  - `mailer`: Jinja2 2.11.3 + MarkupSafe 2.0.1
+  - `sanitizer`: bleach 3.2.1
+  - `sqlfmt`: sqlparse 0.4.1
+  - `webhooks`: Werkzeug 2.0.3
 
 ## Tests
 
@@ -128,22 +137,24 @@ An end-to-end timing of the new pipeline has not been measured yet, because the 
 
 ## Provider setup
 
-The LLM client is OpenAI-compatible and reads `NEBIUS_API_KEY` and `NEBIUS_BASE_URL`, so any compatible provider works.
+The LLM client is OpenAI-compatible and reads `NEBIUS_API_KEY` and `NEBIUS_BASE_URL`. Nebius Token Factory is the default (`NEBIUS_BASE_URL` falls back to `https://api.tokenfactory.nebius.com/v1` when unset); the other providers are optional.
 
-**Nebius Token Factory**
+**1. Nebius Token Factory (default)**
 ```ini
 NEBIUS_API_KEY=your-nebius-key
 NEBIUS_BASE_URL=https://api.tokenfactory.nebius.com/v1
+# optional: content-safety gate model (not auto-filled outside OpenRouter)
+MODEL_GUARD=<content-safety model id listed by GET /v1/models>
 ```
-Auto-discovery matches `nano`/`lightning`/`mini`, `super` and `ultra` in Nemotron model ids. To be safe, pin the ids (e.g. `MODEL_NANO=nvidia/Nemotron-3_5-Lightning`, `MODEL_SUPER=nvidia/nemotron-3-super-120b-a12b`, `MODEL_ULTRA=nvidia/Nemotron-3-Ultra-550b-a55b`; see `.env.example`). Check them against `GET /v1/models` first.
+Auto-discovery matches `nano`/`lightning`/`mini`, `super` and `ultra` in Nemotron model ids. To be safe, pin the ids (e.g. `MODEL_NANO=nvidia/Nemotron-3_5-Lightning`, `MODEL_SUPER=nvidia/nemotron-3-super-120b-a12b`, `MODEL_ULTRA=nvidia/Nemotron-3-Ultra-550b-a55b`; see `.env.example`). Check them against `GET /v1/models` first. Without `MODEL_GUARD` the content-safety gate still runs its static AST screen.
 
-**NVIDIA NIM**
+**2. NVIDIA NIM**
 ```ini
 NEBIUS_API_KEY=nvapi-...
 NEBIUS_BASE_URL=https://integrate.api.nvidia.com/v1
 ```
 
-**OpenRouter (free tier)**
+**3. OpenRouter (free tier, fallback)**
 ```ini
 NEBIUS_API_KEY=sk-or-...
 NEBIUS_BASE_URL=https://openrouter.ai/api/v1
@@ -151,8 +162,28 @@ MODEL_NANO=nvidia/nemotron-3.5-lightning:free
 MODEL_SUPER=nvidia/nemotron-3.5-super-vl:free
 MODEL_ULTRA=nvidia/nemotron-3-ultra-550b-a55b:free
 ```
+On OpenRouter `MODEL_GUARD` defaults to `nvidia/nemotron-3.5-content-safety:free`.
 
 Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PRs, higher org-scan rate limit), `PRICE_*`, `MAX_FIX_ATTEMPTS`, `PATCHPILOT_TOKEN` (requires `Authorization: Bearer <token>` on `POST /api/runs`), and `ALLOW_REMOTE_REPOS=1` to enable remote GitHub repos (off by default: remote repos run arbitrary test code).
+
+## Built on Nebius
+
+- **Token Factory is the default LLM host.** `patchpilot/config.py` defaults `NEBIUS_BASE_URL` to `https://api.tokenfactory.nebius.com/v1`, and `patchpilot/llm.py` sends every model call there with the `NEBIUS_API_KEY` bearer token. Models are discovered from Token Factory's `/models` list, or pinned with `MODEL_NANO` / `MODEL_SUPER` / `MODEL_ULTRA`.
+- **Nemotron roles** (router in `patchpilot/llm.py`):
+  - **Nano** (`nano` / `lightning` / `mini` ids): fast, cheap triage and classification: advisory triage and symbol inference for reachability.
+  - **Super**: planning and first-pass code changes: upgrade plan, exploit-proof test when no curated one exists, first repair attempt.
+  - **Ultra**: deep reasoning on escalation: later repair attempts when Super's fix still fails tests, or when a fix call hits the `FIX_TIMEOUT` cap.
+  - **Guard** (`MODEL_GUARD`, optional): NVIDIA Nemotron content-safety model screening AI-written code before it runs.
+- Tokens, latency and (with `PRICE_*`) cost are recorded per tier for every run.
+
+<!-- TODO(owner): state whether a recorded end-to-end run on Token Factory exists and link its run id / numbers. Do not claim one until it does. -->
+
+### Deploying on Nebius AI Cloud (how-to)
+
+The `Dockerfile` supports both Nebius serverless modes. These steps describe how to deploy; they have not been carried out for this submission. <!-- TODO(owner): update if/when deployed. -->
+
+- **Serverless Endpoint (web app + API).** Build the image and push it to a registry Nebius can pull from, then create an endpoint from it exposing port `8000`. Pass `NEBIUS_API_KEY` (and optionally `TAVILY_API_KEY`, `GITHUB_TOKEN`, `PATCHPILOT_TOKEN`, `MODEL_*`, `MODEL_GUARD`) as environment variables or secrets, and keep `ALLOW_REMOTE_REPOS=0` on a public endpoint. The image's `HEALTHCHECK` polls `/api/health`, which also answers `HEAD`.
+- **Serverless Job (benchmark / batch).** Run the same image with the command overridden to the CLI: `python -m patchpilot.cli <repo-or-case> https://github.com/org/repo`. Runs are recorded under `runs/`; mount or copy that directory out to keep them.
 
 ## Screenshots
 
@@ -178,10 +209,36 @@ Optional: `TAVILY_API_KEY` (research; skipped if unset), `GITHUB_TOKEN` (real PR
 
 ## Limitations
 
+- The content-safety gate's static AST screen and guard-reply parsing are unit-tested; its behaviour against a live hosted guard model has not yet been recorded in a benchmark run.
 - Python only: needs a pinned `requirements.txt` (`pkg==x.y.z`) and a pytest suite.
 - Tests run on the host in a venv, not a container; keep `ALLOW_REMOTE_REPOS=0` on public deployments.
 - Free-tier models (e.g. OpenRouter `:free`) can be rate-limited, slow, or return malformed JSON, so runs may fail or need a retry.
 - Green tests are only as strong as the repo's test suite.
+
+## Feedback on Nebius & NVIDIA tools
+
+<!-- TODO(owner): write this from first-hand experience. Prompts:
+  - Token Factory: onboarding, finding the Nemotron model ids, /v1/models accuracy, rate limits, latency, pricing clarity.
+  - Nemotron Nano / Super / Ultra: JSON reliability, reasoning control, where each tier surprised you.
+  - Nemotron content-safety guard: custom-policy prompt format, false positives/negatives.
+  - Nebius Serverless Endpoints / Jobs: if used, what worked and what was missing.
+  - Differences between NVIDIA NIM and Token Factory (e.g. enable_thinking).
+  - One concrete change you would ask each team for. -->
+TODO
+
+## Changes during the submission period
+
+All 33 commits in this repository are dated 2026-10-29 (from `git log`). <!-- TODO(owner): confirm the official submission-period dates and whether any work predates them. --> In order:
+
+- **Initial agent** (00:29): security advisory to tested PR on NVIDIA Nemotron + Nebius Token Factory.
+- **Core features**: multipage UI, verified exploit proofs, risk score, reachability, model debate, org scan, red-team variants, proof certificate, Nemotron rerank, threat clock, API drift radar, least-change upgrade, real-world benchmark cases.
+- **Benchmark and self-tests**: benchmark round 1 (3/3 completed cases secured; 3 cases blocked by API rate limit), agent self-test suite, provider and models recorded per run.
+- **Supply-chain depth**: curated exploit proofs for urllib3, Jinja2, bleach and sqlparse CVEs; symbol-level reachability; deps.dev release trust check; OpenVEX export; Nebius model id pinning.
+- **Speed and safety**: reasoning control, parallel triage/research, `uv` sandbox prep, demo mode; API keys kept out of the sandboxed repo's environment; NVIDIA content-safety gate + static AST screen.
+- **UI**: guided demo mode, auto-replay console, trust / OpenVEX / guardrails panels, per-tier charts.
+- **Hardening**: auth + rate limits, token-safe PR push, CI, CSP and security headers, no inline scripts, XSS-safe report links, org-scan limits, accessibility, SEO meta, gzip.
+- **Submission drafts**: Devpost text, video script, judge Q&A, 30-second pitch.
+- **Uncommitted at time of writing**: no inline styles (CSP without `style-src 'unsafe-inline'`), `HEAD` on `/api/health` and `/api/runs`, `/robots.txt`, org-scan `reason` field, reduced-motion CSS, this README's Nebius sections.
 
 ## Roadmap
 

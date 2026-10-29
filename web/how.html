@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How PatchPilot Works</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
 <meta name="description" content="Inside the PatchPilot agent: nine stages, three Nemotron models, one rule: nothing ships until the tests pass.">
 <meta property="og:title" content="How PatchPilot Works">
 <meta property="og:description" content="Inside the PatchPilot agent: nine stages, three Nemotron models, one rule: nothing ships until the tests pass.">
@@ -28,15 +27,15 @@
 
 <div class="wrap">
   <div class="arch">
-    <div class="astep rv" style="--c:var(--muted)"><div class="num" aria-hidden="true">🔌</div><div class="body"><h3>Connect</h3><p>Resolves the Nemotron model for each tier from the provider's <code>/models</code> catalog, or uses the ones pinned with <code>MODEL_*</code>.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--muted)"><div class="num" aria-hidden="true">🔌</div><div class="body"><h3>Connect</h3><p>Resolves the Nemotron model for each tier from the provider's <code>/models</code> catalog, or uses the ones pinned with <code>MODEL_*</code>.</p></div></div>
     <div class="astep rv"><div class="num" aria-hidden="true">📦</div><div class="body"><h3>Check out</h3><p>Copies a demo case or clones a public GitHub repo with a pinned <code>requirements.txt</code> and a pytest suite.</p></div></div>
-    <div class="astep rv" style="--c:var(--bad)"><div class="num" aria-hidden="true">🛰️</div><div class="body"><h3>Scan <span class="chip chip-bad">OSV.dev</span></h3><p>Every pinned package is queried against the open-source vulnerability database for real CVEs and GHSAs.</p></div></div>
-    <div class="astep rv" style="--c:var(--nano)"><div class="num" aria-hidden="true">⚡</div><div class="body"><h3>Triage <span class="chip nano">nano</span></h3><p>Decides which advisories your code actually reaches, so the plan focuses on what matters.</p></div></div>
-    <div class="astep rv" style="--c:var(--tavily)"><div class="num" aria-hidden="true">🔎</div><div class="body"><h3>Research <span class="chip chip-tavily">Tavily</span></h3><p>Searches for changelogs and migration guides for each upgrade. The sources are kept as evidence.</p></div></div>
-    <div class="astep rv" style="--c:var(--super)"><div class="num" aria-hidden="true">🧭</div><div class="body"><h3>Plan <span class="chip super">super</span></h3><p>Picks the safe target version for each package and flags breaking upgrades.</p></div></div>
-    <div class="astep rv" style="--c:var(--info)"><div class="num" aria-hidden="true">🧪</div><div class="body"><h3>Upgrade &amp; test</h3><p>Installs the new versions in an isolated venv and runs your pytest suite.</p></div></div>
-    <div class="astep rv" style="--c:var(--ultra)"><div class="num" aria-hidden="true">🛠️</div><div class="body"><h3>Repair <span class="chip super">super</span> → <span class="chip ultra">ultra</span></h3><p>Failures go back to Super with the stack trace. If it keeps failing, the job escalates to Ultra, up to <code>MAX_FIX_ATTEMPTS</code>.</p></div></div>
-    <div class="astep rv" style="--c:var(--ok)"><div class="num" aria-hidden="true">🚀</div><div class="body"><h3>Pull request</h3><p>Green tests produce the diff, the cited evidence and a PR description, and a real GitHub PR if <code>GITHUB_TOKEN</code> is set.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--bad)"><div class="num" aria-hidden="true">🛰️</div><div class="body"><h3>Scan <span class="chip chip-bad">OSV.dev</span></h3><p>Every pinned package is queried against the open-source vulnerability database for real CVEs and GHSAs.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--nano)"><div class="num" aria-hidden="true">⚡</div><div class="body"><h3>Triage <span class="chip nano">nano</span></h3><p>Decides which advisories your code actually reaches, so the plan focuses on what matters.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--tavily)"><div class="num" aria-hidden="true">🔎</div><div class="body"><h3>Research <span class="chip chip-tavily">Tavily</span></h3><p>Searches for changelogs and migration guides for each upgrade. The sources are kept as evidence.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--super)"><div class="num" aria-hidden="true">🧭</div><div class="body"><h3>Plan <span class="chip super">super</span></h3><p>Picks the safe target version for each package and flags breaking upgrades.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--info)"><div class="num" aria-hidden="true">🧪</div><div class="body"><h3>Upgrade &amp; test</h3><p>Installs the new versions in an isolated venv and runs your pytest suite.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--ultra)"><div class="num" aria-hidden="true">🛠️</div><div class="body"><h3>Repair <span class="chip super">super</span> → <span class="chip ultra">ultra</span></h3><p>Failures go back to Super with the stack trace. If it keeps failing, the job escalates to Ultra, up to <code>MAX_FIX_ATTEMPTS</code>.</p></div></div>
+    <div class="astep rv" data-css="--c:var(--ok)"><div class="num" aria-hidden="true">🚀</div><div class="body"><h3>Pull request</h3><p>Green tests produce the diff, the cited evidence and a PR description, and a real GitHub PR if <code>GITHUB_TOKEN</code> is set.</p></div></div>
   </div>
 
   <section class="sec pb-40">

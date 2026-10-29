@@ -9,7 +9,7 @@
     const list = runs.filter((r) => filter === "all" || (filter === "ok" ? r.ok === true : r.ok !== true));
     document.getElementById("runs").innerHTML = list.length ? list.map((r, i) => {
       const st = r.ok === true ? ["ok", "secured"] : r.ok === false ? ["bad", "review"] : ["na", "incomplete"];
-      return `<a class="run spot rv" style="--d:${Math.min(i, 8) * .04}s" href="/console?replay=${encodeURIComponent(r.id)}">
+      return `<a class="run spot rv" data-css="--d:${Math.min(i, 8) * .04}s" href="/console?replay=${encodeURIComponent(r.id)}">
         <div class="top"><span class="status ${st[0]}">${st[1]}</span><span class="go">Replay <span aria-hidden="true">▶</span></span></div>
         <code>${esc(r.repo)}</code><span class="id">${esc(when(r.id))} · ${esc(r.id.slice(-4))}</span></a>`;
     }).join("") : runs.length ? '<div class="empty span-all">No runs match this filter.</div>'
@@ -46,7 +46,7 @@
     const rows = TIERS.map((t, i) => {
       const w = Math.max(vals[i] ? 2 : 0, (vals[i] / max) * bw), y = i * rowH;
       return `<g><text x="0" y="${y + 17}">${t}</text><rect class="track" x="${x0}" y="${y + 5}" width="${bw}" height="16" rx="4"/>
-        <rect x="${x0}" y="${y + 5}" width="${w.toFixed(1)}" height="16" rx="4" style="fill:var(--${t})"/>
+        <rect x="${x0}" y="${y + 5}" width="${w.toFixed(1)}" height="16" rx="4" data-css="fill:var(--${t})"/>
         <text class="v" x="${W}" y="${y + 17}" text-anchor="end">${fmtv(vals[i])}</text></g>`;
     }).join("");
     const label = `${title}: ` + TIERS.map((t, i) => `${t} ${fmtv(vals[i])}${unit}`).join(", ");

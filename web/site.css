@@ -177,3 +177,9 @@
 }
 .filters [role="group"] { display: contents; }
 .chip-bad { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); } .chip-tavily { background: color-mix(in srgb, var(--tavily) 20%, transparent); color: var(--tavily); }
+
+/* Global reduced-motion guard: no animations or transitions anywhere when the user asks for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

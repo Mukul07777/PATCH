@@ -54,7 +54,7 @@ Given a Python repo (pinned `requirements.txt` + pytest suite), PatchPilot:
 ## What's next
 - A full recorded benchmark run on **Nebius Token Factory** (ids pinned in `.env.example`, still to be verified), with a per-tier latency/cost table.
 - NVIDIA content-safety gate (`patchpilot/guard.py`, in progress): an AST screen plus `nemotron-3.5-content-safety` that screens AI-written code before it runs.
-- One real PR on a public repo (shortlist: greyli/bluelog, todoism, sayhello, hack4impact/flask-base).
+- <!-- TODO(owner): one real PR on a public repo; add the PR link here once it exists, or delete this line. -->
 - Re-run the 6-case benchmark with curated proofs and publish the results table.
 - npm support (feasibility done: jsonwebtoken 8.5.1 → 9.0.0, CVE-2022-23540).
 - Container sandbox. Today the venv is **not a security boundary**.

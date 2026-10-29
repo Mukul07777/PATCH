@@ -259,8 +259,10 @@ def test_no_inline_scripts_or_handlers():
 def test_markdown_link_sanitizer():
     js = r"""
     global.window={};global.location={pathname:"/"};
-    global.document={getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],addEventListener(){}};
+    global.document={getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],addEventListener(){},
+      documentElement:{nodeType:1,hasAttribute:()=>false,querySelectorAll:()=>[],dataset:{}}};
     global.fetch=()=>Promise.reject(new Error("x"));global.IntersectionObserver=class{observe(){}};
+    global.MutationObserver=class{observe(){}};
     require(process.argv[1]);
     const e=window.ppEsc,l=(a,b)=>window.ppMdLink(e(a),e(b));
     console.log(JSON.stringify([l("x","javascript:alert(1)"),l("y","https://ok.dev/a"),e(`<'">&`)]));
@@ -270,3 +272,61 @@ def test_markdown_link_sanitizer():
     assert "<a" not in bad
     assert good == '<a href="https://ok.dev/a" target="_blank" rel="noopener">y</a>'
     assert escaped == "&lt;&#39;&quot;&gt;&amp;"
+
+
+# ---------- round 3: HEAD, robots.txt, org reason, inline-style-free CSP ----------
+@pytest.mark.parametrize("url", ["/api/health", "/api/runs"])
+def test_head_supported(client, url):
+    r = client.head(url)
+    assert r.status_code == 200 and r.content == b""
+    assert client.get(url).status_code == 200
+
+
+def test_robots_txt(client):
+    r = client.get("/robots.txt")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/plain")
+    assert r.text == "User-agent: *\nAllow: /\n"
+    assert client.head("/robots.txt").status_code == 200
+
+
+@respx.mock
+def test_org_reason_no_python_repos(client):
+    respx.get(GH).mock(return_value=httpx.Response(200, json=[]))
+    body = client.get("/api/org/acme").json()
+    assert body["scanned"] == 0 and body["reason"] == "no public python repos"
+
+
+@respx.mock
+def test_org_reason_no_requirements_and_clean(client, monkeypatch):
+    monkeypatch.setattr(server.sources, "osv_vulns", lambda p, v: [])
+    respx.get(GH).mock(return_value=httpx.Response(200, json=[_repo("a")]))
+    respx.get(RAW.format("a")).mock(return_value=httpx.Response(404))
+    assert client.get("/api/org/acme").json()["reason"] == "no requirements.txt found"
+    server._org_cache.clear()
+    respx.get(RAW.format("a")).mock(return_value=httpx.Response(200, text="flask==1.0\n"))
+    assert client.get("/api/org/acme").json()["reason"] is None
+
+
+@respx.mock
+def test_org_reason_rate_limited(client):
+    respx.get(GH).mock(return_value=httpx.Response(403, headers={"X-RateLimit-Remaining": "0"}))
+    r = client.get("/api/org/acme")
+    assert r.status_code == 429 and "rate limit" in r.json()["detail"].lower()
+
+
+def test_csp_and_markup_have_no_inline_styles():
+    assert "unsafe-inline" not in server.CSP
+    for f in WEB.iterdir():
+        if f.suffix in (".html", ".js"):
+            text = f.read_text(encoding="utf-8")
+            assert " style=\"" not in text and "<style" not in text, f.name
+            if f.suffix == ".html":
+                assert 'href="data:image' not in text, f.name
+
+
+def test_debate_tier_is_allow_listed():
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    i = js.index("function renderDebate")
+    body = js[i:js.index("\n}\n", i)]
+    assert "TIERS.includes(p.tier)" in body and "${p.tier}" not in body
+    assert "(p.files || [])" in body and "esc(String(p.attempt))" in body

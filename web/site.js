@@ -5,6 +5,25 @@ window.ppEsc = ppEsc;
 // `label` and `url` must already be HTML-escaped.
 window.ppMdLink = (label, url) => /^https?:\/\//i.test(url) ? `<a href="${url}" target="_blank" rel="noopener">${label}</a>` : `${label} (${url})`;
 
+// The CSP has no style-src 'unsafe-inline', so markup carries per-element custom properties as
+// data-css="--k:v;..." and they are applied here through the CSSOM (allowed under CSP), including for HTML injected later.
+(() => {
+  const apply = (el) => {
+    el.getAttribute("data-css").split(";").forEach((d) => {
+      const i = d.indexOf(":");
+      if (i > 0) el.style.setProperty(d.slice(0, i).trim(), d.slice(i + 1).trim());
+    });
+    el.removeAttribute("data-css");
+  };
+  const scan = (n) => {
+    if (n.nodeType !== 1) return;
+    if (n.hasAttribute("data-css")) apply(n);
+    n.querySelectorAll("[data-css]").forEach(apply);
+  };
+  scan(document.documentElement);
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(scan))).observe(document.documentElement, { childList: true, subtree: true });
+})();
+
 (() => {
   const PAGES = [["/", "Home"], ["/console", "Console"], ["/runs", "Runs"], ["/org", "Org scan"], ["/how", "How it works"]];
   const path = location.pathname.replace(/\/$/, "") || "/";

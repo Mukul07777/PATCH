@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PatchPilot</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%2376b900'/></svg>">
 <meta name="description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
 <meta property="og:title" content="PatchPilot">
 <meta property="og:description" content="Autonomous security-upgrade agent powered by NVIDIA Nemotron. Finds CVEs, upgrades dependencies, rewrites code until tests pass.">
@@ -17,149 +16,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/site.css">
-<style>
-  /* Landing is always dark: editorial monochrome + one iridescent object. */
-  body { background: #050505; color: #f2f2f0; }
-  .bg-grid, .bg-glow { display: none; }
-  #theme { display: none; }
-  .ink { --line: rgba(255,255,255,.1); }
-  .disp { font-family: Archivo, Inter, sans-serif; font-weight: 900; letter-spacing: -.04em; text-transform: uppercase; }
-  .over { font: 700 11px var(--mono); letter-spacing: .2em; text-transform: uppercase; color: #8a8a86; }
-  .rule { display: block; width: 34px; height: 2px; background: #f2f2f0; margin-top: 14px; }
-
-  .utility { display: flex; justify-content: space-between; padding: 9px 28px; font: 700 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; background: #000; color: #a8a8a4; border-bottom: 1px solid rgba(255,255,255,.08); }
-  .utility a { color: inherit; text-decoration: none; margin-left: 18px; } .utility a:hover { color: #fff; }
-
-  /* ---------- hero ---------- */
-  .stage { position: relative; height: calc(100vh - 100px); min-height: 640px; overflow: hidden; isolation: isolate; }
-  .stage .word { position: absolute; left: 0; right: 0; top: 30%; transform: translateY(-46%); text-align: center; font-size: clamp(64px, 11vw, 190px); line-height: .8; z-index: 1; white-space: nowrap; color: #f2f2f0; }
-  .stage .word span { display: inline-block; animation: drop 1.1s cubic-bezier(.2,.9,.1,1) both; }
-  .stage .word span:nth-child(2) { animation-delay: .06s } .stage .word span:nth-child(3) { animation-delay: .12s }
-  .stage .word span:nth-child(4) { animation-delay: .18s } .stage .word span:nth-child(5) { animation-delay: .24s }
-  @keyframes drop { from { transform: translateY(40%); opacity: 0; filter: blur(12px); } }
-  .headline { position: absolute; z-index: 4; left: 50%; top: 50%; transform: translateX(-50%); width: min(980px, calc(100% - 40px)); text-align: center; animation: fade 1s .4s both; }
-  .headline h2 { font: 800 clamp(26px, 3.4vw, 46px)/1.12 Archivo, Inter, sans-serif; letter-spacing: -.02em; color: #f2f2f0; margin: 0 0 14px; text-transform: none; }
-  .headline h2 em { font-style: normal; color: var(--accent-2); }
-  .headline p { color: #a8a8a4; font-size: clamp(14px, 1.25vw, 17px); max-width: 64ch; margin: 0 auto; }
-  .stage .vignette { position: absolute; inset: 0; z-index: 3; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 55%, #050505 100%); }
-  .corner { position: absolute; z-index: 4; animation: fade 1s .8s both; }
-  .c-tl { top: 40px; left: 28px; } .c-tl p { font: 700 13px/1.6 var(--mono); letter-spacing: .1em; text-transform: uppercase; margin: 0; }
-  .c-tr { top: 40px; right: 28px; text-align: right; }
-  .c-tr b, .c-l b { display: block; font: 800 30px Archivo; letter-spacing: -.03em; }
-  .c-tr small, .c-l small { color: #8a8a86; font-size: 12px; }
-  .c-l { left: 28px; top: 52%; }
-  .c-bl { bottom: 40px; left: 28px; display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
-  .c-br { bottom: 40px; right: 28px; text-align: right; font: 700 13px/1.6 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
-  .c-br .rule { margin-left: auto; }
-  .btn-solid { display: inline-flex; align-items: center; gap: 10px; background: #f2f2f0; color: #050505; text-decoration: none; padding: 16px 26px; font: 800 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; transition: background .25s, transform .25s; }
-  .btn-solid:hover { background: var(--accent-2); transform: translateY(-2px); }
-  .btn-text { color: #f2f2f0; text-decoration: none; font: 700 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; border-bottom: 1px solid #f2f2f0; padding: 4px 0; display: inline-flex; gap: 10px; }
-  .btn-text:hover { color: var(--accent-2); border-color: var(--accent-2); }
-  .scroll-cue { position: absolute; bottom: 18px; left: 50%; z-index: 4; width: 1px; height: 44px; background: linear-gradient(#f2f2f0, transparent); animation: cue 2s infinite; }
-  @keyframes cue { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
-
-  /* ---------- proof stats ---------- */
-  .stats { display: grid; grid-template-columns: repeat(var(--n, 4), 1fr); background: #000; border-top: 1px solid rgba(255,255,255,.08); }
-  .stats[hidden] { display: none; }
-  .stats > div { padding: 26px 28px; border-right: 1px solid rgba(255,255,255,.08); }
-  .stats > div:last-child { border-right: 0; }
-  .stats b { display: block; font: 900 clamp(30px, 3.2vw, 44px) Archivo; letter-spacing: -.03em; color: #f2f2f0; }
-  .stats b small { font-size: .5em; color: #8a8a86; margin-left: 4px; }
-  .stats span { color: #8a8a86; font: 700 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-  .stats-note { grid-column: 1 / -1; padding: 0 28px 16px; color: #8a8a86; font: 11px var(--mono); }
-  /* ---------- feature strip ---------- */
-  .strip { display: grid; grid-template-columns: repeat(4, 1fr); background: #000; border-block: 1px solid rgba(255,255,255,.08); }
-  .strip > div { padding: 34px 28px 30px; border-right: 1px solid rgba(255,255,255,.08); position: relative; overflow: hidden; min-height: 250px; display: flex; flex-direction: column; }
-  .strip > div:last-child { border-right: 0; }
-  .strip > div::after { content: ""; position: absolute; left: -20%; right: -20%; bottom: -60%; height: 90%; background: radial-gradient(closest-side, var(--g), transparent); opacity: .25; transition: opacity .5s, transform .5s; }
-  .strip > div:hover::after { opacity: .6; transform: translateY(-14%); }
-  .strip .ic { font-size: 26px; margin-bottom: 18px; }
-  .strip h3 { font: 800 15px Archivo; letter-spacing: .04em; text-transform: uppercase; margin: 0 0 8px; }
-  .strip p { color: #9a9a96; margin: 0 0 18px; font-size: 14px; max-width: 30ch; }
-  .strip a { margin-top: auto; color: #f2f2f0; font: 700 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; text-decoration: none; position: relative; z-index: 1; }
-  .strip a:hover { color: var(--accent-2); }
-
-  /* ---------- story ---------- */
-  .story { display: grid; grid-template-columns: 1fr 1.1fr; min-height: 640px; background: linear-gradient(90deg, #0d0d0d, #1a1a19); align-items: center; gap: 40px; padding: 80px 28px 80px 7vw; overflow: hidden; }
-  .story h2 { font-size: clamp(48px, 7vw, 104px); line-height: .92; margin: 18px 0 26px; color: #f2f2f0; text-transform: uppercase; letter-spacing: -.04em; }
-  .story h2 span { display: block; } .story h2 span:nth-child(2) { color: transparent; -webkit-text-stroke: 1.5px #f2f2f0; }
-  .story p { color: #a8a8a4; max-width: 44ch; font-size: 15px; margin: 0 0 30px; }
-  .story .demo .win { transform: perspective(1400px) rotateY(-10deg) rotateX(3deg); box-shadow: 0 60px 120px -40px rgba(255,120,60,.35), 0 40px 80px -40px rgba(120,90,255,.4); }
-  .story .demo:hover .win { transform: none; }
-
-  /* ---------- icon row ---------- */
-  .icons { display: grid; grid-template-columns: repeat(5, 1fr); padding: 40px 28px; border-bottom: 1px solid rgba(255,255,255,.08); }
-  .icons > div { display: flex; gap: 14px; align-items: flex-start; padding: 0 22px; border-right: 1px solid rgba(255,255,255,.08); }
-  .icons > div:last-child { border-right: 0; }
-  .icons .ic { font-size: 22px; line-height: 1; }
-  .icons b { display: block; font: 800 11px var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 4px; }
-  .icons span { color: #8a8a86; font-size: 12.5px; }
-
-  /* ---------- tiers as "editions" ---------- */
-  .editions { padding: 70px 28px 90px; max-width: 1440px; margin: 0 auto; }
-  .ed-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 26px; }
-  .ed-head h2 { font: 900 22px Archivo; letter-spacing: .02em; text-transform: uppercase; color: #f2f2f0; margin: 0; }
-  .ed-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-  .ed { background: #0e0e0e; border: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; transition: transform .4s cubic-bezier(.2,.8,.2,1), border-color .4s; }
-  .ed:hover { transform: translateY(-8px); border-color: rgba(255,255,255,.3); }
-  .ed .art { height: 210px; position: relative; overflow: hidden; background: #000; }
-  .ed .art i { position: absolute; inset: 18% 22%; border-radius: 50%; filter: blur(4px); background: conic-gradient(from var(--a, 0deg), var(--c1), var(--c2), var(--c3), var(--c1)); animation: spinA 8s linear infinite, morph 9s ease-in-out infinite; box-shadow: 0 0 80px -10px var(--c1); }
-  .ed .art i::after { content: ""; position: absolute; inset: 9%; border-radius: inherit; background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.14), #050505 60%); }
-  .ed .art .tag { position: absolute; top: 12px; left: 12px; z-index: 1; background: #f2f2f0; color: #050505; font: 800 9px var(--mono); letter-spacing: .14em; padding: 4px 8px; text-transform: uppercase; }
-  @property --a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
-  @keyframes spinA { to { --a: 360deg; } }
-  @keyframes morph { 0%,100% { border-radius: 52% 48% 41% 59% / 46% 55% 45% 54%; } 33% { border-radius: 38% 62% 56% 44% / 59% 41% 59% 41%; } 66% { border-radius: 60% 40% 47% 53% / 40% 60% 40% 60%; } }
-  .ed .body { padding: 22px; display: flex; flex-direction: column; flex: 1; }
-  .ed h3 { font: 800 15px Archivo; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 10px; }
-  .ed ul { list-style: none; margin: 0 0 22px; padding: 0; color: #9a9a96; font-size: 13px; line-height: 1.8; }
-  .ed .row { margin-top: auto; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-  .ed .row b { font: 800 18px Archivo; }
-  .ed .row a { color: #f2f2f0; border: 1px solid rgba(255,255,255,.4); padding: 9px 14px; font: 700 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; text-decoration: none; transition: background .2s, color .2s; }
-  .ed .row a:hover { background: #f2f2f0; color: #050505; }
-
-  /* ---------- footer ---------- */
-  .bigfoot { background: #000; border-top: 1px solid rgba(255,255,255,.08); padding: 56px 28px 26px; display: grid; grid-template-columns: 1.4fr repeat(3, 1fr) 1.4fr; gap: 30px; }
-  .bigfoot .logo { font: 900 40px Archivo; letter-spacing: -.02em; line-height: .9; }
-  .bigfoot .logo small { display: block; font: 700 10px var(--mono); letter-spacing: .4em; margin-top: 6px; color: #8a8a86; }
-  .bigfoot p { color: #8a8a86; font-size: 13px; }
-  .bigfoot h4 { font: 800 11px var(--mono); letter-spacing: .16em; text-transform: uppercase; margin: 6px 0 14px; }
-  .bigfoot a { display: block; color: #8a8a86; text-decoration: none; font-size: 13px; margin-bottom: 8px; } .bigfoot a:hover { color: #fff; }
-  .bigfoot form { display: flex; border: 1px solid rgba(255,255,255,.15); }
-  .bigfoot input { background: transparent; border: 0; border-radius: 0; color: #fff; padding: 12px; }
-  .bigfoot button { background: #f2f2f0; border: 0; padding: 0 16px; cursor: pointer; font-weight: 800; }
-  .copy a { display: inline; margin: 0 0 0 18px; } .copy nav { display: inline; }
-  #typed .caret { display: inline-block; width: 8px; height: 14px; background: #9be22d; }
-  .copy { grid-column: 1 / -1; text-align: center; color: #8a8a86; font-size: 11px; border-top: 1px solid rgba(255,255,255,.06); padding-top: 22px; margin-top: 10px; }
-
-  @media (max-width: 1000px) {
-    .strip, .ed-grid { grid-template-columns: repeat(2, 1fr); }
-    .strip > div:nth-child(2) { border-right: 0; }
-    .story { grid-template-columns: 1fr; padding: 70px 20px; }
-    .icons { grid-template-columns: repeat(2, 1fr); gap: 24px 0; }
-    .icons > div:nth-child(2n) { border-right: 0; }
-    .bigfoot { grid-template-columns: 1fr 1fr; }
-  }
-  @media (max-width: 640px) {
-    .utility span:first-child { display: none; }
-    .utility { justify-content: center; padding-inline: 16px; } .utility a:first-child { margin-left: 0; }
-    .stage { height: 86vh; min-height: 560px; }
-    .stage .word { font-size: 22vw; top: 20%; }
-    .headline { top: 34%; }
-    .c-tl, .c-tr { display: none; }
-    .c-tl, .c-l { left: 16px; } .c-tr { right: 16px; } .c-l { display: none; }
-    .c-bl { left: 16px; right: 16px; bottom: 30px; } .c-br { display: none; }
-    .c-tr b { font-size: 22px; }
-    .strip, .ed-grid, .icons, .bigfoot { grid-template-columns: 1fr; }
-    .stats { grid-template-columns: 1fr 1fr; } .stats > div { padding: 18px 16px; border-bottom: 1px solid rgba(255,255,255,.08); } .stats > div:nth-child(2n) { border-right: 0; } .stats-note { padding-inline: 16px; }
-    .strip > div, .icons > div { border-right: 0; border-bottom: 1px solid rgba(255,255,255,.08); }
-    .icons > div { padding: 16px 0; }
-    .editions { padding-inline: 16px; }
-    .ed-head { flex-direction: column; gap: 6px; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .stage .word span, .corner, .ed .art i, .scroll-cue { animation: none !important; }
-  }
-</style>
+<link rel="stylesheet" href="/static/landing.css">
 </head>
 <body class="ink">
 <div class="utility"><span>Find the CVE. Fix the code. Ship the PR.</span><span><a href="/console">Launch agent</a><a href="/runs">Run log</a><a href="/how">Help</a></span></div>
@@ -189,10 +46,10 @@
 
 <!-- FEATURE STRIP -->
 <section class="strip">
-  <div class="rv" style="--g:#ff5a3d"><span class="ic" aria-hidden="true">🛰️</span><h3>Scan the threat</h3><p>Every pinned dependency is checked against OSV.dev, and a threat clock shows how long each CVE has been public.</p><a href="/how">Explore pipeline <span aria-hidden="true">→</span></a></div>
-  <div class="rv" style="--g:#4cc2ff;--d:.08s"><span class="ic" aria-hidden="true">🔎</span><h3>Predict the break</h3><p>Drift radar diffs the old and new library APIs and predicts which of your lines will break. Tavily cites the migration guide.</p><a href="/how">See evidence <span aria-hidden="true">→</span></a></div>
-  <div class="rv" style="--g:#b98cff;--d:.16s"><span class="ic" aria-hidden="true">🛠️</span><h3>Fix, then attack</h3><p>Nemotron patches breaking call-sites, then a red team fires exploit variants at the fix.</p><a href="/console">Watch it work <span aria-hidden="true">→</span></a></div>
-  <div class="rv" style="--g:#76b900;--d:.24s"><span class="ic" aria-hidden="true">🚀</span><h3>Ship with proof</h3><p>No PR leaves until your tests are green, and every claim it makes is in a signed proof certificate.</p><a href="/runs">View runs <span aria-hidden="true">→</span></a></div>
+  <div class="rv" data-css="--g:#ff5a3d"><span class="ic" aria-hidden="true">🛰️</span><h3>Scan the threat</h3><p>Every pinned dependency is checked against OSV.dev, and a threat clock shows how long each CVE has been public.</p><a href="/how">Explore pipeline <span aria-hidden="true">→</span></a></div>
+  <div class="rv" data-css="--g:#4cc2ff;--d:.08s"><span class="ic" aria-hidden="true">🔎</span><h3>Predict the break</h3><p>Drift radar diffs the old and new library APIs and predicts which of your lines will break. Tavily cites the migration guide.</p><a href="/how">See evidence <span aria-hidden="true">→</span></a></div>
+  <div class="rv" data-css="--g:#b98cff;--d:.16s"><span class="ic" aria-hidden="true">🛠️</span><h3>Fix, then attack</h3><p>Nemotron patches breaking call-sites, then a red team fires exploit variants at the fix.</p><a href="/console">Watch it work <span aria-hidden="true">→</span></a></div>
+  <div class="rv" data-css="--g:#76b900;--d:.24s"><span class="ic" aria-hidden="true">🚀</span><h3>Ship with proof</h3><p>No PR leaves until your tests are green, and every claim it makes is in a signed proof certificate.</p><a href="/runs">View runs <span aria-hidden="true">→</span></a></div>
 </section>
 
 <!-- STORY -->
@@ -203,7 +60,7 @@
     <p>Security PRs rot because version bumps break builds. PatchPilot doesn't stop at the bump: it runs your tests, reads the failures, patches the code and escalates to a bigger model until everything passes.</p>
     <a class="btn-solid" href="/how">Discover the agent</a>
   </div>
-  <div class="demo rv" style="--d:.1s">
+  <div class="demo rv" data-css="--d:.1s">
     <div class="win">
       <div class="win-bar"><i></i><i></i><i></i><span>patchpilot run case:authsvc · demo</span></div>
       <pre id="typed"></pre>
@@ -214,20 +71,20 @@
 <!-- ICON ROW -->
 <section class="icons">
   <div class="rv"><span class="ic" aria-hidden="true">⏱️</span><div><b>Threat clock</b><span>How long each CVE has been exploitable</span></div></div>
-  <div class="rv" style="--d:.05s"><span class="ic" aria-hidden="true">📡</span><div><b>Drift radar</b><span>Predicts which lines an upgrade breaks</span></div></div>
-  <div class="rv" style="--d:.1s"><span class="ic" aria-hidden="true">🗡️</span><div><b>Red team</b><span>Attack variants fired at every fix</span></div></div>
-  <div class="rv" style="--d:.15s"><span class="ic" aria-hidden="true">📜</span><div><b>Proof certificate</b><span>Every PR claim verified and hashed</span></div></div>
-  <div class="rv" style="--d:.2s"><span class="ic" aria-hidden="true">⏪</span><div><b>Full replay</b><span>Audit any run, event by event</span></div></div>
+  <div class="rv" data-css="--d:.05s"><span class="ic" aria-hidden="true">📡</span><div><b>Drift radar</b><span>Predicts which lines an upgrade breaks</span></div></div>
+  <div class="rv" data-css="--d:.1s"><span class="ic" aria-hidden="true">🗡️</span><div><b>Red team</b><span>Attack variants fired at every fix</span></div></div>
+  <div class="rv" data-css="--d:.15s"><span class="ic" aria-hidden="true">📜</span><div><b>Proof certificate</b><span>Every PR claim verified and hashed</span></div></div>
+  <div class="rv" data-css="--d:.2s"><span class="ic" aria-hidden="true">⏪</span><div><b>Full replay</b><span>Audit any run, event by event</span></div></div>
 </section>
 
 <!-- TIERS -->
 <section class="editions">
   <div class="ed-head"><h2>Choose your model</h2><span class="over">Routed automatically per job</span></div>
   <div class="ed-grid">
-    <div class="ed rv" style="--c1:#4cc2ff;--c2:#1e5bff;--c3:#9be8ff"><div class="art"><i></i></div><div class="body"><h3>Nemotron Nano</h3><ul><li>Advisory triage</li><li>Reachability checks</li><li>Fastest tier</li></ul><div class="row"><b>Triage</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" style="--c1:#b98cff;--c2:#ff5a8a;--c3:#6b4bff;--d:.08s"><div class="art"><span class="tag">Workhorse</span><i></i></div><div class="body"><h3>Nemotron Super</h3><ul><li>Upgrade planning</li><li>First-pass patches</li><li>Repair loop</li></ul><div class="row"><b>Plan + fix</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" style="--c1:#ff7a2f;--c2:#ff2f6d;--c3:#ffd23f;--d:.16s"><div class="art"><i></i></div><div class="body"><h3>Nemotron Ultra</h3><ul><li>Hard failures only</li><li>Deep stack-trace reasoning</li><li>Escalation tier</li></ul><div class="row"><b>Escalate</b><a href="/how">Details</a></div></div></div>
-    <div class="ed rv" style="--c1:#76b900;--c2:#3ce39b;--c3:#d4ff3a;--d:.24s"><div class="art"><span class="tag">Full pipeline</span><i></i></div><div class="body"><h3>All three, routed</h3><ul><li>Cheapest model per step</li><li>Auto-escalation</li><li>Verified PR</li></ul><div class="row"><b>PatchPilot</b><a href="/console">Launch</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#4cc2ff;--c2:#1e5bff;--c3:#9be8ff"><div class="art"><i></i></div><div class="body"><h3>Nemotron Nano</h3><ul><li>Advisory triage</li><li>Reachability checks</li><li>Fastest tier</li></ul><div class="row"><b>Triage</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#b98cff;--c2:#ff5a8a;--c3:#6b4bff;--d:.08s"><div class="art"><span class="tag">Workhorse</span><i></i></div><div class="body"><h3>Nemotron Super</h3><ul><li>Upgrade planning</li><li>First-pass patches</li><li>Repair loop</li></ul><div class="row"><b>Plan + fix</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#ff7a2f;--c2:#ff2f6d;--c3:#ffd23f;--d:.16s"><div class="art"><i></i></div><div class="body"><h3>Nemotron Ultra</h3><ul><li>Hard failures only</li><li>Deep stack-trace reasoning</li><li>Escalation tier</li></ul><div class="row"><b>Escalate</b><a href="/how">Details</a></div></div></div>
+    <div class="ed rv" data-css="--c1:#76b900;--c2:#3ce39b;--c3:#d4ff3a;--d:.24s"><div class="art"><span class="tag">Full pipeline</span><i></i></div><div class="body"><h3>All three, routed</h3><ul><li>Cheapest model per step</li><li>Auto-escalation</li><li>Verified PR</li></ul><div class="row"><b>PatchPilot</b><a href="/console">Launch</a></div></div></div>
   </div>
 </section>
 </main>
