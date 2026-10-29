@@ -41,3 +41,7 @@
 - Launched researcher round 3 (angle: real public GitHub repos for the benchmark).
 - Past angles: [1] papers/pain/data/winners, [2] pitch/Q&A/NAT/Nebius/video.
 - 12:55 Researcher round 3 relaunched READ-ONLY: cloning/running third-party repos was blocked by the permission system (correctly). Running real public repos through the agent needs the owner's explicit approval → noted for owner.
+
+## 2026-10-29 ~13:05 — exploit curator
+- Curated, verified proofs: urllib3 CVE-2024-37891 (old 1 failed → new 1 passed; variants old 4 failed/3 passed → new 7 passed), Jinja2 CVE-2024-22195 (old 1 failed → new 1 passed; 8/8 variants FAIL→PASS).
+- Fixes the weak generated proofs on fetcher and mailer. Re-run of those cases queued for when quota resets.
