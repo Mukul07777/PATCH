@@ -71,3 +71,7 @@
 - vex.py: OpenVEX v0.2.0 per run (fixed / affected / not_affected only from real static evidence, never llm-inferred); GET /api/runs/{id}/vex. Nebius ids pinned in .env.example (marked verify). 33 tests pass (verified).
 - Note: OpenVEX field validation is from the builder's knowledge, spec page not fetched; flagged for check.
 - Launched SPEED builder (research-4 plan).
+
+## 2026-10-29 ~14:10 — research round 3 (real public repos, read-only)
+- research-3.md: 8 qualifying repos; shortlist greyli/bluelog, todoism, sayhello, hack4impact/flask-base. Running them needs owner approval → docs/team/OWNER-DECISIONS.md.
+- Launched scorer round 2 (builds since round 1: self-tests, reachability, trust check, OpenVEX, 7 curated proofs).
