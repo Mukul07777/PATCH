@@ -19,6 +19,11 @@
 <header class="topbar"></header>
 
 <main>
+  <section class="story-bar card glass" id="storyBar" hidden aria-live="polite">
+    <div class="sb-head"><span class="chip ultra">Guided demo</span><b id="sbTitle">Find</b><button class="btn ghost" type="button" id="sbExit">Exit demo</button></div>
+    <ol class="sb-steps" id="sbSteps"></ol>
+    <p class="sb-cap" id="sbCap"></p>
+  </section>
   <section class="hero">
     <div class="hero-copy">
       <div class="eyebrow"><span class="live-dot"></span>Mission control · NVIDIA Nemotron · Tavily</div>
@@ -44,11 +49,12 @@
     <div class="launch-row small">
       <select id="history" aria-label="Recorded runs"><option value="">▶ Replay a recorded run…</option></select>
       <button class="btn ghost" type="button" id="replayBtn">Replay</button>
+      <a class="btn ghost" href="/console?demo=1" id="demoBtn">▶ Guided demo</a>
     </div>
   </section>
 
   <section class="graph card glass">
-    <div class="graph-head"><h2>Agent graph</h2><span id="phase" class="phase">idle</span></div>
+    <div class="graph-head"><h2>Agent graph</h2><div class="gh-right"><span class="replay-badge" id="replayBadge" hidden><i></i>LIVE REPLAY</span><button class="btn ghost sm" type="button" id="realBtn" hidden>Run it for real</button><span id="phase" class="phase">idle</span></div></div>
     <svg id="graph" viewBox="0 0 960 250" role="img" aria-label="Live agent graph"></svg>
   </section>
 
@@ -70,15 +76,20 @@
       <nav class="tabs" role="tablist">
         <button class="tab active" data-tab="advisories">Advisories</button>
         <button class="tab" data-tab="terminal">Live terminal</button>
-        <button class="tab" data-tab="evidence">Evidence</button>
         <button class="tab" data-tab="ledger">Certificate</button>
         <button class="tab" data-tab="proof">Proof &amp; risk</button>
         <button class="tab" data-tab="drift">Drift radar</button>
-        <button class="tab" data-tab="reach">Reachability</button>
-        <button class="tab" data-tab="debate">Debate</button>
         <button class="tab" data-tab="diff">Diff</button>
-        <button class="tab" data-tab="report">PR report</button>
-        <button class="tab" data-tab="bench">Benchmarks</button>
+        <div class="more" id="more">
+          <button class="tab more-btn" id="moreBtn" type="button" aria-haspopup="true" aria-expanded="false">More ▾</button>
+          <div class="more-menu" id="moreMenu" role="menu" hidden>
+            <button class="tab" data-tab="evidence" role="menuitem">Evidence</button>
+            <button class="tab" data-tab="reach" role="menuitem">Reachability</button>
+            <button class="tab" data-tab="debate" role="menuitem">Debate</button>
+            <button class="tab" data-tab="report" role="menuitem">PR report</button>
+            <button class="tab" data-tab="bench" role="menuitem">Benchmarks</button>
+          </div>
+        </div>
       </nav>
       <div class="panel active" id="tab-advisories"><div class="empty">Launch the agent to scan dependencies against <b>OSV.dev</b>.</div></div>
       <div class="panel" id="tab-terminal"><pre class="term" id="term"><span class="dim">patchpilot ~ waiting for launch_</span></pre></div>

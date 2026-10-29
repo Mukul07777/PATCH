@@ -12,10 +12,19 @@ const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
 let state, source, selectedCase = "";
 
 // ---------- tabs ----------
-document.querySelectorAll(".tab").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+document.querySelectorAll(".tab[data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+const moreMenu = $("#moreMenu"), moreBtn = $("#moreBtn");
+function setMore(open) { moreMenu.hidden = !open; moreBtn.setAttribute("aria-expanded", String(open)); }
+moreBtn.onclick = (e) => { e.stopPropagation(); setMore(moreMenu.hidden); };
+document.addEventListener("click", (e) => { if (!e.target.closest("#more")) setMore(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") setMore(false); });
 function showTab(name) {
-  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+  const inMore = !!moreMenu.querySelector(`[data-tab="${name}"]`);
+  moreBtn.classList.toggle("active", inMore);
+  moreBtn.textContent = inMore ? `${moreMenu.querySelector(`[data-tab="${name}"]`).textContent} ▾` : "More ▾";
+  setMore(false);
   if (name === "bench") loadBench();
 }
 
@@ -103,7 +112,71 @@ async function boot() {
   const qs = new URLSearchParams(location.search), replay = qs.get("replay");
   if (qs.get("repo")) $("#repo").value = qs.get("repo");
   if (replay) listen(replay, 4);
+  else if (!userStarted) {
+    const best = await pickBestRun(runs);
+    if (best && !userStarted) { if (qs.get("demo")) startDemo(); listen(best, qs.get("demo") ? 8 : 10, { auto: true }); }
+  }
 }
+
+// ---------- auto replay + guided demo ----------
+let userStarted = false, autoReplay = false, demo = null;
+async function runTypes(id) {
+  const txt = await fetch(`/api/runs/${id}/events`).then((r) => r.text()).catch(() => "");
+  const evs = txt.split(/\r?\n/).filter((l) => l.startsWith("data: ")).map((l) => { try { return JSON.parse(l.slice(6)); } catch { return null; } }).filter(Boolean);
+  const trust = evs.find((e) => e.type === "ledger")?.trust || 0;
+  return { size: new Set(evs.map((e) => e.type)).size, trust };
+}
+async function pickBestRun(runs) {
+  const ok = runs.filter((r) => r.ok === true).slice(0, 5);
+  if (!ok.length) return null;
+  // richest run first (most distinct event types), then the strongest certificate, then newest
+  const sizes = await Promise.all(ok.map((r) => runTypes(r.id).then((t) => t.size * 1000 + t.trust)));
+  let best = 0; sizes.forEach((n, i) => { if (n > sizes[best]) best = i; });
+  return ok[best].id;
+}
+function setReplayBadge(on) { autoReplay = on; $("#replayBadge").hidden = !on; $("#realBtn").hidden = !on; }
+$("#realBtn").onclick = () => {
+  if (source) source.close();
+  setReplayBadge(false); stopDemo(); reset(); $("#runBtn").disabled = false;
+  $(".launch").scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+  ($("#repo").disabled ? $("#runBtn") : $("#repo")).focus({ preventScroll: true });
+};
+
+const CHAPTERS = [
+  ["Find", "advisories", "Scanning every pinned dependency against OSV.dev for real, published vulnerabilities."],
+  ["Prioritize", "advisories", "Nemotron Nano ranks the advisories: which are severe, and which your code actually reaches."],
+  ["Predict", "drift", "Before running anything, the drift radar compares old and new library APIs and predicts which of your lines will break."],
+  ["Fix", "terminal", "Upgrading the dependency and running your own tests. When they fail, Nemotron rewrites the code and tries again."],
+  ["Attack", "proof", "The red team fires attack variants at the app to check the hole is really closed, not just hidden."],
+  ["Prove", "ledger", "The exploit that worked before the fix now fails. Every claim the PR makes is checked and signed in a certificate."],
+  ["Ship", "diff", "Tests green, exploit closed: here is the verified patch, ready to open as a pull request."],
+];
+const CHAPTER_OF = { findings: 0, triage: 1, threat: 1, drift: 2, plan: 2, patch: 3, test: 3, redteam: 4, ledger: 5, diff: 6, report: 6, done: 6 };
+function startDemo() {
+  demo = { at: -1 };
+  $("#sbSteps").innerHTML = CHAPTERS.map(([t], i) => `<li id="sb-${i}"><i>${i + 1}.</i> <span>${t}</span></li>`).join("");
+  $("#storyBar").hidden = false; document.body.classList.add("demo"); $("#sbTitle").textContent = "Starting…"; $("#sbCap").textContent = "Replaying a recorded run. Sit back: the console will walk you through it.";
+}
+function stopDemo() { demo = null; $("#storyBar").hidden = true; document.body.classList.remove("demo"); }
+$("#sbExit").onclick = () => stopDemo();
+function storyStep(ev) {
+  if (!demo) return;
+  let c = CHAPTER_OF[ev.type];
+  if (ev.type === "exploit") c = ev.stage === "after" ? 5 : 4;
+  if (c == null || c <= demo.at) return false;
+  demo.at = c;
+  const [title, tab, cap] = CHAPTERS[c];
+  CHAPTERS.forEach((_, i) => { const li = $("#sb-" + i); li.className = i < c ? "done" : i === c ? "on" : ""; });
+  $("#sbTitle").textContent = `${c + 1}/7 · ${title}`;
+  const cp = $("#sbCap"); cp.textContent = cap; cp.classList.remove("fade"); void cp.offsetWidth; if (!reduced) cp.classList.add("fade");
+  showTab(tab);
+  return true;
+}
+if ($("#demoBtn")) $("#demoBtn").onclick = (e) => {
+  e.preventDefault(); userStarted = true;
+  pickBestRun([...$("#history").options].slice(1).map((o) => ({ id: o.value, ok: o.textContent.startsWith("✓") })))
+    .then((best) => { if (!best) return; startDemo(); listen(best, 8, { auto: true }); });
+};
 
 function reset() {
   state = { threat: null, drift: null, exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
@@ -134,21 +207,34 @@ function reset() {
 // ---------- run / replay ----------
 $("#runForm").onsubmit = async (e) => {
   e.preventDefault();
+  userStarted = true; if (source) source.close(); setReplayBadge(false); stopDemo();
   const repo = $("#repo").value.trim() || selectedCase;
   const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo }) });
   if (!r.ok) return banner(esc((await r.json().catch(() => ({}))).detail || "Could not start run"), false);
   listen((await r.json()).id, 0);
 };
-$("#replayBtn").onclick = () => { const id = $("#history").value; if (id) listen(id, 4); };
+$("#replayBtn").onclick = () => { const id = $("#history").value; if (id) { userStarted = true; stopDemo(); listen(id, 4); } };
 
-function listen(id, replay) {
+function listen(id, replay, opts = {}) {
   if (source) source.close();
   reset();
+  setReplayBadge(!!opts.auto);
   $("#runBtn").disabled = true;
   showTab("terminal");
   term("sys", `$ patchpilot run ${id}${replay ? "  --replay" : ""}`);
   source = new EventSource(`/api/runs/${id}/events?replay=${replay}`);
-  source.onmessage = (m) => handle(JSON.parse(m.data));
+  const queue = [], src = source; let pumping = false;
+  const pump = async () => {
+    if (pumping) return; pumping = true;
+    while (queue.length && source === src) {
+      const ev = queue.shift();
+      const advanced = demo ? storyStep(ev) : false;
+      handle(ev);
+      if (advanced && demo) await new Promise((r) => setTimeout(r, 3800)); // let each chapter breathe
+    }
+    pumping = false;
+  };
+  source.onmessage = (m) => { queue.push(JSON.parse(m.data)); pump(); };
   source.onerror = () => { source.close(); $("#runBtn").disabled = false; };
 }
 
@@ -178,12 +264,13 @@ function handle(ev) {
       (ev.evidence || []).forEach((e) => state.evidence.push({ ...e, attempt: ev.attempt, tier: ev.tier }));
       pulse(ev.tier, "sandbox", `var(--${ev.tier})`); renderEvidence(); break;
     case "reach": state.reach = ev.packages; renderReach(); break;
+    case "reachability": state.reachability = ev.advisories; renderReach(); break;
     case "exploit": onExploit(ev); break;
     case "risk": state.risk = ev; renderProof(); break;
     case "redteam": onRedteam(ev); break;
     case "threat": onThreat(ev); break;
     case "drift": onDrift(ev); break;
-    case "ledger": state.ledger = ev; renderLedger(); setTimeout(() => showTab("ledger"), 2600); break;
+    case "ledger": state.ledger = ev; renderLedger(); if (!demo) setTimeout(() => showTab("ledger"), 2600); break;
     case "diff": state.diff = ev.diff; renderDiff(); break;
     case "report": state.report = ev.markdown; renderReport(); break;
     case "error": term("bad", `error › ${ev.msg}`, ev.t); banner(esc(ev.msg), false); phase("error"); break;
@@ -265,7 +352,7 @@ function onDone(ev) {
     term("ok", `✔ secured: ${state.total} advisories cleared in ${fmtTime(ev.seconds || 0)} with ${ev.attempts} repair attempt(s)`);
     const pr = ev.pr ? ` <a href="${esc(ev.pr.url)}" target="_blank" rel="noopener">Open PR ↗</a>` : "";
     banner(`Secured. All tests passing after ${ev.attempts} repair attempt(s).` + pr, true);
-    confetti(); setTimeout(() => showTab("diff"), 1800);
+    confetti(); if (!demo) setTimeout(() => showTab("diff"), 1800);
   } else if (ev.attempts != null) { phase("needs review"); banner("Could not reach green tests. Patch needs human review.", false); }
   $("#term").insertAdjacentHTML("beforeend", '<span class="cursor"></span>');
 }
@@ -356,9 +443,17 @@ function renderLedger() {
 }
 
 function renderReach() {
-  const entries = Object.entries(state.reach);
-  if (!entries.length) return;
-  $("#tab-reach").innerHTML = entries.map(([pkg, hits]) => {
+  const entries = Object.entries(state.reach || {});
+  const adv = Object.entries(state.reachability || {});
+  const cls = { reachable: "rs-hit", imported: "rs-imp", "not reachable": "rs-no", unknown: "rs-unk" };
+  const chips = adv.length ? `<div class="r-adv">${adv.map(([id, r]) => `<div class="r-adv-row">
+      <span class="r-chip ${cls[r.status] || "rs-unk"}">${esc(r.status)}</span><b>${esc(id)}</b>
+      ${r.symbols && r.symbols.length ? `<code>${esc(r.symbols.join(", "))}</code>` : ""}
+      ${r.source === "llm-inferred" ? '<small class="r-src">llm-inferred</small>' : ""}
+      ${r.sites && r.sites.length ? `<small>${r.sites.map(esc).join(" · ")}</small>` : r.note ? `<small class="muted">${esc(r.note)}</small>` : ""}
+    </div>`).join("")}</div>` : "";
+  if (!entries.length && !chips) return;
+  $("#tab-reach").innerHTML = chips + entries.map(([pkg, hits]) => {
     const files = {};
     hits.forEach((h) => { const m = /^(.+?):(\d+): (.*)$/.exec(h); if (m) (files[m[1]] ||= []).push([m[2], m[3]]); });
     const fk = Object.keys(files);
@@ -508,7 +603,7 @@ async function loadBench() {
       <td class="num">${(sum(r, "in") + sum(r, "out")).toLocaleString()}</td>
       <td class="num">${r.usage?.priced ? "$" + r.usage.total.toFixed(4) : "–"}</td>
       <td><button class="btn ghost" data-run="${esc(r.run)}">Replay</button></td></tr>`).join("")}</tbody></table>`;
-  document.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => listen(b.dataset.run, 4)));
+  document.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => { userStarted = true; stopDemo(); listen(b.dataset.run, 4); }));
 }
 
 // ---------- effects ----------

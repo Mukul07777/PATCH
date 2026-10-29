@@ -21,7 +21,7 @@
   try { const t = localStorage.getItem("pp-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
   const themeBtn = document.getElementById("theme");
   if (themeBtn) themeBtn.onclick = () => {
-    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    const cur = document.documentElement.dataset.theme || "dark";
     const next = cur === "light" ? "dark" : "light";
     document.documentElement.dataset.theme = next;
     try { localStorage.setItem("pp-theme", next); } catch {}

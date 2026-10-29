@@ -102,3 +102,8 @@
 - research-6.md: 11-row threat model. CRITICAL found in our code: sandbox passed full os.environ (API keys/tokens) to the scanned repo's setup.py/conftest.py.
 - FIXED by manager: sandbox env allow-list (patchpilot/sandbox.py), tests/test_sandbox_env.py; verified real uv install + 9 passed, child process sees no keys.
 - Backlog: requirements/_write_files guard, injection spotlighting, poisoned demo case, /api/runs rate limit.
+
+## 2026-10-29 ~15:10 — UI build: judge-first redesign
+- Dark by default; 6 primary tabs + "More"; console auto-replays the best recorded run (LIVE REPLAY badge, "Run it for real"); guided demo /console?demo=1 with Find→Prioritize→Predict→Fix→Attack→Prove→Ship story bar; landing headline + live stat row from real runs; demo terminal shows the payoff; timeline wrap fixed. Also includes the reachability chips UI.
+- Manager checked screenshots (landing + guided demo): good.
+- Launched UI builder round 2: panels for trust check, VEX download, guard events, per-tier cost/latency chart.
