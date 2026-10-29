@@ -17,3 +17,9 @@
 - docs/team/research/ui-1.md: top 5 = auto-play replay on idle console, guided ?demo=1 mode, landing hero rewrite with real stats, dark console by default + fewer tabs, landing terminal shows the payoff (fix, green, PR).
 - Playbook: backend and UI builders may run in parallel on separate file areas.
 - Launched UI builder on those 5 (web/ only).
+
+## 2026-10-29 ~12:20 — research round 1 (angle: papers, dev pain, data sources, winners)
+- research-1.md: top = symbol-level reachability (OSV ecosystem_specific.imports), deps.dev supply-chain trust check, PatchPilot-Bench metrics, OpenVEX, two-loop replanning.
+- Manager did feasibility: 4 items added to top of BACKLOG.md. Next backend build: symbol-level reachability.
+- Launched researcher round 2 (angle: storytelling of winning submissions, NeMo Agent Toolkit fit, Nebius features, judge Q&A prep).
+- Past angles: [1] papers/pain/data sources/winners.

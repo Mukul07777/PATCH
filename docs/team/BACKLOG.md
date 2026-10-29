@@ -2,6 +2,10 @@
 
 Format: `- [ ] **Title**: impact 1-5 · effort S/M/L · risk · acceptance test`
 
+- [ ] **Symbol-level reachability (OSV ecosystem_specific.imports)**: impact 5 · S · OSV field may be missing for some advisories (fallback: Nano-inferred, labelled) · each advisory labelled reachable (file:line) / imported-not-called / not reachable; feeds triage, risk, ledger; Reachability tab shows it
+- [ ] **Supply-chain trust check of the fix release (deps.dev)**: impact 4 · S-M · API coverage for PyPI attestations unverified · old vs target: attestation/provenance, OpenSSF Scorecard, new transitive deps; risk term + ledger claim
+- [ ] **OpenVEX output from evidence**: impact 3 · S · depends on symbol reachability · openvex.json download with not_affected/fixed + justification
+- [ ] **Two-loop repair: replan on wrong strategy**: impact 3 · S-M · needs LLM runs · Nano classifies failure (slip vs strategy); Ultra replans; 'replanned' shown in graph
 - [ ] **Verify threat clock + drift radar end to end**: impact 5 · S · needs 1 LLM run · a recorded run shows threat and drift events and the Drift radar tab renders (fetcher or mailer case)
 - [ ] **Publish benchmark numbers**: impact 5 · S · none · runs/batch-summary.json committed, Runs page shows headline stats, README quotes measured numbers only
 - [ ] **Landing page shows new differentiators**: impact 4 · S · none · landing mentions drift radar, threat clock, red team, certificate with real numbers from the benchmark
