@@ -3,6 +3,7 @@ Pipfile.lock. Pure text parsing: nothing is installed, imported or executed, and
 import json
 import posixpath
 import re
+from urllib.parse import unquote
 import tomllib
 from collections import namedtuple
 
@@ -41,6 +42,8 @@ def kind_of(filename):
     base = parts[-1]
     if base in ("pyproject.toml", "poetry.lock", "uv.lock", "pipfile.lock"):
         return base
+    if base.endswith((".cdx.json", ".spdx.json")) or base in ("bom.json", "sbom.json", "cyclonedx.json", "spdx.json"):
+        return "sbom"
     if base.endswith(".in") or (base.endswith(".txt") and (base.startswith(("requirements", "constraints"))
                                                           or (len(parts) > 1 and parts[-2] == "requirements"))):
         return "requirements"
@@ -52,7 +55,7 @@ def is_lock(filename):
 
 
 def size_limit(filename):
-    return MAX_LOCK if is_lock(filename) else MAX_MANIFEST
+    return MAX_LOCK if is_lock(filename) or kind_of(filename) == "sbom" else MAX_MANIFEST
 
 
 def is_manifest_path(path):
@@ -94,9 +97,11 @@ def parse_ex(filename, text):
     kind = kind_of(filename)
     if kind is None:
         raise ManifestError(f"Unsupported manifest '{filename}'. Use requirements.txt, pyproject.toml, poetry.lock, "
-                            "uv.lock or Pipfile.lock")
+                            "uv.lock, Pipfile.lock or a CycloneDX/SPDX SBOM (*.cdx.json, *.spdx.json, bom.json)")
     if kind == "requirements":
         return requirements_ex(text, filename)
+    if kind == "sbom":
+        return parse_sbom(text, filename)
     fn = {"pyproject.toml": parse_pyproject, "poetry.lock": parse_lock, "uv.lock": parse_lock,
           "pipfile.lock": parse_pipfile_lock}[kind]
     return locate(fn(text, filename), text), []
@@ -309,3 +314,52 @@ def merge(deps):
         seen.add(key)
         out.append(d)
     return out
+
+
+PURL = re.compile(r"^pkg:pypi/([^@?#]+)@([^?#]+)", re.I)
+
+
+def parse_sbom(text, source_file="bom.json"):
+    """(deps, warnings) from a CycloneDX (components[]) or SPDX 2.x (packages[]) JSON SBOM. Only Python packages
+    count: a pkg:pypi purl, or no purl at all with a name and version; other ecosystems are reported, not checked."""
+    try:
+        doc = json.loads(text)
+    except ValueError as e:
+        raise ManifestError(f"{source_file} is not valid JSON: {e}") from None
+    if not isinstance(doc, dict):
+        raise ManifestError(f"{source_file} is not a CycloneDX or SPDX document")
+    if doc.get("bomFormat") == "CycloneDX" or "components" in doc:
+        items, flat = [], list(doc.get("components") or [])
+        while flat:  # CycloneDX nests sub-components
+            c = flat.pop(0)
+            if isinstance(c, dict):
+                items.append((c.get("name"), c.get("version"), c.get("purl") or ""))
+                flat += c.get("components") or []
+    elif "spdxVersion" in doc or "packages" in doc:
+        items = []
+        for pk in doc.get("packages") or []:
+            if not isinstance(pk, dict):
+                continue
+            purl = next((r.get("referenceLocator", "") for r in pk.get("externalRefs") or []
+                         if isinstance(r, dict) and r.get("referenceType") == "purl"), "")
+            items.append((pk.get("name"), pk.get("versionInfo"), purl))
+    else:
+        raise ManifestError(f"{source_file} is not a CycloneDX or SPDX document")
+    deps, other = [], 0
+    for name, version, purl in items:
+        m = PURL.match(purl)
+        if m:
+            name, version = unquote(m.group(1)), unquote(m.group(2))
+        elif purl:
+            other += 1
+            continue
+        elif not version:  # no purl and no version: the application itself or a grouping node, not a package
+            continue
+        if not name or not isinstance(name, str) or not NAME.match(name):
+            continue
+        version = str(version).strip() if version not in (None, "", "NOASSERTION") else None
+        deps.append(Dep(name, version, source_file, bool(version)))
+    warnings = [f"{source_file}: {other} non-Python component(s) not checked"] if other else []
+    if not deps and not other:
+        warnings.append(f"{source_file}: no packages found in the SBOM")
+    return deps, warnings

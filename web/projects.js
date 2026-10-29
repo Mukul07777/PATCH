@@ -5,7 +5,7 @@
   const SEV = ["CRITICAL", "HIGH", "MODERATE", "LOW", "UNKNOWN"];
   const SEV_RANK = Object.fromEntries(SEV.map((s, i) => [s, i]));
   // upload limits match the server: lock files list every transitive package, so they get more room
-  const LOCKS = /(^|\/)(poetry\.lock|uv\.lock|pipfile\.lock)$/i;
+  const LOCKS = /(^|\/)(poetry\.lock|uv\.lock|pipfile\.lock|bom\.json|sbom\.json|cyclonedx\.json|spdx\.json|[^/]*\.cdx\.json|[^/]*\.spdx\.json)$/i;
   const maxBytes = (name) => (LOCKS.test(name || "") ? 5_000_000 : 1_000_000);
   const mb = (n) => `${n / 1_000_000} MB`;
   let health = {}, current = null, sort = { key: "severity", dir: 1 }, findings = [], poll = null, lastScanId = null;
@@ -234,9 +234,43 @@
       return s;
     }
     if (s.status !== "done") return s;
-    findings = s.findings; renderCounts(s); renderFindings(s);
+    findings = s.findings; renderCounts(s); renderFindings(s); loadSupply(s);
     return s;
   }
+
+  // ---------- supply chain, fixed manifest, badge ----------
+  const LEVEL = { critical: "c-bad", high: "c-warn", medium: "", low: "muted" };
+  async function loadSupply(s) {
+    const box = $("#supply"), id = current.id;
+    const vulnerable = (s.summary?.vulnerable_packages || []).some((p) => p.safe);
+    const fixed = $("#fixedBtn");
+    fixed.hidden = !vulnerable || !(s.summary?.files || []).some((f) => /(^|\/)(requirements[^/]*\.txt|constraints[^/]*\.txt|[^/]*\.in)$/i.test(f));
+    fixed.href = `/api/projects/${id}/fixed-manifest`;
+    $("#badgeBtn").hidden = false;
+    box.innerHTML = '<div class="empty">Checking every dependency on PyPI…</div>';
+    let r;
+    try { r = await api(`/api/projects/${id}/supply`); } catch (e) { box.innerHTML = `<div class="empty">Supply-chain check failed: ${esc(e.message)}</div>`; return; }
+    if (current.id !== id) return;
+    const m = r.summary, lic = m.licenses || {};
+    const tile = (label, n, cls) => `<div class="kpi"><span>${label}</span><b class="${n ? cls : ""}">${n}</b></div>`;
+    const flagged = r.packages.filter((p) => p.flags.length);
+    box.innerHTML = `<div class="summary">${tile("Malicious", m.malicious, "c-bad")}${tile("Typosquats", m.typosquat, "c-bad")}${tile("Yanked pins", m.yanked, "c-warn")}${tile("Abandoned", m.stale, "c-warn")}${tile("Copyleft licenses", (lic["strong-copyleft"] || 0), "c-warn")}${tile("Not on PyPI", m.not_on_pypi, "c-warn")}</div>
+      <p class="hint">${r.checked} dependencies checked · licenses: ${Object.entries(lic).map(([k, n]) => `${n} ${esc(k)}`).join(", ") || "none"}</p>
+      ${flagged.length ? `<div class="tbl-wrap"><table class="bench"><thead><tr><th>Package</th><th>License</th><th>Last release</th><th>Signals</th></tr></thead><tbody>${flagged.map((p) => `<tr>
+        <td><b>${esc(p.package)}</b> <span class="muted">${esc(p.version || "unpinned")}</span></td>
+        <td>${esc(p.license)}</td><td>${esc(p.health?.last_release || "–")}</td>
+        <td>${p.flags.map((f) => `<div class="${LEVEL[f.level] || ""}">${esc(f.text)}</div>`).join("")}</td></tr>`).join("")}</tbody></table></div>`
+        : '<div class="empty">No supply-chain signals: every dependency is on PyPI, maintained, not yanked and permissively licensed.</div>'}`;
+  }
+  $("#badgeBtn").onclick = async () => {
+    const box = $("#badgeBox");
+    try {
+      const { path } = await api(`/api/projects/${current.id}/badge`);
+      const url = location.origin + path;
+      box.innerHTML = `<p><img src="${esc(path)}" alt="PatchPilot status badge"></p><p class="hint">Paste into your README (the link is signed, and shows counts only):</p><code class="badge-code">![PatchPilot](${esc(url)})</code>`;
+      box.hidden = false;
+    } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; box.hidden = false; }
+  };
 
   function renderCounts(s) {
     const box = $("#pjCounts");

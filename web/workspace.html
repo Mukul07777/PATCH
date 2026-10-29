@@ -40,7 +40,7 @@
       <fieldset class="pj-modes">
         <legend>Source</legend>
         <label><input type="radio" name="mode" value="git" checked> GitHub repository</label>
-        <label><input type="radio" name="mode" value="upload"> Manifest file</label>
+        <label><input type="radio" name="mode" value="upload"> Manifest or SBOM file</label>
       </fieldset>
       <div id="gitFields" class="pj-fields">
         <label for="gitUrl">Repository URL</label>
@@ -52,8 +52,8 @@
         <p class="hint">Scans requirements*.txt, pyproject.toml, poetry.lock, uv.lock and Pipfile.lock up to 3 folders deep. A lock file is used instead of the pyproject.toml next to it.</p>
       </div>
       <div id="uploadFields" class="pj-fields" hidden>
-        <label for="file">Choose a file <span class="muted">(requirements.txt, pyproject.toml: max 1 MB; poetry.lock, uv.lock, Pipfile.lock: max 5 MB)</span></label>
-        <input id="file" type="file" accept=".txt,.toml,.lock,.in">
+        <label for="file">Choose a file <span class="muted">(requirements.txt, pyproject.toml: max 1 MB; poetry.lock, uv.lock, Pipfile.lock, CycloneDX or SPDX SBOM JSON: max 5 MB)</span></label>
+        <input id="file" type="file" accept=".txt,.toml,.lock,.in,.json">
         <label for="filename">File name</label>
         <input id="filename" name="filename" value="requirements.txt" autocomplete="off">
         <label for="content">…or paste its contents</label>
@@ -80,6 +80,10 @@
     <div class="summary" id="pjCounts"></div>
     <div class="filters"><h2 id="findingsTitle">Findings</h2></div>
     <div id="findings" class="card glass"><div class="empty">No scan yet.</div></div>
+    <div class="filters"><h2 id="supplyTitle">Supply chain</h2><span class="pj-actions"><a class="btn ghost sm no-underline" id="fixedBtn" href="#" hidden>Download fixed requirements.txt</a><button type="button" class="btn ghost sm" id="badgeBtn" hidden>README badge</button></span></div>
+    <p class="hint">Beyond CVEs: known-malicious packages, typosquats, yanked or abandoned releases and licenses, from PyPI metadata and OSV. Nothing is installed or run.</p>
+    <div id="badgeBox" class="card glass" hidden></div>
+    <div id="supply" class="card glass"><div class="empty">Scan the project to check its supply chain.</div></div>
     <div class="filters"><h2 id="policyTitle">Policy</h2></div>
     <section class="card glass pj-policy" aria-labelledby="policyTitle">
       <form id="policyForm" class="fm" novalidate>

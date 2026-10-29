@@ -65,6 +65,15 @@ def _cipher():
         return f
 
 
+def signing_key():
+    """Bytes for HMAC signatures (public badge links): derived from the same secret as the settings cipher."""
+    env = os.getenv("PATCHPILOT_SECRET_KEY", "").strip()
+    if env:
+        return hashlib.sha256(b"patchpilot-sign:" + env.encode()).digest()
+    _cipher()  # creates the key file on first use
+    return hashlib.sha256(b"patchpilot-sign:" + _key_file().read_bytes().strip()).digest()
+
+
 def encrypt(text):
     """Encrypt any text with the settings key (notification channel configs use it too)."""
     return _cipher().encrypt(text.encode()).decode()

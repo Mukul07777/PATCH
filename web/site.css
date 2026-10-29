@@ -311,3 +311,5 @@ tr.suppressed td { opacity: .6; }
 @media (max-width: 720px) {
   table.bench, .card table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+.badge-code { display: block; padding: 10px 12px; border-radius: 6px; background: var(--surface-2); font: 12px var(--mono); overflow-wrap: anywhere; user-select: all; }
+#badgeBox { padding: 16px 20px; margin-bottom: 14px; }
