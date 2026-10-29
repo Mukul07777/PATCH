@@ -1,5 +1,6 @@
 """Isolated test runner: a fresh virtualenv per run, so the agent's changes are verified for real."""
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,13 @@ class Sandbox:
         code, out = run([venv_python(self.venv), "-m", "pip", "install", "-q", "-r", "requirements.txt", "pytest"],
                         cwd=self.repo)
         return code == 0, out[-4000:]
+
+    def test_cases(self, target):
+        """Per-test outcome for one file: {"test_name[param]": True/False}."""
+        _, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-rA", "-p", "no:cacheprovider", "--tb=no", target],
+                     cwd=self.repo)
+        return {m.group(2): m.group(1) == "PASSED"
+                for m in re.finditer(r"^(PASSED|FAILED|ERROR) \S*?::(\S+)", out, re.M)}
 
     def test(self, target=None):
         code, out = run([venv_python(self.venv), "-m", "pytest", "-q", "-p", "no:cacheprovider", "--tb=short",

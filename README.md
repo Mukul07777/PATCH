@@ -41,6 +41,9 @@ flowchart LR
 
 - **Live agent graph**: each pipeline step streams to the console over SSE.
 - **Exploit proof**: a curated or Nemotron-written test shows the vulnerability before the upgrade and checks it is closed after.
+- **Red-team variants**: after the fix, 5-8 variants of the attack (other algorithms, key types, encodings) run against the patched code; each is reported as closed by fix, already blocked, or still open.
+- **Proof certificate (evidence ledger)**: every claim the PR makes, each checked independently, including a fresh OSV re-scan of the new pins, a trust score, and a SHA-256 over claims + diff.
+- **Reranked research**: Tavily returns 8 results; Nemotron Nano scores each for relevance and only the top 4 reach the repair model.
 - **PR risk score**: 0 to 100 from code churn, files touched, major-version jumps, repair attempts, test result and exploit proof.
 - **Reachability map**: where each vulnerable package is used in your code.
 - **Model debate**: each repair attempt's diagnosis (Super, then Ultra) side by side.

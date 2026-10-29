@@ -1,5 +1,6 @@
 """PatchPilot pipeline: advisory -> triage -> research -> upgrade -> test -> fix loop -> PR."""
 import difflib
+import hashlib
 import json
 import re
 import shutil
@@ -16,6 +17,7 @@ PIN = re.compile(r"^\s*([A-Za-z0-9_.\-\[\]]+)\s*==\s*([A-Za-z0-9_.\-]+)\s*$")
 TEXT_EXT = {".py", ".txt", ".toml", ".cfg", ".ini", ".md"}
 # lives in a dot-dir: the normal pytest run skips it and the diff ignores it
 EXPLOIT_TEST = ".patchpilot/test_exploit.py"
+MUTATION_TEST = ".patchpilot/test_mutations.py"
 
 
 def extract_test_code(text):
@@ -104,10 +106,10 @@ class Agent:
         research = {}
         for f in findings:
             q = f"{f['package']} upgrade {f['current']} to {f['latest']} breaking changes migration guide"
-            hits = sources.tavily_search(q)
+            hits = self._rerank(q, sources.tavily_search(q, max_results=8))
             research[f["package"]] = hits
             self._emit({"type": "research", "package": f["package"], "query": q,
-                        "results": [{"title": h["title"], "url": h["url"]} for h in hits]})
+                        "results": [{"title": h["title"], "url": h["url"], "score": h.get("score")} for h in hits]})
         if not config.TAVILY_API_KEY:
             self.log("TAVILY_API_KEY not set - skipping web research", "research")
         self.step("research", "done")
@@ -125,6 +127,7 @@ class Agent:
         base_ok, base_summary, _ = sandbox.test() if ok_install else (False, "install failed", out)
         self._emit({"type": "test", "label": "baseline", "ok": base_ok, "summary": base_summary})
         exploit = self._exploit_before(findings, original, research, sandbox) if ok_install else None
+        mutations = self._mutations_before(exploit, sandbox) if exploit else None
 
         self._apply_pins({u["package"]: u["to"] for u in plan["upgrades"]})
         self.log("Bumped: " + ", ".join(f"{u['package']} -> {u['to']}" for u in plan["upgrades"]), "test")
@@ -142,7 +145,13 @@ class Agent:
             attempts += 1
             tier = "super" if attempts == 1 else "ultra"
             self.log(f"Attempt {attempts} with Nemotron {tier.title()}", "fix")
-            change = self._fix(tier, plan, research, output, attempts)
+            try:
+                change = self._fix(tier, plan, research, output, attempts)
+            except Exception as e:  # one malformed reply shouldn't end the run; the next attempt escalates
+                self.log(f"Attempt {attempts} returned an unusable reply: {e}"[:300], "fix")
+                self._emit({"type": "patch", "attempt": attempts, "tier": tier, "explanation": "unusable model reply",
+                            "diagnosis": "", "evidence": [], "files": []})
+                continue
             self.evidence += [e for e in change.get("evidence", []) if isinstance(e, dict) and e.get("quote")]
             self._write_files(change.get("files", []))
             self._emit({"type": "patch", "attempt": attempts, "tier": tier,
@@ -155,12 +164,16 @@ class Agent:
         self.step("fix", "done" if ok else "failed", detail={"attempts": attempts})
         if exploit:
             self._exploit_after(exploit, sandbox)
+        if mutations:
+            self._mutations_after(mutations, sandbox)
 
         # 7. diff + report + PR
         diff = self._diff(original)
         self._emit({"type": "diff", "diff": diff})
         self._emit({"type": "risk", **self._risk(diff, plan, attempts, ok, exploit)})
-        report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary, exploit)
+        ledger = self._ledger(findings, plan, ok, base_summary, summary, exploit, mutations, diff)
+        self._emit({"type": "ledger", **ledger})
+        report = self._report(findings, triage, plan, research, attempts, ok, base_summary, summary, exploit, ledger)
         self._emit({"type": "report", "markdown": report})
         pr = None
         if ok and config.GITHUB_TOKEN and str(self.repo_src).startswith("https://github.com/"):
@@ -379,6 +392,147 @@ class Agent:
                          "inconclusive: old version passed the test too" if ok else "not proven")
         self._emit({"type": "exploit", "stage": "after", "after": summary, "closed": ok, "verdict": ex["verdict"]})
 
+    # ---------- red-team mutations ----------
+    def _mutations_before(self, ex, sandbox):
+        """Variants of the proven attack: run on the vulnerable pins now, on the patched code after the fix."""
+        self.step("redteam", "running", "Red-teaming: generating attack variants")
+        code, source = exploits.mutations(ex["advisory"]), "curated"
+        if not code:
+            source = "generated"
+            try:
+                text = self.router.chat(
+                    "super",
+                    "You are a red-team engineer. Given a proof-of-exploit pytest, write ONE pytest file with 5-8 "
+                    "VARIANTS of the same attack (other algorithms, encodings, payload shapes, boundary values) using "
+                    "@pytest.mark.parametrize with readable ids. Each case asserts the SAFE outcome, like the original. "
+                    "Same imports rules as the original: only the library under test, pytest and the standard library. "
+                    "Keep your reasoning brief. Reply with the file in a single ```python code block and nothing else.",
+                    json.dumps({"advisory": ex["advisory"], "package": ex["package"], "original_proof": ex["code"]}),
+                    "Generate attack variants", max_tokens=32000)
+                code = extract_test_code(text) or extract_test_code(self.router.last_reasoning)
+            except Exception as e:
+                self.log(f"Variant generation failed: {e}", "redteam")
+                code = None
+        if not code:
+            self.step("redteam", "failed")
+            return None
+        try:
+            path = self.work / MUTATION_TEST
+            path.write_text(code, encoding="utf-8")
+            before = sandbox.test_cases(MUTATION_TEST)
+        except Exception as e:
+            self.log(f"Variants could not run: {e}", "redteam")
+            self.step("redteam", "failed")
+            return None
+        if not before:
+            self.log("Variant file collected no tests", "redteam")
+            self.step("redteam", "failed")
+            return None
+        landed = sum(1 for v in before.values() if not v)
+        self.log(f"{landed}/{len(before)} attack variants succeed against the vulnerable pins", "redteam")
+        m = {"source": source, "code": code, "before": before}
+        self._emit({"type": "redteam", "stage": "before", "source": source, "variants": before, "code": code})
+        return m
+
+    def _mutations_after(self, m, sandbox):
+        try:
+            after = sandbox.test_cases(MUTATION_TEST)
+        except Exception as e:
+            self.log(f"Variant re-run failed: {e}", "redteam")
+            self.step("redteam", "failed")
+            return
+        rows = []
+        for name, was_blocked in m["before"].items():
+            now = after.get(name)
+            status = ("still open" if now is False else "closed by fix" if not was_blocked and now
+                      else "already blocked" if now else "not run")
+            rows.append({"variant": name, "status": status})
+        m["rows"] = rows
+        m["open"] = sum(r["status"] == "still open" for r in rows)
+        m["closed"] = sum(r["status"] == "closed by fix" for r in rows)
+        self._emit({"type": "redteam", "stage": "after", "rows": rows, "open": m["open"], "closed": m["closed"]})
+        self.log(f"Red-team: {m['closed']} variants closed by the fix, {m['open']} still open", "redteam")
+        self.step("redteam", "done" if not m["open"] else "failed")
+
+    # ---------- evidence ledger ----------
+    def _ledger(self, findings, plan, ok, base, final, exploit, mutations, diff):
+        """Every claim the PR makes, each checked by something other than the model that made it."""
+        claims = []
+
+        def add(claim, status, evidence):
+            claims.append({"claim": claim, "status": status, "evidence": evidence})
+
+        # independent re-scan: query OSV again for the NEW pinned versions
+        original = {(f["package"].lower(), x) for f in findings for v in f["vulns"] for x in (v["cve"] or v["id"],)}
+        remaining = []
+        for u in plan["upgrades"]:
+            try:
+                remaining += [v["cve"] or v["id"] for v in sources.osv_vulns(u["package"], u["to"])
+                              if (u["package"].lower(), v["cve"] or v["id"]) in original]
+            except Exception:
+                remaining.append(f"{u['package']}: OSV re-scan failed")
+        add("All reported advisories resolved", "unverified" if remaining else "verified",
+            f"OSV re-scan of new pins still lists: {', '.join(remaining)}" if remaining
+            else f"OSV re-scan of {len(plan['upgrades'])} upgraded package(s): 0 of {len(original)} advisories remain")
+
+        add("Project test suite passes", "verified" if ok else "unverified", f"pytest: {final}")
+        passed = lambda t: int((re.search(r"(\d+) passed", t or "") or [0, 0])[1])
+        add("No tests lost", "verified" if passed(final) >= passed(base) else "partial",
+            f"baseline {passed(base)} passed → final {passed(final)} passed")
+        touched = re.findall(r"^\+\+\+ b/(\S+)", diff, re.M)
+        add("Tests were not edited to pass", "unverified" if any(t.startswith("tests/") for t in touched) else "verified",
+            f"diff touches {len(touched)} file(s), none under tests/" if touched else "no files changed")
+        if exploit:
+            v = exploit.get("verdict", "not run")
+            add(f"Exploit {exploit['advisory']} closed", "verified" if v == "proven closed" else "partial",
+                f"{exploit['source']} proof: old pins `{exploit['before']}`, patched `{exploit.get('after', 'not run')}`")
+        else:
+            add("Exploit closed", "unverified", "no exploit proof could be run")
+        if mutations and "rows" in mutations:
+            n = len(mutations["rows"])
+            add("Attack variants blocked", "verified" if not mutations["open"] else "partial",
+                f"{n - mutations['open']}/{n} variants blocked after the fix ({mutations['closed']} closed by it)"
+                + (f"; still open: {', '.join(r['variant'] for r in mutations['rows'] if r['status'] == 'still open')}"
+                   if mutations["open"] else ""))
+        cited = len(self.evidence)
+        add("Code changes cite migration sources", "verified" if cited else "partial",
+            f"{cited} quoted line(s) from researched sources" if cited else "no quotes returned by the model")
+        body = json.dumps({"claims": claims, "diff": diff}, sort_keys=True).encode()
+        score = {"verified": 1, "partial": .5, "unverified": 0}
+        return {"claims": claims, "certificate": "pp-" + hashlib.sha256(body).hexdigest()[:16],
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "trust": round(100 * sum(score[c["status"]] for c in claims) / len(claims))}
+
+    # ---------- research rerank ----------
+    def _rerank(self, query, hits, keep=4):
+        """Nemotron Nano scores each Tavily result for relevance; keep the best."""
+        docs = [h for h in hits if h.get("url")]
+        answer = [h for h in hits if not h.get("url")]
+        if len(docs) <= 1:
+            return hits
+        try:
+            # a one-line format survives reasoning models far better than JSON
+            text = self.router.chat(
+                "nano",
+                "You rerank search results for an engineer upgrading a dependency. Score each document 0-10 for how "
+                "useful it is to answer the query (breaking changes, migration steps, security fix details). "
+                "Do not explain. Reply with exactly one line in this format: SCORES: 0=7, 1=3, 2=9",
+                json.dumps({"query": query, "documents": [{"i": i, "title": d["title"], "text": d["content"][:500]}
+                                                          for i, d in enumerate(docs)]}),
+                "Rerank research", max_tokens=6000)
+            line = (re.findall(r"SCORES:([^\n]*)", text) or re.findall(r"SCORES:([^\n]*)", self.router.last_reasoning or "")
+                    or [""])[-1]
+            scores = {int(i): float(v) for i, v in re.findall(r"(\d+)\s*=\s*(\d+(?:\.\d+)?)", line)}
+            if not scores:
+                raise ValueError("no SCORES line in reply")
+        except Exception as e:  # keep Tavily's order if reranking fails
+            self.log(f"Rerank skipped: {e}", "research")
+            return hits[:keep + len(answer)]
+        for i, d in enumerate(docs):
+            d["score"] = scores.get(i, 0.0)
+        docs.sort(key=lambda d: d["score"], reverse=True)
+        return answer + docs[:keep]
+
     # ---------- risk score ----------
     def _risk(self, diff, plan, attempts, ok, exploit):
         files = len(re.findall(r"^\+\+\+ ", diff, re.M))
@@ -417,7 +571,7 @@ class Agent:
                 chunks += difflib.unified_diff(a.splitlines(True), b.splitlines(True), f"a/{path}", f"b/{path}")
         return "".join(chunks)
 
-    def _report(self, findings, triage, plan, research, attempts, ok, base, final, exploit=None):
+    def _report(self, findings, triage, plan, research, attempts, ok, base, final, exploit=None, ledger=None):
         lines = ["## PatchPilot security upgrade", ""]
         lines.append("### Advisories resolved")
         for f in findings:
@@ -432,6 +586,10 @@ class Agent:
             lines += ["", "### Exploit proof", f"- {exploit['title']} ({exploit['advisory']})",
                       f"- Vulnerable pins: `{exploit['before']}` · Patched: `{exploit.get('after', 'not run')}`",
                       f"- Verdict: **{exploit.get('verdict', 'not run')}**"]
+        if ledger:
+            icon = {"verified": "✅", "partial": "🟡", "unverified": "❌"}
+            lines += ["", f"### Proof certificate `{ledger['certificate']}`"]
+            lines += [f"- {icon[c['status']]} **{c['claim']}**: {c['evidence']}" for c in ledger["claims"]]
         if self.evidence:
             lines += ["", "### Why these changes (evidence quoted by the agent)"]
             for e in self.evidence[:5]:

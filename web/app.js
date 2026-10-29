@@ -5,7 +5,7 @@ const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const STEPS = [
   ["models", "Connect · Nemotron"], ["checkout", "Check out repo"], ["scan", "Scan · OSV.dev"],
   ["triage", "Triage · Nemotron Nano"], ["research", "Research · Tavily"], ["plan", "Plan · Nemotron Super"],
-  ["exploit", "Exploit proof · Super"], ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
+  ["exploit", "Exploit proof"], ["redteam", "Red-team variants"], ["test", "Upgrade & test"], ["fix", "Repair · Super → Ultra"], ["pr", "Pull request"],
 ];
 const TIERS = ["nano", "super", "ultra"];
 const SEV_RANK = { CRITICAL: 0, HIGH: 1, MODERATE: 2, MEDIUM: 2, LOW: 3 };
@@ -106,7 +106,7 @@ async function boot() {
 }
 
 function reset() {
-  state = { exploit: null, risk: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
+  state = { exploit: null, risk: null, redteam: null, ledger: null, reach: {}, patches: [], findings: [], triage: {}, plan: null, tests: [], diff: "", report: "", evidence: [], research: [],
             usage: Object.fromEntries(TIERS.map((t) => [t, { calls: 0, tok: 0, s: 0, model: "" }])), total: 0 };
   $("#steps").innerHTML = STEPS.map(([k, t]) => `<li id="s-${k}"><span class="dot"></span><div>${t}<small></small></div></li>`).join("");
   $("#tests").innerHTML = '<li class="muted">No test runs yet</li>';
@@ -115,6 +115,7 @@ function reset() {
   $("#tab-advisories").innerHTML = '<div class="empty">Scanning…</div>';
   $("#tab-evidence").innerHTML = '<div class="empty">Migration sources from Tavily and the exact lines the agent relied on appear here.</div>';
   $("#tab-diff").innerHTML = '<div class="empty">The verified patch appears here.</div>';
+  $("#tab-ledger").innerHTML = '<div class="empty">When the run finishes, every claim the PR makes is listed here with how it was verified.</div>';
   $("#tab-proof").innerHTML = '<div class="empty">PatchPilot writes an exploit test, shows it working on the old version, then proves the fix closes it.</div>';
   $("#tab-reach").innerHTML = '<div class="empty">Where your code calls each vulnerable package.</div>';
   $("#tab-debate").innerHTML = '<div class="empty">When a fix fails, each model’s diagnosis appears here side by side.</div>';
@@ -178,6 +179,8 @@ function handle(ev) {
     case "reach": state.reach = ev.packages; renderReach(); break;
     case "exploit": onExploit(ev); break;
     case "risk": state.risk = ev; renderProof(); break;
+    case "redteam": onRedteam(ev); break;
+    case "ledger": state.ledger = ev; renderLedger(); setTimeout(() => showTab("ledger"), 2600); break;
     case "diff": state.diff = ev.diff; renderDiff(); break;
     case "report": state.report = ev.markdown; renderReport(); break;
     case "error": term("bad", `error › ${ev.msg}`, ev.t); banner(esc(ev.msg), false); phase("error"); break;
@@ -293,7 +296,42 @@ function renderProof() {
   const rk = r ? `<div class="card glass risk ${r.level}">
       <div class="gauge" style="--v:${r.score}"><b>${r.score}</b><small>${r.level} risk</small></div>
       <div class="factors">${r.factors.map((f) => `<div><span>${esc(f.name)}</span><span class="muted">${esc(f.detail)}</span><b>${f.points > 0 ? "+" : ""}${f.points}</b></div>`).join("")}</div></div>` : "";
-  $("#tab-proof").innerHTML = ex + rk;
+  $("#tab-proof").innerHTML = ex + renderRedteam() + rk;
+}
+
+function onRedteam(ev) {
+  if (ev.stage === "before") {
+    state.redteam = { ...ev };
+    const landed = Object.values(ev.variants).filter((v) => !v).length;
+    term("bad", `redteam › ${landed}/${Object.keys(ev.variants).length} attack variants land on the vulnerable pins (${ev.source})`, ev.t);
+  } else {
+    Object.assign(state.redteam || (state.redteam = {}), ev);
+    term(ev.open ? "bad" : "ok", `redteam › after fix: ${ev.rows.length - ev.open}/${ev.rows.length} blocked${ev.open ? `, ${ev.open} STILL OPEN` : ""}`, ev.t);
+  }
+  renderProof();
+}
+
+function renderRedteam() {
+  const r = state.redteam;
+  if (!r) return "";
+  const rows = r.rows || Object.entries(r.variants).map(([variant, blocked]) => ({ variant, status: blocked ? "blocked on old pins" : "lands on old pins" }));
+  const cls = (s) => (s === "still open" || s === "lands on old pins" ? "bad" : s === "closed by fix" ? "ok" : "na");
+  return `<div class="card glass pf"><div class="pf-head"><span class="chip ultra">red team</span><b>Attack variants</b>
+    <span class="muted">${r.rows ? `${rows.length - r.open}/${rows.length} blocked after the fix` : "running against old pins…"} · ${esc(r.source)}</span></div>
+    <div class="rt">${rows.map((x) => `<div class="rt-row ${cls(x.status)}"><code>${esc(x.variant)}</code><span>${esc(x.status)}</span></div>`).join("")}</div></div>`;
+}
+
+function renderLedger() {
+  const L = state.ledger;
+  const icon = { verified: "✓", partial: "◐", unverified: "✗" };
+  $("#tab-ledger").innerHTML = `<div class="cert card glass">
+    <div class="cert-head"><div><small>PatchPilot proof certificate</small><b>${esc(L.certificate)}</b></div>
+      <div class="cert-trust" style="--v:${L.trust}"><b>${L.trust}</b><small>trust</small></div></div>
+    <div class="claims">${L.claims.map((c) => `<div class="claim ${c.status}"><span class="ci">${icon[c.status]}</span>
+      <div><b>${esc(c.claim)}</b><small>${esc(c.evidence)}</small></div><span class="cs">${c.status}</span></div>`).join("")}</div>
+    <div class="cert-foot"><code title="sha256 of claims + diff">sha256 ${esc(L.sha256.slice(0, 32))}…</code>
+      <button class="btn ghost" id="dlCert">⇩ Download certificate</button></div></div>`;
+  $("#dlCert").onclick = () => download(`${L.certificate}.json`, JSON.stringify(L, null, 2));
 }
 
 function renderReach() {
@@ -326,6 +364,9 @@ $("#speak").onclick = () => {
   if (d.ok) parts.push(`All tests pass after ${d.attempts} repair attempts.`);
   else if (!d.clean) parts.push("The patch needs human review.");
   if (x?.verdict) parts.push(`Exploit proof: ${x.verdict}.`);
+  const rt = state.redteam;
+  if (rt?.rows) parts.push(`Red team: ${rt.rows.length - rt.open} of ${rt.rows.length} attack variants blocked${rt.open ? `, ${rt.open} still open` : ""}.`);
+  if (state.ledger) parts.push(`Proof certificate trust score ${state.ledger.trust} percent.`);
   if (r) parts.push(`Risk score ${r.score}, ${r.level}.`);
   speechSynthesis.cancel();
   speechSynthesis.speak(Object.assign(new SpeechSynthesisUtterance(parts.join(" ")), { rate: 1.05 }));
@@ -369,7 +410,7 @@ function renderAdvisories() {
 function renderEvidence() {
   const quotes = state.evidence.map((e) => `<div class="ev-card"><span class="chip ${e.tier}">${e.tier} · patch #${e.attempt}</span>
     <blockquote>“${esc(e.quote)}”</blockquote><div class="src">${e.url ? `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.url)}</a>` : "migration notes"}</div></div>`).join("");
-  const srcs = state.research.flatMap((r) => r.results.filter((x) => x.url).map((x) => `<li><span class="pk">${esc(r.package)}</span><a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`)).join("");
+  const srcs = state.research.flatMap((r) => r.results.filter((x) => x.url).map((x) => `<li><span class="pk">${esc(r.package)}</span>${x.score != null ? `<span class="rr" title="Nemotron Nano relevance">${(+x.score).toFixed(1)}</span>` : ""}<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a></li>`)).join("");
   $("#tab-evidence").innerHTML =
     (quotes ? `<div class="ev-section">Lines the agent relied on</div>${quotes}` : "") +
     (srcs ? `<div class="ev-section">Sources found by Tavily</div><ul class="src-list">${srcs}</ul>` : "") ||
